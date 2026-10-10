@@ -8,7 +8,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { naira, PRODUCTS, CATEGORIES } from '@/lib/data';
-import { productsApi, categoriesApi, adminProductsApi } from '@/lib/api/endpoints';
+import { categoriesApi, adminProductsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { Kpi, STATUS_CLS } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
@@ -19,7 +19,7 @@ import { AdmHead, Pager, usePager, AdmSelect, AdmDate, ADMIN_ORDERS, useHighligh
 let ADMIN_EXTRA_CATS = [];
 
 // GET /admin/products (adminProductsApi, lib/api/endpoints.js) returns the full
-// backend record — brand, sku, status (draft/published), compare_at_price,
+// backend record — brand, sku, status (draft/active/archived), compare_at_price,
 // is_featured, etc. — none of which the public OpenAPI spec documents. Mapped
 // here into the flat shape this table/drawer already expect; `_raw` keeps the
 // untouched record around for anything not mapped.
@@ -37,6 +37,18 @@ const mapAdminProduct = (p) => ({
   _raw: p,
 });
 
+const productToDraft = (p) => ({
+  id: p.id,
+  name: p.name,
+  brand: p.brand,
+  price: p.price,
+  category: p.category,
+  status: p.status,
+  desc: p.desc,
+  _stock: p.stock,
+  _raw: p._raw,
+});
+
 // /admin/products/[id] renders this same list page with that product's edit
 // drawer pre-opened (see app/admin/products/[id]/page.js) rather than being a
 // separate detail page — matches every other admin section, which only ever
@@ -50,13 +62,14 @@ export function AdminProducts({ editId }) {
   const [cat, setCat] = useState('all');
   const [sort, setSort] = useState('featured');
   const [stat, setStat] = useState('All status');
+  const [stockStat, setStockStat] = useState('All stock');
   const [editing, setEditing] = useState(null); // product being edited
   const [bulk, setBulk] = useState(false);
   const t = (m) => addToast(m);
 
   // The admin's OWN catalog, not the storefront's — productsApi.list() (what
   // StoreProvider's catalog loader feeds PRODUCTS from) always filters to
-  // status:"published" only, for every caller, with no override, even an admin
+  // status:"active" only, for every caller, with no override, even an admin
   // token. A freshly created product defaults to "draft" and would never show
   // up there — this is why a just-created product "disappeared" on refresh.
   const loadProducts = useCallback(async () => {
@@ -72,21 +85,38 @@ export function AdminProducts({ editId }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
-  // retries once `items` loads (so a hard refresh on /admin/products/:id still
-  // finds it); the ref stops it from reopening a drawer the admin already closed.
+  // Prefer the loaded page, then fetch the requested record directly. This keeps
+  // deep links working when the product is beyond the first 100 list results.
   const deepLinkOpened = useRef(false);
   useEffect(() => {
-    if (!editId || deepLinkOpened.current) return;
+    if (!editId || deepLinkOpened.current || !loaded) return;
     const p = items.find(x => String(x.id) === String(editId));
-    if (!p) return;
-    deepLinkOpened.current = true;
-    setEditing({ id: p.id, name: p.name, brand: p.brand, price: p.price, category: p.category, _stock: p.stock, _raw: p._raw });
-  }, [editId, items]);
+    if (p) {
+      deepLinkOpened.current = true;
+      setEditing(productToDraft(p));
+      return;
+    }
+
+    let cancelled = false;
+    adminProductsApi.get(editId).then(raw => {
+      if (cancelled) return;
+      deepLinkOpened.current = true;
+      setEditing(productToDraft(mapAdminProduct(raw)));
+    }).catch(e => {
+      if (!cancelled) t(messageFrom(e));
+    });
+    return () => { cancelled = true; };
+  }, [editId, items, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const closeEditing = () => { setEditing(null); router.replace('/admin/products'); };
 
   const cats = ['all', ...new Set(items.map(p => p.category))];
-  const statusOf = (s) => s === 0 ? 'Out of stock' : s < 10 ? 'Low stock' : 'Active';
-  let list = items.filter(p => (cat === 'all' || p.category === cat) && (!q || p.name.toLowerCase().includes(q.toLowerCase())) && (stat === 'All status' || statusOf(p.stock) === stat));
+  const stockStatusOf = (s) => s === 0 ? 'Out of stock' : s < 10 ? 'Low stock' : 'In stock';
+  let list = items.filter(p =>
+    (cat === 'all' || p.category === cat) &&
+    (!q || p.name.toLowerCase().includes(q.toLowerCase())) &&
+    (stat === 'All status' || p.status === stat.toLowerCase()) &&
+    (stockStat === 'All stock' || stockStatusOf(p.stock) === stockStat)
+  );
   list = [...list].sort((a, b) => {
     if (sort === 'price-low') return a.price - b.price;
     if (sort === 'price-high') return b.price - a.price;
@@ -95,18 +125,19 @@ export function AdminProducts({ editId }) {
     if (sort === 'stock-high') return b.stock - a.stock;
     return 0;
   });
-  const { shown: pShown, page: pPage, pages: pPages, setPage: pSet } = usePager(list, q + cat + sort + stat);
+  const { shown: pShown, page: pPage, pages: pPages, setPage: pSet } = usePager(list, q + cat + sort + stat + stockStat);
   return (
     <>
       <AdmHead title="Products" sub={`${items.length} products across ${cats.length - 1} categories`}>
         <button className="adm-btn ghost" onClick={() => setBulk(true)}><Icon name="download" size={15} /> Bulk upload</button>
-        <button className="adm-btn primary" onClick={() => setEditing({ id: 'new', name: '', brand: '', price: 0, category: cats[1] || 'phones', _stock: 20, _new: true })}><Icon name="plus" size={15} /> Add product</button>
+        <button className="adm-btn primary" onClick={() => setEditing({ id: 'new', name: '', brand: '', price: 0, category: cats[1] || 'phones', status: 'draft', desc: '', _stock: 20, _new: true })}><Icon name="plus" size={15} /> Add product</button>
       </AdmHead>
       <div className="adm-filters">
         <div className="adm-mini-search"><Icon name="search" size={16} className="muted" /><input placeholder="Search products…" value={q} onChange={e => setQ(e.target.value)} /></div>
         {cats.slice(0, 6).map(c => <button key={c} className={'adm-chip' + (cat === c ? ' on' : '')} onClick={() => setCat(c)}>{c === 'all' ? 'All' : (CATEGORIES.find(x => x.slug === c)?.name || c)}</button>)}
         <div className="adm-filters-r">
-          <AdmSelect compact icon="filter" title="Filter by status" value={stat} options={['All status', 'Active', 'Low stock', 'Out of stock']} onChange={setStat} />
+          <AdmSelect compact icon="filter" title="Filter by catalog status" value={stat} options={['All status', 'Draft', 'Active', 'Archived']} onChange={setStat} />
+          <AdmSelect compact icon="filter" title="Filter by stock" value={stockStat} options={['All stock', 'In stock', 'Low stock', 'Out of stock']} onChange={setStockStat} />
           <AdmSelect compact icon="sort" title="Sort by" value={sort} options={[{ value: 'featured', label: 'Featured' }, { value: 'price-low', label: 'Price: Low → High' }, { value: 'price-high', label: 'Price: High → Low' }, { value: 'name-az', label: 'Name: A → Z' }, { value: 'stock-low', label: 'Stock: Low → High' }, { value: 'stock-high', label: 'Stock: High → Low' }]} onChange={setSort} />
         </div>
       </div>
@@ -120,11 +151,11 @@ export function AdminProducts({ editId }) {
               <td><b>{naira(p.price)}</b></td>
               <td>{p.stock}</td>
               <td className="row" style={{ gap: 6 }}>
-                <span className={'adm-pill ' + (p.stock === 0 ? 'bad' : p.stock < 10 ? 'warn' : 'ok')}>{statusOf(p.stock)}</span>
-                <span className={'adm-pill ' + (p.status === 'published' ? 'ok' : 'muted')}>{p.status === 'published' ? 'Published' : 'Draft'}</span>
+                <span className={'adm-pill ' + (p.stock === 0 ? 'bad' : p.stock < 10 ? 'warn' : 'ok')}>{stockStatusOf(p.stock)}</span>
+                <span className={'adm-pill ' + (p.status === 'active' ? 'ok' : p.status === 'draft' ? 'warn' : 'muted')}>{p.status === 'active' ? 'Active' : p.status === 'archived' ? 'Archived' : 'Draft'}</span>
               </td>
-              <td><div className="adm-rowact"><button title="Edit" onClick={() => { setEditing({ id: p.id, name: p.name, brand: p.brand, price: p.price, category: p.category, _stock: p.stock, _raw: p._raw }); router.replace('/admin/products/' + p.id); }}><Icon name="edit" size={15} /></button><button className="del" title="Delete" onClick={async () => {
-                try { await productsApi.remove(p.id); } catch (e) { t(messageFrom(e)); return; }
+              <td><div className="adm-rowact"><button title="Edit" onClick={() => { setEditing(productToDraft(p)); router.replace('/admin/products/' + p.id); }}><Icon name="edit" size={15} /></button><button className="del" title="Delete" onClick={async () => {
+                try { await adminProductsApi.remove(p.id); } catch (e) { t(messageFrom(e)); return; }
                 setItems(list => list.filter(x => x.id !== p.id));
                 t('Product deleted');
               }}><Icon name="trash" size={15} /></button></div></td>
@@ -134,13 +165,13 @@ export function AdminProducts({ editId }) {
       </div>
       {editing && <ProductEditDrawer draft={editing} onClose={closeEditing} onSave={async (d) => {
         const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
-        const body = { category_id: catObj?.id, name: d.name.trim(), description: d.desc || '', price: Number(d.price) || 0, stock: Number(d._stock) || 0 };
+        const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', price: Number(d.price) || 0, stock: Number(d._stock) || 0, status: d.status || 'draft' };
         try {
           if (d._new) {
-            await productsApi.create(body);
-            t('Product created as a draft — publish it from the backend to show on the storefront.');
+            await adminProductsApi.create(body);
+            t(d.status === 'active' ? 'Product created and published' : 'Product created');
           } else {
-            await productsApi.update(d.id, body);
+            await adminProductsApi.update(d.id, body);
             t('Changes saved');
           }
           await loadProducts();
@@ -293,6 +324,9 @@ function ProductEditDrawer({ draft, onClose, onSave }) {
           </div>
           <label className="adm-field"><span>Category</span>
             <AdmSelect value={f.category} options={cats.map(c => ({ value: c.slug, label: c.name }))} onChange={v => set('category', v)} creatable onCreate={addCat} />
+          </label>
+          <label className="adm-field"><span>Catalog status</span>
+            <AdmSelect value={f.status || 'draft'} options={[{ value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived' }]} onChange={v => set('status', v)} />
           </label>
           <label className="adm-field"><span>Description</span><textarea rows={3} value={f.desc || (f._raw && f._raw.desc) || ''} onChange={e => set('desc', e.target.value)} placeholder="Short product description" /></label>
           <VariantsEditor variants={f.variants} onChange={v => set('variants', v)} />
