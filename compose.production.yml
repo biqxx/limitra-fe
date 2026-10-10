@@ -1,3 +1,5 @@
+name: limitra-frontend
+
 services:
   frontend:
     image: ${FRONTEND_IMAGE:-ghcr.io/biqxx/limitra-fe:main}
