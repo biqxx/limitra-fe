@@ -1,6 +1,6 @@
 'use client';
 /* LIMITRA, Product details — ported from legacy/pages-product.jsx */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
@@ -8,6 +8,37 @@ import { Thumb, REAL_IMG, Placeholder, Stars, QtyStepper, Breadcrumbs, SectionHe
 import { ShareButton } from '@/components/share/Share';
 import { VideoStage, VID_POSTER, VIDEOS } from '@/components/video/Video';
 import { CATEGORIES, naira, byId, bySlug, byCat } from '@/lib/data';
+import { productsApi } from '@/lib/api/endpoints';
+
+function mapProductDetails(product) {
+  const firstImage = Array.isArray(product.images) ? product.images[0] : null;
+  const imageUrl = typeof firstImage === 'string' ? firstImage : firstImage?.url || firstImage?.path;
+  const variants = Array.isArray(product.variants)
+    ? product.variants.filter(group => group?.name && Array.isArray(group.options))
+    : [];
+  const specs = Array.isArray(product.specifications)
+    ? product.specifications.filter(spec => spec?.name).map(spec => [spec.name, spec.value ?? ''])
+    : [];
+
+  if (imageUrl) REAL_IMG[product.id] = imageUrl;
+
+  return {
+    id: product.id,
+    name: product.name,
+    brand: product.brand || '',
+    price: Number(product.price) || 0,
+    was: Number(product.compare_at_price) || 0,
+    stock: Number(product.stock) || 0,
+    desc: product.description || '',
+    description: product.description || '',
+    store: product.creator?.name || product.creator?.username || 'Limitra',
+    rating: Number(product.average_rating ?? product.rating) || 0,
+    reviews: Number(product.review_count ?? product.reviews_count ?? product.reviews) || 0,
+    bestseller: Boolean(product.is_bestseller),
+    specs,
+    variants,
+  };
+}
 
 function Gallery({ product, variantKey }) {
   const [active, setActive] = useState(0);
@@ -99,7 +130,15 @@ function ReviewBreakdown({ product }) {
 
 export function ProductPage({ id }) {
   const { go, addToCart, toggleWish, wish, cart } = useStore();
-  const product = bySlug(id) || byId(id);
+  const catalogProduct = bySlug(id) || byId(id);
+  const [productDetails, setProductDetails] = useState(null);
+  const productId = catalogProduct?.id;
+  const product = useMemo(
+    () => catalogProduct && productDetails?.id === productId
+      ? { ...catalogProduct, ...productDetails }
+      : catalogProduct,
+    [catalogProduct, productDetails, productId]
+  );
   // Variation groups are defined per-product by whoever uploaded it (admin ->
   // AdminCatalog's ProductEditDrawer) — a group only renders when the product
   // actually has one, so a plain accessory with no colour/size shows none.
@@ -108,6 +147,18 @@ export function ProductPage({ id }) {
   const [selected, setSelected] = useState({});
   const [qty, setQty] = useState(1);
   const [tab, setTab] = useState('desc');
+  useEffect(() => {
+    if (!productId) return;
+
+    let cancelled = false;
+    productsApi.get(productId)
+      .then(details => {
+        if (!cancelled && details) setProductDetails(mapProductDetails(details));
+      })
+      .catch(() => { /* the safe catalog shape remains usable if detail loading fails */ });
+
+    return () => { cancelled = true; };
+  }, [productId]);
   const related = product ? byCat(product.category).filter(p => p.id !== product.id).slice(0, 5) : [];
   const faved = !!product && wish.includes(product.id);
   useEffect(() => {
@@ -128,15 +179,17 @@ export function ProductPage({ id }) {
     );
   }
 
+  const specs = Array.isArray(product.specs) ? product.specs : [];
+  const variants = Array.isArray(product.variants) ? product.variants : [];
   const variantKey = JSON.stringify(selected);
   const buy = (checkout) => {
-    const variants = {};
-    (product.variants || []).forEach(g => {
+    const selectedVariants = {};
+    variants.forEach(g => {
       const sel = selected[g.name];
       if (sel == null) return;
-      variants[g.name] = g.type === 'color' ? { label: sel.name, hex: sel.hex } : { label: sel };
+      selectedVariants[g.name] = g.type === 'color' ? { label: sel.name, hex: sel.hex } : { label: sel };
     });
-    addToCart(product, { variants }, qty);
+    addToCart(product, { variants: selectedVariants }, qty);
     if (checkout) go('checkout');
   };
 
@@ -165,7 +218,7 @@ export function ProductPage({ id }) {
             {product.was > 0 && <><span className="was">{naira(product.was)}</span><span className="badge badge-sale">Save {naira(product.was - product.price)}</span></>}
           </div>
 
-          {(product.variants || []).map(g => (
+          {variants.map(g => (
             <div className="variant" key={g.name}>
               {g.type === 'color' ? (
                 <>
@@ -200,7 +253,7 @@ export function ProductPage({ id }) {
           {product.stock <= 5 && <p className="stock-warn"><Icon name="flame" size={14} fill="currentColor" /> Only {product.stock} left, order soon</p>}
 
           <div className="pdp-perks">
-            {[['truck', 'Free delivery', 'Nationwide in 10–14 days'], ['refresh', '7-day returns', 'No questions asked'], ['shield', 'Warranty', product.specs.find(s => s[0] === 'Warranty')?.[1] || '12 months']].map(([ic, t, s]) => (
+            {[['truck', 'Free delivery', 'Nationwide in 10–14 days'], ['refresh', '7-day returns', 'No questions asked'], ['shield', 'Warranty', specs.find(s => s[0] === 'Warranty')?.[1] || '12 months']].map(([ic, t, s]) => (
               <div key={t} className="perk"><span className="perk-ic"><Icon name={ic} size={18} /></span><div><b>{t}</b><small>{s}</small></div></div>
             ))}
           </div>
@@ -239,9 +292,10 @@ export function ProductPage({ id }) {
           {tab === 'specs' && (
             <table className="spec-table">
               <tbody>
-                {product.specs.map(([k, v]) => (
+                {specs.map(([k, v]) => (
                   <tr key={k}><td>{k}</td><td>{v}</td></tr>
                 ))}
+                {specs.length === 0 && <tr><td colSpan={2}>No specifications have been added yet.</td></tr>}
               </tbody>
             </table>
           )}

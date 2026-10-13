@@ -177,8 +177,11 @@ export function StoreProvider({ children }) {
 
       const rawProducts = Array.isArray(rawProductsRes) ? rawProductsRes : rawProductsRes?.items || rawProductsRes?.data || [];
       const mappedProducts = rawProducts.map(p => {
-        const cat = catsById[p.category_id];
-        if (Array.isArray(p.images) && p.images[0]) REAL_IMG[p.id] = p.images[0];
+        const cat = catsById[p.category_id ?? p.category?.id];
+        const firstImage = Array.isArray(p.images) ? p.images[0] : null;
+        const imageUrl = typeof firstImage === 'string' ? firstImage : firstImage?.url || firstImage?.path;
+        const stock = Number(p.stock) || 0;
+        if (imageUrl) REAL_IMG[p.id] = imageUrl;
         return {
           id: p.id,
           slug: p.slug || slugify(p.name) || `product-${p.id}`,
@@ -187,13 +190,19 @@ export function StoreProvider({ children }) {
           price: Number(p.price) || 0,
           was: Number(p.compare_at_price) || 0,
           off: 0,
-          stock: p.stock ?? 0,
-          category: cat?.slug || 'all',
+          stock,
+          category: cat?.slug || p.category?.slug || 'all',
+          desc: p.description || '',
           description: p.description || '',
-          rating: Number(p.rating) || 0,
-          reviews: Number(p.reviews_count ?? p.reviews) || 0,
-          badges: p.stock === 0 ? ['out-of-stock'] : [],
-          bestseller: false,
+          store: p.creator?.name || p.creator?.username || 'Limitra',
+          rating: Number(p.average_rating ?? p.rating) || 0,
+          reviews: Number(p.review_count ?? p.reviews_count ?? p.reviews) || 0,
+          specs: Array.isArray(p.specifications)
+            ? p.specifications.filter(s => s?.name).map(s => [s.name, s.value ?? ''])
+            : [],
+          variants: Array.isArray(p.variants) ? p.variants : [],
+          badges: stock === 0 ? ['out-of-stock'] : [],
+          bestseller: Boolean(p.is_bestseller),
           tint: cat?.tint || CAT_TINTS[0],
         };
       });
