@@ -7,8 +7,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { Thumb, REAL_IMG } from '@/components/ui/Shared';
+import { useStore } from '@/components/store/StoreProvider';
 import { naira, PRODUCTS, CATEGORIES } from '@/lib/data';
-import { categoriesApi, adminProductsApi, sourcingApi } from '@/lib/api/endpoints';
+import { getVariants, setVariants, applyStoredVariants } from '@/lib/variantsStore';
+import { productsApi, categoriesApi, adminProductsApi, sourcingApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { Kpi, STATUS_CLS } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
@@ -33,7 +35,7 @@ const mapAdminProduct = (p) => ({
   category: p.category?.slug || 'all',
   status: p.status || 'draft',
   desc: p.description || '',
-  variants: [],
+  variants: getVariants(p.id),
   _raw: p,
 });
 
@@ -197,8 +199,10 @@ export function AdminProducts({ editId }) {
         const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft' };
         if (!sourced) body.price = Number(d.price) || 0;
         try {
+          let productId = d.id;
           if (d._new) {
-            await adminProductsApi.create(body);
+            const created = await adminProductsApi.create(body);
+            productId = created?.id ?? productId;
             t(d.status === 'active' ? 'Product created and published' : 'Product created');
           } else {
             if (body.status === 'active' && sourced) {
@@ -215,6 +219,7 @@ export function AdminProducts({ editId }) {
             await adminProductsApi.update(d.id, body);
             t(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
           }
+          if (productId != null) setVariants(productId, d.variants || []);
           await loadProducts();
           closeEditing();
         } catch (e) {
@@ -257,15 +262,21 @@ function BulkUploadModal({ onClose, onDone }) {
 function VariantGroupRow({ group, onChange, onRemove }) {
   const [name, setName] = useState('');
   const [hex, setHex] = useState('#0438B6');
+  const label = (o) => group.type === 'color' ? o.name : o.label;
   const addOption = () => {
     const v = name.trim();
     if (!v) return;
-    const exists = group.options.some(o => (group.type === 'color' ? o.name : o) === v);
+    const exists = group.options.some(o => label(o) === v);
     if (exists) return;
-    onChange({ options: [...group.options, group.type === 'color' ? { name: v, hex } : v] });
+    const next = group.type === 'color' ? { name: v, hex, price: null } : { label: v, price: null };
+    onChange({ options: [...group.options, next] });
     setName('');
   };
   const removeOption = (oi) => onChange({ options: group.options.filter((_, i) => i !== oi) });
+  const updateOptionPrice = (oi, raw) => {
+    const price = raw === '' ? null : Math.max(0, Number(raw) || 0);
+    onChange({ options: group.options.map((o, i) => i === oi ? { ...o, price } : o) });
+  };
   return (
     <div className="adm-variant-group" style={{ border: '1.5px solid var(--border)', borderRadius: 'var(--r-md)', padding: 14, marginBottom: 12 }}>
       <div className="adm-field-row" style={{ marginBottom: 10 }}>
@@ -274,16 +285,21 @@ function VariantGroupRow({ group, onChange, onRemove }) {
           <AdmSelect value={group.type} options={[{ value: 'text', label: 'Text options' }, { value: 'color', label: 'Colour swatches' }]} onChange={v => onChange({ type: v, options: [] })} />
         </label>
       </div>
-      <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+      <div className="adm-variant-opts" style={{ marginBottom: 10 }}>
         {group.options.map((o, oi) => (
-          <span key={oi} className="adm-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            {group.type === 'color' && <i style={{ width: 12, height: 12, borderRadius: '50%', background: o.hex, display: 'inline-block' }} />}
-            {group.type === 'color' ? o.name : o}
-            <button type="button" onClick={() => removeOption(oi)} aria-label="Remove option" style={{ display: 'inline-flex', color: 'inherit' }}><Icon name="close" size={11} /></button>
-          </span>
+          <div key={oi} className="adm-variant-opt-row">
+            {group.type === 'color' && <i className="adm-variant-swatch" style={{ background: o.hex }} />}
+            <span className="adm-variant-opt-label">{label(o)}</span>
+            <div className="adm-variant-opt-price">
+              <span className="muted">₦</span>
+              <input type="number" min="0" step="100" placeholder="Base price" value={o.price ?? ''} onChange={e => updateOptionPrice(oi, e.target.value)} />
+            </div>
+            <button type="button" onClick={() => removeOption(oi)} aria-label="Remove option"><Icon name="close" size={13} /></button>
+          </div>
         ))}
         {group.options.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>No options yet</span>}
       </div>
+      <p className="muted" style={{ fontSize: 11.5, marginBottom: 10, marginTop: -4 }}>Leave an option's price blank to use the product's base price when it's selected.</p>
       <div className="adm-field-row" style={{ alignItems: 'flex-end' }}>
         <label className="adm-field" style={{ flex: 1 }}>
           <span>{group.type === 'color' ? 'Add colour' : 'Add option'}</span>
@@ -650,6 +666,11 @@ function CouponModal({ draft, onClose, onSave }) {
 /* ---------- INVENTORY ---------- */
 export function AdminInventory() {
   const addToast = useAdminToast();
+  // Reads the storefront's PRODUCTS directly below (not AdminProducts' own
+  // adminProductsApi-backed `items` state) — subscribes to context so it
+  // re-renders once the async catalog load populates it, same reasoning as
+  // ShopPage/HomePage's useStore() calls.
+  useStore();
   const highlight = useSearchParams().get('highlight');
   useHighlight(highlight);
   const [q, setQ] = useState('');
