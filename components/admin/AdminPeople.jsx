@@ -2,13 +2,15 @@
 /* People nav group (Customers, Affiliates, Referrals) — ported verbatim from
    legacy/admin-sections.jsx. `window.admToast` calls replaced with `useAdminToast()`;
    AdminAffiliates has `data-hlkey` rows so it reads the highlight query param too. */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { naira } from '@/lib/data';
+import { businessSettingsApi } from '@/lib/api/endpoints';
+import { messageFrom } from '@/lib/api/errors';
 import { Kpi, BarChart } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead, Pager, usePager, Toggle, AdmSelect, useHighlight } from './AdminShared';
+import { AdmHead, Pager, usePager, AdmSelect, useHighlight } from './AdminShared';
 
 /* ---------- CUSTOMERS ---------- */
 // No customers backend yet — stays genuinely empty rather than fake accounts.
@@ -275,11 +277,76 @@ export function AdminAffiliates() {
 
 /* ---------- REFERRALS ---------- */
 export function AdminReferrals() {
+  const addToast = useAdminToast();
+  const [settings, setSettings] = useState([]);
+  const [draft, setDraft] = useState({});
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const displayValue = useCallback(setting => {
+    if (setting.key === 'referrals.reward_amount_minor') return Number(setting.value) / 100;
+    return setting.value;
+  }, []);
+
+  const storedValue = useCallback((setting, value) => {
+    if (setting.type === 'boolean') return Boolean(value);
+    if (setting.key === 'referrals.reward_amount_minor') return Math.round(Number(value) * 100);
+    if (setting.type === 'integer') return Math.round(Number(value));
+    return String(value);
+  }, []);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await businessSettingsApi.list({ group: 'referrals' });
+      const items = Array.isArray(response) ? response : response?.items || response?.data || [];
+      setSettings(items);
+      setDraft(Object.fromEntries(items.map(setting => [setting.key, displayValue(setting)])));
+    } catch (error) {
+      addToast(messageFrom(error));
+    } finally {
+      setLoaded(true);
+    }
+  }, [addToast, displayValue]);
+
+  // Initial network hydration is intentionally triggered when the page mounts.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [load]);
+
+  const byKey = useMemo(() => Object.fromEntries(settings.map(setting => [setting.key, setting])), [settings]);
+  const changed = useMemo(() => settings.filter(setting => (
+    JSON.stringify(storedValue(setting, draft[setting.key])) !== JSON.stringify(setting.value)
+  )), [draft, settings, storedValue]);
+  const rewardAmount = Number(draft['referrals.reward_amount_minor']) || 0;
+  const enabled = Boolean(draft['referrals.enabled']);
+  const set = (key, value) => setDraft(current => ({ ...current, [key]: value }));
+  const constraints = key => byKey[key]?.constraints || {};
+
+  const save = async () => {
+    if (!changed.length) return;
+    setSaving(true);
+    try {
+      await businessSettingsApi.update(changed.map(setting => ({
+        key: setting.key,
+        value: storedValue(setting, draft[setting.key]),
+      })));
+      addToast('Referral settings saved.');
+      await load();
+    } catch (error) {
+      addToast(messageFrom(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
-      <AdmHead title="Referrals" sub="Lim Cash reward program" />
+      <AdmHead title="Referrals" sub="Lim Cash reward program">
+        <button className="adm-btn primary" onClick={save} disabled={!loaded || saving || changed.length === 0}>
+          <Icon name="check" size={15} /> {saving ? 'Saving…' : `Save ${changed.length || ''} change${changed.length === 1 ? '' : 's'}`}
+        </button>
+      </AdmHead>
       <div className="kpi-grid">
-        <Kpi ic="dollar" tint="#1F8A5B" label="Reward per referral" val={naira(7000)} delta="" up />
+        <Kpi ic="dollar" tint="#1F8A5B" label="Reward per referral" val={loaded ? naira(rewardAmount) : '—'} delta="" up />
         <Kpi ic="user" tint="#0438B6" label="Successful referrals" val="0" delta="" up />
         <Kpi ic="gift" tint="#F67208" label="Lim Cash issued" val={naira(0)} delta="" up />
         <Kpi ic="refresh" tint="#7A5AE0" label="Redemption rate" val="0%" delta="" up />
@@ -287,11 +354,39 @@ export function AdminReferrals() {
       <div className="adm-row c2">
         <div className="panel"><div className="panel-h"><h3>Referrals over time</h3></div><BarChart data={[0, 0, 0, 0, 0, 0, 0, 0]} labels={['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8']} alt /></div>
         <div className="panel"><div className="panel-h"><h3>Program settings</h3></div>
-          <div className="adm-list">
-            <div className="adm-li"><div className="adm-li-main"><b>Reward amount</b><small>Lim Cash per completed referral</small></div><input className="cfg-row" style={{ width: 90, textAlign: 'center', padding: 7, border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }} defaultValue="₦7,000" /></div>
-            <div className="adm-li"><div className="adm-li-main"><b>Min. payout order</b><small>Friend’s first order minimum</small></div><input style={{ width: 90, textAlign: 'center', padding: 7, border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }} defaultValue="₦10,000" /></div>
-            <div className="adm-li"><div className="adm-li-main"><b>Program active</b><small>Enable referral earning</small></div><Toggle defaultOn /></div>
-          </div>
+          {!loaded ? <div className="adm-soon"><p>Loading referral settings…</p></div> : (
+            <div className="adm-list">
+              <div className="adm-li">
+                <div className="adm-li-main"><b>Reward amount</b><small>{byKey['referrals.reward_amount_minor']?.description}</small></div>
+                <div style={{ position: 'relative' }}>
+                  <span className="muted" style={{ position: 'absolute', left: 10, top: 8 }}>₦</span>
+                  <input type="number" min={(constraints('referrals.reward_amount_minor').min || 0) / 100} max={(constraints('referrals.reward_amount_minor').max || 100000000) / 100} step="100" value={draft['referrals.reward_amount_minor'] ?? ''} onChange={event => set('referrals.reward_amount_minor', event.target.value)} style={{ width: 120, padding: '7px 8px 7px 25px', border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }} />
+                </div>
+              </div>
+              <div className="adm-li">
+                <div className="adm-li-main"><b>Reward currency</b><small>{byKey['referrals.currency']?.description}</small></div>
+                <select value={draft['referrals.currency'] ?? 'NGN'} onChange={event => set('referrals.currency', event.target.value)} style={{ width: 100, padding: 7, border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }}>
+                  {(constraints('referrals.currency').options || ['NGN']).map(option => <option value={option} key={option}>{option}</option>)}
+                </select>
+              </div>
+              <div className="adm-li">
+                <div className="adm-li-main"><b>Attribution window</b><small>{byKey['referrals.attribution_days']?.description}</small></div>
+                <input type="number" min={constraints('referrals.attribution_days').min || 1} max={constraints('referrals.attribution_days').max || 365} value={draft['referrals.attribution_days'] ?? ''} onChange={event => set('referrals.attribution_days', event.target.value)} style={{ width: 90, textAlign: 'center', padding: 7, border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }} aria-label="Attribution window in days" />
+              </div>
+              <div className="adm-li">
+                <div className="adm-li-main"><b>Daily invitation limit</b><small>{byKey['referrals.invitation_daily_limit']?.description}</small></div>
+                <input type="number" min={constraints('referrals.invitation_daily_limit').min || 1} max={constraints('referrals.invitation_daily_limit').max || 100} value={draft['referrals.invitation_daily_limit'] ?? ''} onChange={event => set('referrals.invitation_daily_limit', event.target.value)} style={{ width: 90, textAlign: 'center', padding: 7, border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }} aria-label="Daily invitation limit" />
+              </div>
+              <div className="adm-li">
+                <div className="adm-li-main"><b>Invitation resend window</b><small>{byKey['referrals.invitation_resend_days']?.description}</small></div>
+                <input type="number" min={constraints('referrals.invitation_resend_days').min || 1} max={constraints('referrals.invitation_resend_days').max || 90} value={draft['referrals.invitation_resend_days'] ?? ''} onChange={event => set('referrals.invitation_resend_days', event.target.value)} style={{ width: 90, textAlign: 'center', padding: 7, border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }} aria-label="Invitation resend window in days" />
+              </div>
+              <div className="adm-li">
+                <div className="adm-li-main"><b>Program active</b><small>{byKey['referrals.enabled']?.description}</small></div>
+                <button type="button" className={'toggle' + (enabled ? ' on' : '')} onClick={() => set('referrals.enabled', !enabled)} role="switch" aria-checked={enabled} aria-label="Enable referral program" />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
