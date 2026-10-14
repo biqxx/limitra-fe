@@ -8,7 +8,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { naira, PRODUCTS, CATEGORIES } from '@/lib/data';
-import { categoriesApi, adminProductsApi } from '@/lib/api/endpoints';
+import { categoriesApi, adminProductsApi, sourcingApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { Kpi, STATUS_CLS } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
@@ -108,6 +108,15 @@ export function AdminProducts({ editId }) {
     return () => { cancelled = true; };
   }, [editId, items, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const closeEditing = () => { setEditing(null); router.replace('/admin/products'); };
+  const openEditor = async (product) => {
+    router.replace('/admin/products/' + product.id);
+    try {
+      const detail = await adminProductsApi.get(product.id);
+      setEditing(productToDraft(mapAdminProduct(detail)));
+    } catch (error) {
+      t(messageFrom(error));
+    }
+  };
 
   const cats = ['all', ...new Set(items.map(p => p.category))];
   const stockStatusOf = (s) => s === 0 ? 'Out of stock' : s < 10 ? 'Low stock' : 'In stock';
@@ -154,7 +163,7 @@ export function AdminProducts({ editId }) {
                 <span className={'adm-pill ' + (p.stock === 0 ? 'bad' : p.stock < 10 ? 'warn' : 'ok')}>{stockStatusOf(p.stock)}</span>
                 <span className={'adm-pill ' + (p.status === 'active' ? 'ok' : p.status === 'draft' ? 'warn' : 'muted')}>{p.status === 'active' ? 'Active' : p.status === 'archived' ? 'Archived' : 'Draft'}</span>
               </td>
-              <td><div className="adm-rowact"><button title="Edit" onClick={() => { setEditing(productToDraft(p)); router.replace('/admin/products/' + p.id); }}><Icon name="edit" size={15} /></button><button className="del" title="Delete" onClick={async () => {
+              <td><div className="adm-rowact"><button title="Edit" onClick={() => openEditor(p)}><Icon name="edit" size={15} /></button><button className="del" title="Delete" onClick={async () => {
                 try { await adminProductsApi.remove(p.id); } catch (e) { t(messageFrom(e)); return; }
                 setItems(list => list.filter(x => x.id !== p.id));
                 t('Product deleted');
@@ -165,7 +174,9 @@ export function AdminProducts({ editId }) {
       </div>
       {editing && <ProductEditDrawer draft={editing} onClose={closeEditing} onSave={async (d) => {
         const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
-        const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', price: Number(d.price) || 0, stock: Number(d._stock) || 0, status: d.status || 'draft' };
+        const sourced = Boolean(d._raw?.sources?.length);
+        const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft' };
+        if (!sourced) body.price = Number(d.price) || 0;
         try {
           if (d._new) {
             await adminProductsApi.create(body);
@@ -280,8 +291,21 @@ function VariantsEditor({ variants, onChange }) {
 function ProductEditDrawer({ draft, onClose, onSave }) {
   const addToast = useAdminToast();
   const [f, setF] = useState({ ...draft, variants: draft.variants || draft._raw?.variants || [] });
+  const [pricingBusy, setPricingBusy] = useState(false);
+  const initialSource = draft._raw?.sources?.[0] || null;
+  const [pricingInputs, setPricingInputs] = useState({
+    supplier_price: initialSource?.supplier_price || '',
+    supplier_currency: initialSource?.supplier_currency || 'USD',
+    weight_lb: initialSource?.weight_lb || '',
+    delivery_days_min: initialSource?.delivery_days_min || '',
+    delivery_days_max: initialSource?.delivery_days_max || '',
+  });
   const [, force] = useState(0);
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+  const source = f._raw?.sources?.[0] || null;
+  const quote = source?.current_price_quote;
+  const sourced = Boolean(source);
+  const pricingApproved = source?.pricing_status === 'approved';
   const cats = [...CATEGORIES, ...ADMIN_EXTRA_CATS];
   const addCat = async (name) => {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -293,6 +317,42 @@ function ProductEditDrawer({ draft, onClose, onSave }) {
       addToast('Category “' + name + '” added');
     } catch (e) {
       addToast(messageFrom(e));
+    }
+  };
+  const applySource = updated => {
+    setF(current => ({
+      ...current,
+      price: Number(updated.final_price_ngn || updated.current_price_quote?.proposed_price_ngn || current.price) || 0,
+      _raw: {
+        ...current._raw,
+        price: updated.product?.price || current._raw?.price,
+        sources: [updated, ...(current._raw?.sources || []).filter(item => item.id !== updated.id)],
+      },
+    }));
+  };
+  const recalculate = async () => {
+    setPricingBusy(true);
+    try {
+      const payload = Object.fromEntries(Object.entries(pricingInputs).filter(([, value]) => value !== '').map(([key, value]) => [key, key === 'supplier_currency' ? String(value).toUpperCase() : Number(value)]));
+      const updated = await sourcingApi.recalculatePrice(source.id, payload);
+      applySource(updated);
+      addToast(updated.pricing_status === 'pending_approval' ? 'Price calculated. Review and approve it below.' : 'Pricing details saved. Complete the missing information.');
+    } catch (error) {
+      addToast(messageFrom(error));
+    } finally {
+      setPricingBusy(false);
+    }
+  };
+  const approve = async () => {
+    setPricingBusy(true);
+    try {
+      const updated = await sourcingApi.approvePrice(source.id, quote?.id);
+      applySource(updated);
+      addToast('Selling price approved. This product can now be published.');
+    } catch (error) {
+      addToast(messageFrom(error));
+    } finally {
+      setPricingBusy(false);
     }
   };
   return (
@@ -319,14 +379,44 @@ function ProductEditDrawer({ draft, onClose, onSave }) {
           <label className="adm-field"><span>Product name</span><input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Product name" /></label>
           <label className="adm-field"><span>Brand</span><input value={f.brand} onChange={e => set('brand', e.target.value)} placeholder="Brand" /></label>
           <div className="adm-field-row">
-            <label className="adm-field"><span>Price (₦)</span><input type="number" value={f.price} onChange={e => set('price', e.target.value)} /></label>
+            <label className="adm-field"><span>{sourced ? 'Approved / proposed price (₦)' : 'Price (₦)'}</span><input type="number" value={f.price} onChange={e => set('price', e.target.value)} disabled={sourced} />{sourced && <small className="muted">Managed by the pricing workflow below.</small>}</label>
             <label className="adm-field"><span>Stock</span><input type="number" value={f._stock} onChange={e => set('_stock', e.target.value)} /></label>
           </div>
+          {sourced && (
+            <section style={{ border: '1.5px solid var(--border)', borderRadius: 'var(--r-md)', padding: 16, marginBottom: 18 }}>
+              <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+                <div><b>Supplier pricing</b><small className="muted" style={{ display: 'block', marginTop: 3 }}>{source.supplier} · {source.external_product_id}</small></div>
+                <span className={'adm-pill ' + (pricingApproved ? 'ok' : source.pricing_status === 'blocked' ? 'bad' : 'warn')}>{String(source.pricing_status || 'pending').replaceAll('_', ' ')}</span>
+              </div>
+              <div className="adm-field-row">
+                <label className="adm-field"><span>Supplier price</span><input type="number" min="0" step="0.01" value={pricingInputs.supplier_price} onChange={e => setPricingInputs(current => ({ ...current, supplier_price: e.target.value }))} /></label>
+                <label className="adm-field"><span>Currency</span><input maxLength="3" value={pricingInputs.supplier_currency} onChange={e => setPricingInputs(current => ({ ...current, supplier_currency: e.target.value.toUpperCase() }))} /></label>
+              </div>
+              <div className="adm-field-row">
+                <label className="adm-field"><span>Weight (lb)</span><input type="number" min="0" step="0.01" value={pricingInputs.weight_lb} onChange={e => setPricingInputs(current => ({ ...current, weight_lb: e.target.value }))} /></label>
+                <label className="adm-field"><span>US delivery min (days)</span><input type="number" min="1" value={pricingInputs.delivery_days_min} onChange={e => setPricingInputs(current => ({ ...current, delivery_days_min: e.target.value }))} /></label>
+                <label className="adm-field"><span>US delivery max (days)</span><input type="number" min="1" value={pricingInputs.delivery_days_max} onChange={e => setPricingInputs(current => ({ ...current, delivery_days_max: e.target.value }))} /></label>
+              </div>
+              {quote?.missing_inputs?.length > 0 && <div className="adm-note" style={{ marginBottom: 10 }}><Icon name="info" size={14} /> Missing: {quote.missing_inputs.join(', ').replaceAll('_', ' ')}</div>}
+              {quote?.blocked_reasons?.length > 0 && <div className="adm-note" style={{ marginBottom: 10, color: 'var(--red)' }}><Icon name="info" size={14} /> Blocked: {quote.blocked_reasons.join(', ').replaceAll('_', ' ')}</div>}
+              {quote?.proposed_price_ngn && (
+                <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                  <div className="row" style={{ justifyContent: 'space-between' }}><span>Proposed selling price</span><b>{naira(Number(quote.proposed_price_ngn))}</b></div>
+                  {quote.cost_breakdown && <small className="muted" style={{ display: 'block', marginTop: 6 }}>Landed cost {naira(Number(quote.cost_breakdown.total_cost_ngn || 0))} · Profit {naira(Number(quote.cost_breakdown.profit_ngn || 0))} · FX {Number(quote.cost_breakdown.supplier_effective_rate_ngn || 0).toLocaleString('en-NG')} NGN/{source.supplier_currency}</small>}
+                </div>
+              )}
+              <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="adm-btn ghost" onClick={recalculate} disabled={pricingBusy}>{pricingBusy ? 'Working…' : 'Recalculate'}</button>
+                {source.pricing_status === 'pending_approval' && <button type="button" className="adm-btn primary" onClick={approve} disabled={pricingBusy}>Approve price</button>}
+              </div>
+            </section>
+          )}
           <label className="adm-field"><span>Category</span>
             <AdmSelect value={f.category} options={cats.map(c => ({ value: c.slug, label: c.name }))} onChange={v => set('category', v)} creatable onCreate={addCat} />
           </label>
           <label className="adm-field"><span>Catalog status</span>
             <AdmSelect value={f.status || 'draft'} options={[{ value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived' }]} onChange={v => set('status', v)} />
+            {sourced && !pricingApproved && <small className="muted">Approve the latest complete supplier price before selecting Active.</small>}
           </label>
           <label className="adm-field"><span>Description</span><textarea rows={3} value={f.desc || (f._raw && f._raw.desc) || ''} onChange={e => set('desc', e.target.value)} placeholder="Short product description" /></label>
           <VariantsEditor variants={f.variants} onChange={v => set('variants', v)} />
