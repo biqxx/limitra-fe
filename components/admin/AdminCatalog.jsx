@@ -49,6 +49,26 @@ const productToDraft = (p) => ({
   _raw: p._raw,
 });
 
+const pricingIssueMessage = (source) => {
+  const reasons = source?.current_price_quote?.blocked_reasons || [];
+  const missing = source?.current_price_quote?.missing_inputs || [];
+  const labels = {
+    delivery_above_limit: 'supplier delivery exceeds the configured limit',
+    weight_above_limit: 'supplier weight exceeds the configured limit',
+    supplier_price: 'supplier price',
+    supplier_currency: 'supplier currency',
+    delivery_days_max: 'maximum delivery time',
+  };
+
+  if (reasons.length) {
+    return `Cannot activate this product: ${reasons.map(reason => labels[reason] || reason.replaceAll('_', ' ')).join(', ')}.`;
+  }
+  if (missing.length) {
+    return `Cannot activate this product until you add: ${missing.map(field => labels[field] || field.replaceAll('_', ' ')).join(', ')}.`;
+  }
+  return 'Recalculate and approve the supplier price before activating this product.';
+};
+
 // /admin/products/[id] renders this same list page with that product's edit
 // drawer pre-opened (see app/admin/products/[id]/page.js) rather than being a
 // separate detail page — matches every other admin section, which only ever
@@ -174,7 +194,8 @@ export function AdminProducts({ editId }) {
       </div>
       {editing && <ProductEditDrawer draft={editing} onClose={closeEditing} onSave={async (d) => {
         const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
-        const sourced = Boolean(d._raw?.sources?.length);
+        const sources = d._raw?.sources || [];
+        const sourced = Boolean(sources.length);
         const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft' };
         if (!sourced) body.price = Number(d.price) || 0;
         try {
@@ -182,8 +203,19 @@ export function AdminProducts({ editId }) {
             await adminProductsApi.create(body);
             t(d.status === 'active' ? 'Product created and published' : 'Product created');
           } else {
+            if (body.status === 'active' && sourced) {
+              const unapprovable = sources.find(source => !['approved', 'pending_approval'].includes(source.pricing_status));
+              if (unapprovable) {
+                t(pricingIssueMessage(unapprovable));
+                return;
+              }
+
+              for (const source of sources.filter(source => source.pricing_status === 'pending_approval')) {
+                await sourcingApi.approvePrice(source.id, source.current_price_quote?.id);
+              }
+            }
             await adminProductsApi.update(d.id, body);
-            t('Changes saved');
+            t(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
           }
           await loadProducts();
           closeEditing();
@@ -416,7 +448,8 @@ function ProductEditDrawer({ draft, onClose, onSave }) {
           </label>
           <label className="adm-field"><span>Catalog status</span>
             <AdmSelect value={f.status || 'draft'} options={[{ value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived' }]} onChange={v => set('status', v)} />
-            {sourced && !pricingApproved && <small className="muted">Approve the latest complete supplier price before selecting Active.</small>}
+            {sourced && source.pricing_status === 'pending_approval' && <small className="muted">Saving as Active will approve the displayed price and publish the product.</small>}
+            {sourced && !pricingApproved && source.pricing_status !== 'pending_approval' && <small className="muted">{pricingIssueMessage(source)} Update the pricing inputs or pricing settings, then recalculate.</small>}
           </label>
           <label className="adm-field"><span>Description</span><textarea rows={3} value={f.desc || (f._raw && f._raw.desc) || ''} onChange={e => set('desc', e.target.value)} placeholder="Short product description" /></label>
           <VariantsEditor variants={f.variants} onChange={v => set('variants', v)} />
