@@ -105,30 +105,28 @@ export function AdminProducts({ editId }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
-  // Prefer the loaded page, then fetch the requested record directly. This keeps
-  // deep links working when the product is beyond the first 100 list results.
+  // Always fetch the detail record for an editor deep link. List records do not
+  // include supplier sources, so using one here hides the pricing approval UI
+  // even though the API still enforces supplier-price approval on activation.
   const deepLinkOpened = useRef(false);
   useEffect(() => {
-    if (!editId || deepLinkOpened.current || !loaded) return;
-    const p = items.find(x => String(x.id) === String(editId));
-    if (p) {
-      deepLinkOpened.current = true;
-      setEditing(productToDraft(p));
-      return;
-    }
+    if (!editId || deepLinkOpened.current) return;
 
     let cancelled = false;
+    deepLinkOpened.current = true;
     adminProductsApi.get(editId).then(raw => {
       if (cancelled) return;
-      deepLinkOpened.current = true;
       setEditing(productToDraft(mapAdminProduct(raw)));
     }).catch(e => {
       if (!cancelled) t(messageFrom(e));
     });
     return () => { cancelled = true; };
-  }, [editId, items, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editId]); // eslint-disable-line react-hooks/exhaustive-deps
   const closeEditing = () => { setEditing(null); router.replace('/admin/products'); };
   const openEditor = async (product) => {
+    // The route change also triggers the deep-link effect. Mark this interaction
+    // as handled so it cannot briefly open a source-less list record first.
+    deepLinkOpened.current = true;
     router.replace('/admin/products/' + product.id);
     try {
       const detail = await adminProductsApi.get(product.id);
@@ -192,7 +190,7 @@ export function AdminProducts({ editId }) {
           ))}</tbody>
         </table>{loaded && list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager page={pPage} pages={pPages} onPage={pSet} /></div>
       </div>
-      {editing && <ProductEditDrawer draft={editing} onClose={closeEditing} onSave={async (d) => {
+      {editing && <ProductEditDrawer key={`${editing.id}:${(editing._raw?.sources || []).map(source => source.id).join(',')}`} draft={editing} onClose={closeEditing} onSave={async (d) => {
         const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
         const sources = d._raw?.sources || [];
         const sourced = Boolean(sources.length);
