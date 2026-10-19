@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { Thumb, REAL_IMG } from '@/components/ui/Shared';
+import { useStore } from '@/components/store/StoreProvider';
 import { naira, PRODUCTS } from '@/lib/data';
 import { Kpi, BarChart, Donut, STATUS_CLS } from '@/components/charts/Charts';
 import { ADMIN_ORDERS } from './AdminShared';
@@ -29,6 +30,10 @@ function RevenueChart() {
 }
 
 export function AdminOverview() {
+  // Reads PRODUCTS directly below (Total Products KPI, bestseller list) —
+  // subscribes to context so it re-renders once the async catalog load
+  // populates it, same reasoning as ShopPage/HomePage's useStore() calls.
+  useStore();
   const revenue = ADMIN_ORDERS.filter((o) => o.status !== 'Cancelled' && o.status !== 'Refunded').reduce((s, o) => s + o.total, 0);
   const pending = ADMIN_ORDERS.filter((o) => o.status === 'Pending' || o.status === 'Processing').length;
   const completed = ADMIN_ORDERS.filter((o) => o.status === 'Delivered').length;

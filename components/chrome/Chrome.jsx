@@ -16,25 +16,38 @@ export const NAV = [
   { slug: 'electronics', name: 'Electronics' },
   { slug: 'home', name: 'Home Essentials' }];
 
-// nav dropdowns show a trimmed subset (first 8); full lists live on category/banner pages
-const SUBCATS = Object.fromEntries(Object.entries(ALL_SUBCATS).map(([k, v]) => [k, v.slice(0, 8)]));
+// ALL_SUBCATS (lib/data.js's SUBCATS) starts empty and is only filled in later,
+// once the real catalog loads (StoreProvider's loadCatalog -> setSubcats).
+// These three used to be computed ONCE at module-eval time, when ALL_SUBCATS
+// was still empty, and — since nothing re-ran that computation afterward —
+// stayed empty forever even once real subcategories arrived: the exact same
+// class of bug as PRODUCTS/CATEGORIES being mutated in place (see lib/data.js),
+// just here it was "frozen at first read" instead of "frozen by reference"
+// (nothing mutates these in place; they just never ran a second time). Turned
+// into functions so every call site recomputes from the current ALL_SUBCATS.
 
-const SUBCAT_SECTIONS = {
+// nav dropdowns show a trimmed subset (first 8); full lists live on category/banner pages
+const getSubcats = () => Object.fromEntries(Object.entries(ALL_SUBCATS).map(([k, v]) => [k, v.slice(0, 8)]));
+
+const getSubcatSections = () => ({
   fashion: [
     { title: 'Women', slug: 'womens', items: (ALL_SUBCATS.womens || []).slice(0, 7) },
     { title: 'Men', slug: 'mens', items: (ALL_SUBCATS.mens || []).slice(0, 7) }]
-};
+});
 
 export const subSlugify = (s) => s.toLowerCase().replace(/[’'`]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-export const SUBCAT_INDEX = {};
-Object.entries(ALL_SUBCATS).forEach(([parent, items]) => items.forEach((it) => { SUBCAT_INDEX[parent + '/' + subSlugify(it)] = { label: it, parent }; }));
+export function getSubcatIndex() {
+  const index = {};
+  Object.entries(ALL_SUBCATS).forEach(([parent, items]) => items.forEach((it) => { index[parent + '/' + subSlugify(it)] = { label: it, parent }; }));
+  return index;
+}
 
 export const CAT_ICON = { phones: 'phone', computing: 'grid', electronics: 'spark', audio: 'headset', home: 'store', gaming: 'spark', wearables: 'clock', cameras: 'eye', accessories: 'tag', hair: 'hair', beauty: 'makeup', fashion: 'shirt', mens: 'shirt', womens: 'shirt', fragrance: 'spark', kids: 'gift', auto: 'truck', sports: 'spark', pets: 'heart', adult: 'heart', shoes: 'tag' };
 
 function NavCategory({ n, active, go, onEnterClose, className }) {
   const [open, setOpen] = useState(false);
-  const sections = SUBCAT_SECTIONS[n.slug];
-  const subs = SUBCATS[n.slug] || [];
+  const sections = getSubcatSections()[n.slug];
+  const subs = getSubcats()[n.slug] || [];
   const hasMenu = sections || subs.length > 0;
   const dealSlug = sections ? sections[0].slug : n.slug;
   const deal = (PRODUCTS.filter(p => p.category === dealSlug) || []).
