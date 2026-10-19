@@ -5,11 +5,12 @@
    the active-state check are built from the same `affPath` helper the page components use for
    their own internal `go(...)` navigation (see components/affiliate/Affiliate.jsx), so both
    stay in sync. */
-import { useState, useEffect, Fragment } from 'react';
+import { Suspense, useState, useEffect, Fragment } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { AFF, FAFF_NAV, fn, affPath } from '@/components/affiliate/Affiliate';
 import { AffiliateToastProvider } from '@/components/affiliate/AffiliateToastContext';
+import { StoreProvider } from '@/components/store/StoreProvider';
 // NOTE: these two stylesheets were relocated from legacy/ to styles/ as part of this
 // conversion (styles/admin.css, styles/aff-dashboard.css); the affiliate dashboard depends
 // on admin's shared .adm-* classes plus its own .aff-* additions on top (see
@@ -18,7 +19,29 @@ import { AffiliateToastProvider } from '@/components/affiliate/AffiliateToastCon
 import '@/styles/admin.css';
 import '@/styles/aff-dashboard.css';
 
+/* This tree had no StoreProvider of its own — components/affiliate/Affiliate.jsx
+   reads the shared PRODUCTS array directly in several places, but with no
+   Provider mounted anywhere above it those reads just saw whatever (if
+   anything) another part of the app had already loaded into that same module-
+   level state, frozen — Affiliate.jsx couldn't call useStore() itself to fix
+   that the way ShopPage/HomePage did, since there was no context to read from.
+   Split into a thin outer layout + inner shell, same shape as app/admin/layout.js,
+   so StoreProvider (which calls useSearchParams(), needing a Suspense boundary)
+   sits outside the shell rather than the shell needing to be the Suspense
+   boundary for its own provider. The localStorage-based `lim_affiliate`/
+   `lim_admin` route guard below is intentionally left as-is — swapping it for
+   real `user.role` auth is a separate decision, not bundled into this fix. */
 export default function AffiliateDashboardLayout({ children }) {
+  return (
+    <Suspense fallback={null}>
+      <StoreProvider>
+        <AffiliateDashboardShell>{children}</AffiliateDashboardShell>
+      </StoreProvider>
+    </Suspense>
+  );
+}
+
+function AffiliateDashboardShell({ children }) {
   const router = useRouter();
   const pathname = usePathname();
 
