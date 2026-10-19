@@ -8,13 +8,24 @@ import { useStore } from '@/components/store/StoreProvider';
 import { EmptyState, QtyStepper, Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { naira, CATEGORIES, SUBCATS as ALL_SUBCATS, PRODUCTS, byId, unitPriceOf } from '@/lib/data';
 
-export const NAV = [
-  { slug: 'new', name: 'New Arrivals' },
-  { slug: 'phones', name: 'Phones' },
-  { slug: 'fashion', name: 'Fashion' },
-  { slug: 'beauty', name: 'Beauty' },
-  { slug: 'electronics', name: 'Electronics' },
-  { slug: 'home', name: 'Home Essentials' }];
+// How many real categories get a direct top-level nav link, beyond the
+// always-present "New Arrivals". The rest are still one click away via "All
+// Categories" (MegaMenu below, already built from the full CATEGORIES list)
+// and the mobile drawer (same) — this just decides what's worth the nav
+// bar's limited width. Previously this was a hardcoded 5-category list
+// (phones/fashion/beauty/electronics/home) left over from the legacy mock
+// catalog; it never noticed the real backend's 14-category tree arrive, so
+// mens/womens/computing/fragrance/kids/auto/sports/pets/adult were only ever
+// reachable through "All Categories", never as a direct link.
+const NAV_DIRECT_COUNT = 6;
+
+function getNav() {
+  const real = [...CATEGORIES]
+    .sort((a, b) => (b.count || 0) - (a.count || 0) || a.name.localeCompare(b.name))
+    .slice(0, NAV_DIRECT_COUNT)
+    .map(c => ({ slug: c.slug, name: c.name }));
+  return [{ slug: 'new', name: 'New Arrivals' }, ...real];
+}
 
 // ALL_SUBCATS (lib/data.js's SUBCATS) starts empty and is only filled in later,
 // once the real catalog loads (StoreProvider's loadCatalog -> setSubcats).
@@ -419,7 +430,7 @@ export function Header() {
           <button className={'nav-all' + (mega ? ' on' : '')} onMouseEnter={() => setMega(true)} onClick={() => setMega((m) => !m)}>
             <Icon name="grid" size={17} /> All Categories <Icon name="chevdown" size={15} />
           </button>
-          {NAV.map((n, i) =>
+          {getNav().map((n, i) =>
           <NavCategory key={n.slug} n={n} active={route.name === 'shop' && route.params[0] === n.slug} go={go} onEnterClose={() => setMega(false)} className={i >= 3 ? 'nav-collapsible' : ''} />
           )}
           <a className="nav-link nav-collapsible" onClick={() => go('shop', 'all')}>All Products</a>
