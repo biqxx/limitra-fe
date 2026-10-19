@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { Thumb, REAL_IMG } from '@/components/ui/Shared';
+import { useStore } from '@/components/store/StoreProvider';
 import { naira, PRODUCTS } from '@/lib/data';
 import { Kpi, BarChart } from '@/components/charts/Charts';
 import { VIDEOS, VID_POSTER, fmtViews } from '@/components/video/Video';
@@ -77,6 +78,10 @@ export function AdminSpin() {
 /* ---------- VIDEOS ---------- */
 export function AdminVideos() {
   const addToast = useAdminToast();
+  // The product-assignment picker below reads PRODUCTS directly — subscribes
+  // to context so it re-renders once the async catalog load populates it,
+  // same reasoning as ShopPage/HomePage's useStore() calls.
+  useStore();
   const V = VIDEOS || [];
   const [edit, setEdit] = useState(null);
   const [assign, setAssign] = useState(null);

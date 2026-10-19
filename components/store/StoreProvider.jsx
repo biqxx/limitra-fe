@@ -186,7 +186,20 @@ export function StoreProvider({ children }) {
         // above for CATEGORIES, but falls back to the nested slug if for any
         // reason this product's category isn't in that list.
         const cat = catsById[p.category?.id];
-        if (Array.isArray(p.images) && p.images[0]) REAL_IMG[p.id] = p.images[0];
+        // Each entry in p.images is {id, url, alt, position}, not a plain URL
+        // string — storing the object itself (as this used to) renders
+        // <img src="[object Object]">, a broken image with naturalWidth 0.
+        const firstImg = Array.isArray(p.images) && p.images[0];
+        if (firstImg) REAL_IMG[p.id] = typeof firstImg === 'string' ? firstImg : firstImg.url;
+        // "New" is computed, not a flag the API sends — anything created in
+        // the last 14 days. isFeatured/isBestseller DO come straight from the
+        // API; none of them are true for any live product as of this writing
+        // (freshly-sourced/admin-created items default to false), so this is
+        // currently invisible but is what the "New arrivals"/"Trending this
+        // week" sections (which filter on these) actually need to ever show
+        // real products instead of permanently showing nothing.
+        const createdAt = p.created_at ? new Date(p.created_at) : null;
+        const isNew = createdAt ? (Date.now() - createdAt.getTime()) < 14 * 24 * 60 * 60 * 1000 : false;
         return {
           id: p.id,
           slug: p.slug || slugify(p.name) || `product-${p.id}`,
@@ -194,14 +207,27 @@ export function StoreProvider({ children }) {
           brand: p.brand || '',
           price: Number(p.price) || 0,
           was: Number(p.compare_at_price) || 0,
-          off: 0,
+          // discount_percentage is the API's own field — it was hardcoded to 0
+          // here before, which hid any real discount from the "Deals" page
+          // (filters on off > 0) even when one existed.
+          off: Number(p.discount_percentage) || 0,
           stock: p.stock ?? 0,
           category: cat?.slug || p.category?.slug || 'all',
+          // ShopPage matches a subcategory route segment against this (exact
+          // name match, see getSubcatIndex() in Chrome.jsx) — the real API
+          // nests a subcategory object with its own `name`/`slug`, not a flat
+          // `sub` field the way the old mock catalog had one.
+          subcategoryName: p.subcategory?.name || null,
           description: p.description || '',
-          rating: Number(p.rating) || 0,
-          reviews: Number(p.reviews_count ?? p.reviews) || 0,
-          badges: p.stock === 0 ? ['out-of-stock'] : [],
-          bestseller: false,
+          // The API's fields are `average_rating`/`review_count` — this used
+          // to read `p.rating`/`p.reviews_count`, neither of which exist, so
+          // it silently always fell through to 0. That happened to match
+          // every live product's actual rating/review count so far, which is
+          // exactly why it went unnoticed.
+          rating: Number(p.average_rating) || 0,
+          reviews: Number(p.review_count) || 0,
+          badges: [...(p.stock === 0 ? ['out-of-stock'] : []), ...(isNew ? ['new'] : []), ...(p.is_featured ? ['hot'] : [])],
+          bestseller: !!p.is_bestseller,
           tint: cat?.tint || CAT_TINTS[0],
         };
       });

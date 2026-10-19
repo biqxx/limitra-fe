@@ -5,7 +5,7 @@ import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { ProductCard, Thumb, REAL_IMG, Stars, Price, Breadcrumbs, EmptyState } from '@/components/ui/Shared';
 import { Dropdown } from '@/components/forms/Shared';
-import { CAT_ICON, subSlugify, SUBCAT_INDEX } from '@/components/chrome/Chrome';
+import { CAT_ICON, subSlugify, getSubcatIndex } from '@/components/chrome/Chrome';
 import { PRODUCTS, CATEGORIES, SUBCATS, naira, byCat } from '@/lib/data';
 
 const SORTS = [['relevance', 'Most relevant'], ['low', 'Price: low to high'], ['high', 'Price: high to low'], ['rating', 'Top rated'], ['new', 'Newest']];
@@ -32,7 +32,16 @@ export function priceSort(a, b, s) {
   return b.reviews - a.reviews;
 }
 
-export function FilterPanel({ f, setF, brands, priceCap }) {
+// `idPrefix` scopes the rating radios' `name` per render site — ShopShell
+// renders this twice (desktop sidebar + mobile drawer) with the same `f`/
+// `setF`, and native <input type="radio"> groups by `name` across the whole
+// document, not per component instance or even per React tree: two unscoped
+// groups both named "rate" fight over which one the browser marks checked,
+// so the one you actually clicked can visibly un-check itself even though the
+// filter did apply (React's `checked` prop was right; the browser's native
+// radio-exclusivity constraint overrode it because it saw a second same-named
+// group elsewhere in the DOM).
+export function FilterPanel({ f, setF, brands, priceCap, idPrefix = 'a' }) {
   const toggleBrand = b => setF(s => ({ ...s, brands: s.brands.includes(b) ? s.brands.filter(x => x !== b) : [...s.brands, b] }));
   return (
     <div className="filters">
@@ -57,7 +66,7 @@ export function FilterPanel({ f, setF, brands, priceCap }) {
         <h5>Rating</h5>
         {[4, 3, 2].map(r => (
           <label key={r} className="check">
-            <input type="radio" name="rate" checked={f.minRating === r} onChange={() => setF(s => ({ ...s, minRating: r }))} />
+            <input type="radio" name={`rate-${idPrefix}`} checked={f.minRating === r} onChange={() => setF(s => ({ ...s, minRating: r }))} />
             <span className="cbox round"><Icon name="check" size={12} stroke={3} /></span>
             <span className="row" style={{ gap: 6 }}><Stars value={r} /> & up</span>
           </label>
@@ -140,7 +149,7 @@ function ShopShell({ baseList, title, eyebrow, crumbLabel }) {
               <h4 style={{ fontSize: 17 }}>Filters</h4>
               {activeCount > 0 && <button className="link-btn" onClick={() => setF({ maxPrice: null, brands: [], minRating: 0, onSale: false, inStock: false })}>Clear all</button>}
             </div>
-            <FilterPanel f={f} setF={setF} brands={brands} priceCap={priceCap} />
+            <FilterPanel f={f} setF={setF} brands={brands} priceCap={priceCap} idPrefix="desktop" />
           </aside>
 
           <div>
@@ -170,7 +179,7 @@ function ShopShell({ baseList, title, eyebrow, crumbLabel }) {
       <div className={'scrim' + (drawer ? ' on' : '')} onClick={() => setDrawer(false)} />
       <aside className={'drawer left' + (drawer ? ' on' : '')}>
         <div className="drawer-head"><h3>Filters</h3><button className="icon-btn" onClick={() => setDrawer(false)}><Icon name="close" size={18} /></button></div>
-        <div className="drawer-body"><FilterPanel f={f} setF={setF} brands={brands} priceCap={priceCap} /></div>
+        <div className="drawer-body"><FilterPanel f={f} setF={setF} brands={brands} priceCap={priceCap} idPrefix="mobile" /></div>
         <div className="drawer-foot"><button className="btn btn-primary btn-block" onClick={() => setDrawer(false)}>Show {filtered.length} results</button></div>
       </aside>
     </div>
@@ -220,16 +229,13 @@ export function ShopPage({ cat, sub }) {
   // of special-casing it is what actually shows its real products now.
   let base = isDeals ? PRODUCTS.filter(p => p.off > 0) : isNew ? PRODUCTS.filter(p => (p.badges || []).includes('new')) : isTrending ? PRODUCTS.filter(p => p.bestseller) : isAll ? PRODUCTS : byCat(cat);
 
-  const subInfo = sub ? (SUBCAT_INDEX || {})[cat + '/' + sub] : null;
-  if (subInfo) {
-    const exact = base.filter(p => p.sub === sub);
-    if (exact.length) base = exact;
-    else {
-      const kws = subInfo.label.toLowerCase().replace(/&/g, ' ').split(/[^a-z0-9]+/).filter(w => w.length > 3);
-      const matched = base.filter(p => kws.some(w => (p.name + ' ' + p.shot).toLowerCase().includes(w)));
-      if (matched.length) base = matched;
-    }
-  }
+  // Matches on the real subcategory's name (StoreProvider's product mapper
+  // sets `subcategoryName` from the API's nested subcategory object) — a
+  // known subcategory with zero matching products should show zero results,
+  // not silently fall back to the parent category's full list, so this
+  // doesn't try a fuzzy/keyword match as a second-chance fallback.
+  const subInfo = sub ? getSubcatIndex()[cat + '/' + sub] : null;
+  if (subInfo) base = base.filter(p => p.subcategoryName === subInfo.label);
 
   const title = subInfo ? subInfo.label : isDeals ? 'Flash Deals & Offers' : isNew ? 'New Arrivals' : isTrending ? 'Trending This Week' : isAll ? 'All Products' : (meta?.name || 'Shop');
   const eyebrow = subInfo ? ((meta?.name) || 'Category') : isDeals ? 'Limited time' : isNew ? 'Just landed' : isTrending ? 'Best sellers' : meta ? 'Category' : 'Catalog';
