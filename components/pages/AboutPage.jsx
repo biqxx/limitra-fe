@@ -96,7 +96,7 @@ export function AboutPage() {
           </div>
           <div className="about-timeline">
             {milestones.map(([yr, t, b]) => (
-              <div key={yr} className="about-ms">
+              <div key={t} className="about-ms">
                 <div className="ams-year">{yr}</div>
                 <div className="ams-body"><b>{t}</b><p className="muted">{b}</p></div>
               </div>
