@@ -1,0 +1,36 @@
+/* ============ LIMITRA — Creator Program switcher + commission rate table ============
+   Shared across the Affiliate, MicroStores and Celebrity Stores landing pages
+   (see components/pages/CreatorPrograms.jsx). */
+
+.cp-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; align-items: stretch; }
+.cp-card { padding: 24px; display: flex; flex-direction: column; gap: 14px; border: 1.5px solid var(--border); }
+.cp-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-md); }
+.cp-card-head { display: flex; align-items: flex-start; gap: 12px; }
+.cp-card-ic { width: 40px; height: 40px; border-radius: var(--r-md); background: var(--primary-soft); color: var(--primary); display: grid; place-items: center; flex: none; }
+.cp-card.on .cp-card-ic { background: var(--accent); color: #fff; }
+.cp-card-head b { font-family: var(--font-display); font-weight: 700; font-size: 16.5px; display: block; }
+.cp-card-head small { font-size: 12px; display: block; margin-top: 2px; }
+.cp-card-desc { font-size: 13.5px; line-height: 1.55; text-wrap: pretty; flex: none; }
+.cp-card-min { display: flex; align-items: center; gap: 10px; background: var(--surface-2); border-radius: var(--r-md); padding: 10px 12px; }
+.cp-card-min svg { color: var(--text-faint); flex: none; }
+.cp-card-min b { display: block; font-family: var(--font-display); font-weight: 700; font-size: 15px; line-height: 1.2; }
+.cp-card-min small { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .04em; }
+.cp-card-list { display: flex; flex-direction: column; gap: 9px; flex: 1; }
+.cp-card-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--text-muted); line-height: 1.45; }
+.cp-card-list svg { color: var(--success); flex: none; margin-top: 2px; }
+.cp-card-foot { text-align: center; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; }
+
+/* commission rate table */
+.cp-rate-card { padding: 30px; }
+.cp-rate-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-md); }
+.cp-rate-table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 460px; }
+.cp-rate-table th, .cp-rate-table td { padding: 13px 18px; text-align: left; white-space: nowrap; }
+.cp-rate-table th:not(:first-child), .cp-rate-table td:not(:first-child) { text-align: center; }
+.cp-rate-table thead th { font-family: var(--font-display); font-weight: 700; font-size: 12.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--text-faint); background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.cp-rate-table tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
+.cp-rate-table tbody td:not(:first-child) { font-family: var(--font-display); font-weight: 700; color: var(--primary); }
+.cp-rate-table tbody td:first-child { color: var(--text); font-weight: 600; }
+
+@media (max-width: 860px) {
+  .cp-switch { grid-template-columns: 1fr; }
+}

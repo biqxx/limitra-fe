@@ -4,6 +4,8 @@ import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { Placeholder } from '@/components/ui/Shared';
 import { MICROSTORES } from '@/lib/microstoresData';
+import { MICROSTORE_TIERS, MICROSTORE_RATES, COMMISSION_CATEGORIES, STORE_ADVANTAGE, ORDERS_COUNT_YES, ORDERS_COUNT_NO } from '@/lib/creatorPrograms';
+import { CreatorProgramSwitcher, PerformanceTierBlock, CommissionTable, WhichOrdersCount, ApplySection } from '@/components/pages/CreatorPrograms';
 
 const MS_TRUST = [
   ['package', 'No inventory required'],
@@ -21,20 +23,9 @@ const MS_PREVIEW = [
 
 const MS_PERKS = ['Personal store URL', 'Curate multiple products', 'Store analytics', 'AI content studio'];
 
-const MS_CATS = [
-  ['phone', 'Phones', 'phones', 'rgba(4,56,182,.1)'],
-  ['makeup', 'Beauty', 'beauty', 'rgba(246,114,8,.12)'],
-  ['shirt', 'Fashion', 'fashion', 'rgba(16,122,69,.1)'],
-  ['store', 'Home & Living', 'home', 'rgba(142,85,230,.1)'],
-  ['grid', 'Appliances', 'appliances', 'rgba(4,56,182,.1)'],
-  ['gift', 'Baby Products', 'baby', 'rgba(246,114,8,.12)'],
-  ['truck', 'Spare Parts', 'spareparts', 'rgba(90,90,90,.1)'],
-  ['tag', 'Deals', 'deals', 'rgba(229,72,77,.1)'],
-];
-
 const MS_STEPS = [
-  ['cart', 'Choose products', 'Pick from millions of products across every category on Limitra.'],
   ['store', 'Create your store', 'Pick a name and claim your unique, shareable store URL in seconds.'],
+  ['cart', 'Choose products', 'Pick from millions of products across every category on Limitra.'],
   ['share', 'Share your store', 'Share one link on WhatsApp, TikTok, Instagram & more.'],
   ['dollar', 'Earn', 'Get paid out when your orders are successfully delivered.'],
 ];
@@ -43,6 +34,15 @@ const AFFILIATE_PERKS = ['Share a single product link', 'Earn on tracked sales']
 const STORE_PERKS = ['Personalized storefront', 'Choose your niche & products', 'AI content studio', 'Track sales & earnings', 'Build your brand'];
 
 const FEATURED_STORES = MICROSTORES.slice(0, 4);
+
+const FAQS = [
+  ['How is my commission rate decided?', 'Your rate is based on your qualifying sales within a rolling 90-day period: Creator, Pro Creator or Elite Creator, with the category commission applying on top. Everyone starts at the Creator rate.'],
+  ['What is the rolling 90-day window?', 'Rather than resetting quarterly, your performance is recalculated continuously using your most recent 90 days. Your tier can move up when you hit the next threshold, or down if recent activity falls below it.'],
+  ['Which orders count toward my rank and earnings?', 'Only valid, successfully delivered orders from genuine customers through your approved storefront. Cancelled, refunded, returned, failed, duplicate, self-referred or fraudulent orders do not count and may be reversed.'],
+  ['When is my commission paid?', 'Commission is payable only on valid qualifying orders confirmed by Limitra. Payouts may be held for review, reconciliation, fraud screening or return checks.'],
+  ['Can my rank go down or my account be removed?', 'Yes. Tier is not permanent, it adjusts automatically with your rolling 90-day results. Limitra may also pause or remove partners for fraud, impersonation or other policy violations.'],
+  ['Does it cost anything to join?', 'No. The Limitra MicroStores program is free to join, with no fees and no obligations.'],
+];
 
 export function MicroStoresPage() {
   const { go } = useStore();
@@ -99,22 +99,52 @@ export function MicroStoresPage() {
         </div>
       </section>
 
-      {/* category strip */}
-      <section className="sec" style={{ paddingBottom: 8 }}>
+      <CreatorProgramSwitcher active="microstores" />
+
+      {/* advantage */}
+      <section className="sec" style={{ paddingTop: 8 }}>
         <div className="wrap">
-          <div className="cat-strip">
-            {MS_CATS.map(([ic, name, slug, tint]) => (
-              <button key={slug} className="cat-tile" onClick={() => go('shop', slug)}>
-                <span className="cat-tile-ic" style={{ '--ph-b': tint }}><Icon name={ic} size={24} /></span>
-                <b>{name}</b>
-              </button>
+          <div className="aff-sec-head" style={{ maxWidth: 680 }}>
+            <span className="eyebrow">The MicroStores advantage</span>
+            <h2>More than commissions. It&rsquo;s your brand.</h2>
+            <p className="muted" style={{ marginTop: 10, textWrap: 'pretty' }}>With Limitra MicroStores, you get the tools, support and flexibility to turn your audience into a thriving online business. Not just a link.</p>
+          </div>
+          <div className="aff-perks" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+            {STORE_ADVANTAGE.map(([ic, t, b]) => (
+              <div key={t} className="aff-perk card">
+                <span className="aff-perk-ic"><Icon name={ic} size={20} /></span>
+                <b>{t}</b>
+                <p className="muted">{b}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <PerformanceTierBlock tiers={MICROSTORE_TIERS} />
+
+      {/* how it works */}
+      <section className="sec" style={{ paddingTop: 8 }}>
+        <div className="wrap">
+          <div className="aff-sec-head">
+            <span className="eyebrow">How it works</span>
+            <h2>From idea to income in four steps</h2>
+          </div>
+          <div className="aff-steps">
+            {MS_STEPS.map(([ic, t, b], i) => (
+              <div key={t} className="aff-step">
+                <span className="aff-step-num">{i + 1}</span>
+                <span className="aff-step-ic"><Icon name={ic} size={22} /></span>
+                <b>{t}</b>
+                <p className="muted">{b}</p>
+              </div>
             ))}
           </div>
         </div>
       </section>
 
       {/* comparison */}
-      <section className="sec">
+      <section className="sec" style={{ paddingTop: 8 }}>
         <div className="wrap">
           <div className="aff-sec-head">
             <span className="eyebrow">Two ways to earn</span>
@@ -149,26 +179,6 @@ export function MicroStoresPage() {
         </div>
       </section>
 
-      {/* how it works */}
-      <section className="sec">
-        <div className="wrap">
-          <div className="aff-sec-head">
-            <span className="eyebrow">How it works</span>
-            <h2>From idea to income in four steps</h2>
-          </div>
-          <div className="aff-steps">
-            {MS_STEPS.map(([ic, t, b], i) => (
-              <div key={t} className="aff-step">
-                <span className="aff-step-num">{i + 1}</span>
-                <span className="aff-step-ic"><Icon name={ic} size={22} /></span>
-                <b>{t}</b>
-                <p className="muted">{b}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* featured microstores */}
       <section className="sec" id="featured-stores">
         <div className="wrap">
@@ -195,6 +205,25 @@ export function MicroStoresPage() {
           </div>
         </div>
       </section>
+
+      <CommissionTable
+        categories={COMMISSION_CATEGORIES}
+        columns={['Creator', 'Pro Creator', 'Elite Creator']}
+        rates={MICROSTORE_RATES}
+      />
+
+      <WhichOrdersCount yes={ORDERS_COUNT_YES} no={ORDERS_COUNT_NO} />
+
+      <ApplySection
+        title="Become a Microstore Partner"
+        desc="Apply to join, start at the current category commission on your first valid delivered sale, and climb the tiers as your rolling 90-day performance grows. Fill in the form to get started."
+        faqs={FAQS}
+        apply={{
+          rateNote: 'Free to join · commissions on a rolling 90-day basis.',
+          codePrefix: 'MS',
+          termsLabel: 'MicroStores',
+        }}
+      />
 
       {/* final cta */}
       <section className="sec">
