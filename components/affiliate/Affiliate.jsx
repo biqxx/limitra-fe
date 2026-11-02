@@ -16,6 +16,7 @@ import { Icon } from '@/components/icons/Icon';
 import { Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { SocialMark } from '@/components/ui/SocialMark';
 import { Kpi, BarChart, Donut } from '@/components/charts/Charts';
+import { useStore } from '@/components/store/StoreProvider';
 import { naira, PRODUCTS } from '@/lib/data';
 import { useAffiliateToast } from './AffiliateToastContext';
 
@@ -235,6 +236,11 @@ function AffOverview() {
 
 /* ============ PERFORMANCE ============ */
 function AffPerformance() {
+  // Reads PRODUCTS directly below — subscribes to context so it re-renders
+  // once the async catalog load populates it. This whole dashboard previously
+  // had no StoreProvider ancestor at all (see AffiliateDashboardLayout), so
+  // this call would have thrown; it's safe now that the layout provides one.
+  useStore();
   const [gran, setGran] = useState('Weekly');
   const C = { Daily: { d: [12, 18, 14, 22, 19, 25, 21], l: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] }, Weekly: { d: [58, 72, 64, 80, 76, 91, 104, 98], l: ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8'] }, Monthly: { d: [220, 265, 248, 310, 290, 356], l: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'] } };
   const top = PRODUCTS.slice(0, 5);
@@ -265,6 +271,7 @@ function AffPerformance() {
 
 /* ============ PROMOTION CENTER ============ */
 function AffPromote() {
+  useStore(); // see AffPerformance's comment above
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(null);
   const list = PRODUCTS.filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase())).slice(0, 12);
@@ -291,6 +298,7 @@ function AffPromote() {
 }
 
 function GenLinkModal({ onClose }) {
+  useStore(); // see AffPerformance's comment above
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(null);
   useEffect(() => { const k = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', k); document.body.style.overflow = 'hidden'; return () => { window.removeEventListener('keydown', k); document.body.style.overflow = ''; }; }, [onClose]);
@@ -324,7 +332,7 @@ function GenLinkModal({ onClose }) {
 function LinkModal({ product, onClose }) {
   const [short, setShort] = useState(false);
   const url = aff_link(product.slug);
-  const shortUrl = `${SITE}/r/${AFF.id}${product.id.replace(/\D/g, '')}`;
+  const shortUrl = `${SITE}/r/${AFF.id}${String(product.id).replace(/\D/g, '')}`;
   const link = short ? shortUrl : url;
   const msg = `Check out ${product.name} on Limitra, ${fn(product.price)}`;
   useEffect(() => { const k = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
@@ -353,6 +361,7 @@ function LinkModal({ product, onClose }) {
 /* ============ MY LINKS ============ */
 function AffLinks() {
   const affToast = useAffiliateToast();
+  useStore(); // see AffPerformance's comment above
   const links = PRODUCTS.slice(0, 14);
   const { shown, page, pages, setPage } = usePager(links, 'links');
   return (
@@ -363,7 +372,7 @@ function AffLinks() {
           <thead><tr><th>Product</th><th>Link</th><th>Clicks</th><th>Orders</th><th>Earned</th><th></th></tr></thead>
           <tbody>{shown.map((p, i) => { const clicks = 180 - i * 22, orders = 24 - i * 3; return (
             <tr key={p.id}><td><div className="adm-prod"><span className="adm-prod-thumb"><FThumb product={p} src={FREAL[p.id]} /></span><b>{p.name.split(',')[0]}</b></div></td>
-              <td><code className="aff-link-code">/r/{AFF.id}{p.id.replace(/\D/g, '')}</code></td>
+              <td><code className="aff-link-code">/r/{AFF.id}{String(p.id).replace(/\D/g, '')}</code></td>
               <td>{clicks}</td><td>{orders}</td><td><b>{fn(Math.round(orders * p.price * AFF.rate / 100))}</b></td>
               <td><div className="adm-rowact"><button title="Copy link" onClick={async () => { try { await navigator.clipboard.writeText(aff_link(p.slug)); } catch (e) {} affToast('Link copied'); }}><FIcon name="copy" size={15} /></button></div></td></tr>
           ); })}</tbody>

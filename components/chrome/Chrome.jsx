@@ -6,35 +6,59 @@ import { Icon } from '@/components/icons/Icon';
 import { Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { EmptyState, QtyStepper, Thumb, REAL_IMG } from '@/components/ui/Shared';
-import { naira, CATEGORIES, SUBCATS as ALL_SUBCATS, PRODUCTS, byId } from '@/lib/data';
+import { naira, CATEGORIES, SUBCATS as ALL_SUBCATS, PRODUCTS, byId, unitPriceOf } from '@/lib/data';
 
-export const NAV = [
-  { slug: 'new', name: 'New Arrivals' },
-  { slug: 'phones', name: 'Phones' },
-  { slug: 'fashion', name: 'Fashion' },
-  { slug: 'beauty', name: 'Beauty' },
-  { slug: 'electronics', name: 'Electronics' },
-  { slug: 'home', name: 'Home Essentials' }];
+// How many real categories get a direct top-level nav link, beyond the
+// always-present "New Arrivals". The rest are still one click away via "All
+// Categories" (MegaMenu below, already built from the full CATEGORIES list)
+// and the mobile drawer (same) — this just decides what's worth the nav
+// bar's limited width. Previously this was a hardcoded 5-category list
+// (phones/fashion/beauty/electronics/home) left over from the legacy mock
+// catalog; it never noticed the real backend's 14-category tree arrive, so
+// mens/womens/computing/fragrance/kids/auto/sports/pets/adult were only ever
+// reachable through "All Categories", never as a direct link.
+const NAV_DIRECT_COUNT = 6;
+
+function getNav() {
+  const real = [...CATEGORIES]
+    .sort((a, b) => (b.count || 0) - (a.count || 0) || a.name.localeCompare(b.name))
+    .slice(0, NAV_DIRECT_COUNT)
+    .map(c => ({ slug: c.slug, name: c.name }));
+  return [{ slug: 'new', name: 'New Arrivals' }, ...real];
+}
+
+// ALL_SUBCATS (lib/data.js's SUBCATS) starts empty and is only filled in later,
+// once the real catalog loads (StoreProvider's loadCatalog -> setSubcats).
+// These three used to be computed ONCE at module-eval time, when ALL_SUBCATS
+// was still empty, and — since nothing re-ran that computation afterward —
+// stayed empty forever even once real subcategories arrived: the exact same
+// class of bug as PRODUCTS/CATEGORIES being mutated in place (see lib/data.js),
+// just here it was "frozen at first read" instead of "frozen by reference"
+// (nothing mutates these in place; they just never ran a second time). Turned
+// into functions so every call site recomputes from the current ALL_SUBCATS.
 
 // nav dropdowns show a trimmed subset (first 8); full lists live on category/banner pages
-const SUBCATS = Object.fromEntries(Object.entries(ALL_SUBCATS).map(([k, v]) => [k, v.slice(0, 8)]));
+const getSubcats = () => Object.fromEntries(Object.entries(ALL_SUBCATS).map(([k, v]) => [k, v.slice(0, 8)]));
 
-const SUBCAT_SECTIONS = {
+const getSubcatSections = () => ({
   fashion: [
     { title: 'Women', slug: 'womens', items: (ALL_SUBCATS.womens || []).slice(0, 7) },
     { title: 'Men', slug: 'mens', items: (ALL_SUBCATS.mens || []).slice(0, 7) }]
-};
+});
 
 export const subSlugify = (s) => s.toLowerCase().replace(/[’'`]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-export const SUBCAT_INDEX = {};
-Object.entries(ALL_SUBCATS).forEach(([parent, items]) => items.forEach((it) => { SUBCAT_INDEX[parent + '/' + subSlugify(it)] = { label: it, parent }; }));
+export function getSubcatIndex() {
+  const index = {};
+  Object.entries(ALL_SUBCATS).forEach(([parent, items]) => items.forEach((it) => { index[parent + '/' + subSlugify(it)] = { label: it, parent }; }));
+  return index;
+}
 
 export const CAT_ICON = { phones: 'phone', computing: 'grid', electronics: 'spark', audio: 'headset', home: 'store', gaming: 'spark', wearables: 'clock', cameras: 'eye', accessories: 'tag', hair: 'hair', beauty: 'makeup', fashion: 'shirt', mens: 'shirt', womens: 'shirt', fragrance: 'spark', kids: 'gift', auto: 'truck', sports: 'spark', pets: 'heart', adult: 'heart', shoes: 'tag' };
 
 function NavCategory({ n, active, go, onEnterClose, className }) {
   const [open, setOpen] = useState(false);
-  const sections = SUBCAT_SECTIONS[n.slug];
-  const subs = SUBCATS[n.slug] || [];
+  const sections = getSubcatSections()[n.slug];
+  const subs = getSubcats()[n.slug] || [];
   const hasMenu = sections || subs.length > 0;
   const dealSlug = sections ? sections[0].slug : n.slug;
   const deal = (PRODUCTS.filter(p => p.category === dealSlug) || []).
@@ -273,7 +297,7 @@ function MiniCart({ open, onClose }) {
                       <div className="muted" style={{ fontSize: 12, fontFamily: 'var(--font-display)' }}>{Object.values(it.variants || {}).map(v => v.label).filter(Boolean).join(' · ')}</div>
                       <div className="row between" style={{ marginTop: 8 }}>
                         <QtyStepper size="sm" value={it.qty} onChange={(q) => setQty(it.key, q)} />
-                        <strong style={{ fontFamily: 'var(--font-display)', fontSize: 15 }}>{p ? naira(p.price * it.qty) : '—'}</strong>
+                        <strong style={{ fontFamily: 'var(--font-display)', fontSize: 15 }}>{p ? naira(unitPriceOf(it, p) * it.qty) : '—'}</strong>
                       </div>
                     </div>
                   </div>);
@@ -318,6 +342,7 @@ function MobileMenu({ open, onClose }) {
             )}
           <div className="mm-sec">Earn with Limitra</div>
           <a className="mm-link" onClick={() => nav('microstores')}><span className="row" style={{ gap: 12 }}><Icon name="store" size={18} />MicroStores <span className="nav-badge-new">New</span></span><Icon name="chevright" size={16} /></a>
+          <a className="mm-link" onClick={() => nav('celebrityStores')}><span className="row" style={{ gap: 12 }}><Icon name="star" size={18} />Celebrity Stores</span><Icon name="chevright" size={16} /></a>
           <a className="mm-link" onClick={() => nav('affiliate')}><span className="row" style={{ gap: 12 }}><Icon name="share" size={18} />Become an Affiliate</span><Icon name="chevright" size={16} /></a>
           <div className="mm-sec">Account</div>
           <a className="mm-link" onClick={() => nav('account')}><span className="row" style={{ gap: 12 }}><Icon name="user" size={18} />My account</span><Icon name="chevright" size={16} /></a>
@@ -355,6 +380,8 @@ export function Header() {
           <span className="row" style={{ gap: 8 }}><Icon name="truck" size={15} /> Free Delivery <b>Nationwide</b></span>
           <div className="row" style={{ gap: 20 }}>
             <a onClick={() => go('affiliate')} style={{ cursor: 'pointer' }}>Become an Affiliate</a>
+            <a onClick={() => go('microstores')} style={{ cursor: 'pointer' }}>MicroStores</a>
+            <a onClick={() => go('celebrityStores')} style={{ cursor: 'pointer' }}>Celebrity Stores</a>
             <a onClick={() => go('help')} style={{ cursor: 'pointer' }}>Help Center</a>
             <a onClick={() => go('orders')} style={{ cursor: 'pointer' }}>Track Order</a>
             <ThemeToggle />
@@ -406,13 +433,14 @@ export function Header() {
           <button className={'nav-all' + (mega ? ' on' : '')} onMouseEnter={() => setMega(true)} onClick={() => setMega((m) => !m)}>
             <Icon name="grid" size={17} /> All Categories <Icon name="chevdown" size={15} />
           </button>
-          {NAV.map((n, i) =>
+          {getNav().map((n, i) =>
           <NavCategory key={n.slug} n={n} active={route.name === 'shop' && route.params[0] === n.slug} go={go} onEnterClose={() => setMega(false)} className={i >= 3 ? 'nav-collapsible' : ''} />
           )}
           <a className="nav-link nav-collapsible" onClick={() => go('shop', 'all')}>All Products</a>
           <span style={{ flex: 1 }} />
           <a className="nav-link deals" onClick={() => go('shop', 'deals')}><Icon name="flame" size={15} fill="currentColor" /> Deals</a>
           <a className={'nav-link' + (route.name === 'microstores' ? ' active' : '')} onClick={() => go('microstores')}><Icon name="store" size={16} /> MicroStores <span className="nav-badge-new">New</span></a>
+          <a className={'nav-link nav-collapsible' + (route.name === 'celebrityStores' ? ' active' : '')} onClick={() => go('celebrityStores')}>Celebrity Stores</a>
           <a className={'nav-link nav-collapsible' + (route.name === 'affiliate' ? ' active' : '')} onClick={() => go('affiliate')}>Affiliate</a>
           <a className="nav-link" onClick={() => go('videos')}><Icon name="video" size={16} /> Videos</a>
           <a className="nav-link soft" onClick={() => go('help')}><Icon name="headset" size={16} /> Support</a>
@@ -460,7 +488,7 @@ export function Footer() {
   ['Shop', [['Phones & Tablets', () => go('shop', 'phones')], ['Computers & Accessories', () => go('shop', 'computing')], ['Electronics', () => go('shop', 'electronics')], ['Women’s Fashion', () => go('shop', 'womens')], ['All deals', () => go('shop', 'deals')]]],
   ['Account', [['My account', () => go('account')], ['Orders', () => go('orders')], ['Wishlist', () => go('wishlist')], ['Track order', () => go('orders')], ['Sign in', () => go('auth', 'signin')]]],
   ['Support', [['Help center', () => go('help')], ['About us', () => go('about')], ['Videos', () => go('videos')], ['Channels', () => go('channels')], ['Contact us', () => go('help', 'contact')]]],
-  ['Earn from Limitra', [['Limitra MicroStores', () => go('microstores')], ['Become an Affiliate', () => go('affiliate')], ['Affiliate dashboard', () => router.push('/affiliate/dashboard')], ['Careers', () => go('careers')]]]];
+  ['Earn from Limitra', [['Limitra MicroStores', () => go('microstores')], ['Limitra Celebrity Stores', () => go('celebrityStores')], ['Become an Affiliate', () => go('affiliate')], ['Affiliate dashboard', () => router.push('/affiliate/dashboard')], ['Careers', () => go('careers')]]]];
 
   return (
     <footer className="site-foot">
