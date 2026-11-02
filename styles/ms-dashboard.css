@@ -1,0 +1,59 @@
+/* ============ LIMITRA — MicroStore Partner Dashboard ============
+   Shell/table/panel primitives come from admin.css + aff-dashboard.css (same pattern as the
+   Affiliate dashboard, see app/microstores/dashboard/layout.js). This file only covers what's
+   new here: the sidebar store header, stat cards with a "view details" link, the sales line
+   chart, order-status legend, top-products list, store-settings upload panels and link grid. */
+
+/* sidebar store header (replaces the brand/logo block for this dashboard) */
+.ms-side-store { display: flex; align-items: center; gap: 11px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.ms-side-store-logo { width: 42px; height: 42px; border-radius: var(--r-md); display: grid; place-items: center; color: #fff; flex: none; }
+.ms-side-store-logo img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.ms-side-store-info b { display: block; font-family: var(--font-display); font-weight: 700; font-size: 14px; line-height: 1.25; }
+.ms-side-store-verified { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-display); font-weight: 600; font-size: 10.5px; color: var(--success); margin-top: 2px; }
+.ms-side-viewstore { margin: 10px 14px 16px; }
+
+/* stat card + "view details" link */
+.ms-stat-card { display: flex; flex-direction: column; }
+.ms-stat-link { font-size: 12px; margin-top: -6px; align-self: flex-start; }
+
+/* sales overview panel */
+.ms-period-tabs, .ms-view-tabs { display: flex; gap: 4px; background: var(--surface-2); border-radius: var(--r-pill); padding: 3px; }
+.ms-period-tabs button, .ms-view-tabs button { font-family: var(--font-display); font-weight: 600; font-size: 12px; padding: 6px 12px; border-radius: var(--r-pill); color: var(--text-muted); white-space: nowrap; }
+.ms-period-tabs button.on, .ms-view-tabs button.on { background: var(--primary); color: #fff; }
+.ms-sales-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin: 4px 0 14px; }
+.ms-sales-total { font-family: var(--font-display); font-weight: 700; font-size: 26px; }
+
+.ms-line-chart { width: 100%; }
+.ms-line-svg { width: 100%; height: 180px; display: block; }
+.ms-line-labels { display: flex; justify-content: space-between; margin-top: 6px; }
+.ms-line-labels span { font-family: var(--font-display); font-weight: 600; font-size: 11px; color: var(--text-faint); }
+
+/* top performing products */
+.ms-top-list { display: flex; flex-direction: column; }
+.ms-top-row { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--border); }
+.ms-top-row:first-child { border-top: none; }
+.ms-top-info { flex: 1; min-width: 0; }
+.ms-top-info b { display: block; font-family: var(--font-display); font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.adm-chip-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+
+/* storefront */
+.ms-store-url-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+
+/* store settings */
+.ms-appearance-row { display: flex; gap: 20px; flex-wrap: wrap; }
+.ms-appearance-card { display: flex; flex-direction: column; }
+.ms-avatar-upload { position: relative; width: 84px; height: 84px; border-radius: var(--r-lg); display: grid; place-items: center; color: #fff; margin-top: 8px; }
+.ms-cover-upload { position: relative; width: 100%; min-width: 220px; height: 84px; border-radius: var(--r-lg); background: var(--surface-2); border: 1.5px dashed var(--border); display: grid; place-items: center; color: var(--text-faint); margin-top: 8px; }
+.ms-upload-edit { position: absolute; bottom: -4px; right: -4px; width: 24px; height: 24px; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--border); display: grid; place-items: center; color: var(--text-muted); }
+.ms-links-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.ms-links-grid.three { grid-template-columns: repeat(3, 1fr); }
+
+@media (max-width: 1100px) {
+  .ms-links-grid { grid-template-columns: repeat(2, 1fr); }
+  .ms-links-grid.three { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .ms-links-grid, .ms-links-grid.three { grid-template-columns: 1fr; }
+  .ms-appearance-row { flex-direction: column; }
+}

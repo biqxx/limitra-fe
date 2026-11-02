@@ -32,7 +32,7 @@ export function BarChart({ data, labels, alt }) {
 
 }
 
-export function Donut({ segments }) {
+export function Donut({ segments, centerValue, centerLabel = 'visits' }) {
   const total = segments.reduce((s, x) => s + x.v, 0);
   if (total === 0) return <div className="chart-empty">No data yet</div>;
   let acc = 0;
@@ -40,7 +40,7 @@ export function Donut({ segments }) {
   return (
     <div className="donut-wrap">
       <div className="donut" style={{ background: `conic-gradient(${stops})` }}>
-        <div className="donut-c"><b>{(total / 1000).toFixed(1)}K</b><small>visits</small></div>
+        <div className="donut-c"><b>{centerValue ?? (total / 1000).toFixed(1) + 'K'}</b><small>{centerLabel}</small></div>
       </div>
       <div className="legend">
         {segments.map((s, i) => <div className="legend-row" key={i}><span className="legend-dot" style={{ background: s.c }} /><span>{s.label}</span><b>{s.v.toLocaleString()}</b><span className="legend-pct">{Math.round(s.v / total * 100)}%</span></div>)}
