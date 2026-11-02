@@ -187,7 +187,7 @@ export function CheckoutPage() {
   const [useCredit, setUseCreditState] = useState(false);
   useEffect(() => { try { setUseCreditState(localStorage.getItem('lim_use_credit') === '1'); } catch (e) {} }, []);
   const setUseCredit = (v) => { setUseCreditState(v); localStorage.setItem('lim_use_credit', v ? '1' : '0'); };
-  const primaryAddr = addresses.find(a => a.primary) || addresses[0];
+  const primaryAddr = addresses.find(a => a.is_default) || addresses[0];
   const primaryCard = cards.find(c => c.primary) || cards[0];
   const [selAddr, setSelAddr] = useState(primaryAddr ? primaryAddr.id : null);
   const [selCard, setSelCard] = useState(primaryCard ? primaryCard.id : null);
@@ -223,7 +223,7 @@ export function CheckoutPage() {
     );
   }
 
-  const addNewAddress = (d) => { const id = Date.now(); saveAddress({ ...d, id }); setSelAddr(id); setAddrModal(false); };
+  const addNewAddress = async (d) => { const created = await saveAddress(d); setSelAddr(created.id); setAddrModal(false); };
   const addNewCard = (d) => { const id = Date.now(); saveCard({ ...d, id }); setSelCard(id); setCardModal(false); };
 
   const validateShip = () => {
@@ -290,9 +290,9 @@ export function CheckoutPage() {
                       <input type="radio" name="addr" checked={selAddr === a.id} onChange={() => setSelAddr(a.id)} />
                       <span className="rc-radio" />
                       <div className="ap-body">
-                        <div className="row" style={{ gap: 8 }}><b>{a.label}</b>{a.primary && <span className="badge badge-soft" style={{ fontSize: 10 }}>Default</span>}</div>
-                        <p className="muted">{a.name} · {a.line}, {a.city}{a.state ? ', ' + a.state : ''}</p>
-                        <p className="muted" style={{ fontSize: 12.5 }}>{a.phone}</p>
+                        <div className="row" style={{ gap: 8 }}><b>{a.type === 'billing' ? 'Billing' : 'Delivery'} address</b>{a.is_default && <span className="badge badge-soft" style={{ fontSize: 10 }}>Default</span>}</div>
+                        <p className="muted">{[a.address_line_1, a.address_line_2].filter(Boolean).join(', ')}, {a.city}{a.state ? ', ' + a.state : ''}</p>
+                        {a.landmark && <p className="muted" style={{ fontSize: 12.5 }}>Near {a.landmark}</p>}
                       </div>
                       <button type="button" className="ap-edit" onClick={(e) => { e.preventDefault(); setSelAddr(a.id); setAddrModal('edit-' + a.id); }} title="Edit"><Icon name="edit" size={15} /></button>
                     </label>
@@ -374,7 +374,7 @@ export function CheckoutPage() {
               <h3 className="co-h">Review your order</h3>
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="location" size={16} /> Delivery to</span><button className="link-btn" onClick={() => setStep(0)}>Edit</button></div>
-                {activeAddr && <p><b>{activeAddr.name}</b> <span className="badge badge-soft" style={{ fontSize: 10 }}>{activeAddr.label}</span><br />{activeAddr.line}, {activeAddr.city}{activeAddr.state ? ', ' + activeAddr.state : ''}<br />{activeAddr.phone} · {email}</p>}
+                {activeAddr && <p><b>{activeAddr.type === 'billing' ? 'Billing address' : 'Delivery address'}</b><br />{[activeAddr.address_line_1, activeAddr.address_line_2].filter(Boolean).join(', ')}, {activeAddr.city}{activeAddr.state ? ', ' + activeAddr.state : ''}<br />{email}</p>}
                 <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>{methodLabel}</div>
               </div>
               <div className="review-block">
@@ -429,7 +429,7 @@ export function CheckoutPage() {
         <Modal title={typeof addrModal === 'string' && addrModal.startsWith('edit-') ? 'Edit address' : 'Add a new address'} sub="Where should we deliver your order?" onClose={() => setAddrModal(false)}>
           <AddressForm
             initial={typeof addrModal === 'string' && addrModal.startsWith('edit-') ? addresses.find(a => a.id === Number(addrModal.slice(5))) : null}
-            onSave={(d) => { if (d.id) { saveAddress(d); setSelAddr(d.id); setAddrModal(false); } else { addNewAddress(d); } }}
+            onSave={async (d) => { if (d.id) { await saveAddress(d); setSelAddr(d.id); setAddrModal(false); } else { await addNewAddress(d); } }}
             onCancel={() => setAddrModal(false)} />
         </Modal>
       )}

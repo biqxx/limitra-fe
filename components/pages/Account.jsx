@@ -164,32 +164,39 @@ function Orders() {
 }
 
 function Addresses() {
-  const { addresses, saveAddress, removeAddress, setPrimaryAddress } = useStore();
+  const { addresses, addressesLoading, saveAddress, removeAddress, setPrimaryAddress } = useStore();
   const [editing, setEditing] = useState(null); // address obj or 'new' or null
   const close = () => setEditing(null);
+  const addressLine = (a) => [a.address_line_1, a.address_line_2].filter(Boolean).join(', ');
   return (
     <>
       <div className="row between" style={{ marginBottom: 18 }}><h1 style={{ fontSize: 26 }}>Saved addresses</h1><button className="btn btn-primary btn-sm" onClick={() => setEditing('new')}><Icon name="plus" size={16} /> Add address</button></div>
-      <div className="addr-grid">
-        {addresses.map(a => (
-          <div key={a.id} className={'addr-card card' + (a.primary ? ' primary' : '')}>
-            <div className="row between">
-              <span className="addr-label"><Icon name="location" size={15} /> {a.label}</span>
-              {a.primary && <span className="badge badge-soft">Default</span>}
+      {addressesLoading ? (
+        <div className="muted" style={{ padding: '40px 0', textAlign: 'center' }}>Loading addresses…</div>
+      ) : addresses.length === 0 ? (
+        <EmptyState icon="location" title="No saved addresses" body="Add a delivery address to speed up checkout." action="Add address" onAction={() => setEditing('new')} />
+      ) : (
+        <div className="addr-grid">
+          {addresses.map(a => (
+            <div key={a.id} className={'addr-card card' + (a.is_default ? ' primary' : '')}>
+              <div className="row between">
+                <span className="addr-label"><Icon name="location" size={15} /> {a.type === 'billing' ? 'Billing' : 'Delivery'}</span>
+                {a.is_default && <span className="badge badge-soft">Default</span>}
+              </div>
+              <p><b>{addressLine(a)}</b><br />{a.city}{a.state ? ', ' + a.state : ''}{a.postal_code ? ' ' + a.postal_code : ''}{a.landmark && <><br /><span className="muted">Near {a.landmark}</span></>}</p>
+              <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setEditing(a)}><Icon name="edit" size={14} /> Edit</button>
+                {!a.is_default && <button className="btn btn-outline btn-sm" onClick={() => setPrimaryAddress(a.id)}>Set as default</button>}
+                {!a.is_default && <button className="btn btn-ghost btn-sm danger" onClick={() => removeAddress(a.id)}><Icon name="trash" size={14} /></button>}
+              </div>
             </div>
-            <p><b>{a.name}</b><br />{a.line}<br />{a.city}{a.state ? ', ' + a.state : ''}<br /><span className="muted">{a.phone}</span></p>
-            <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => setEditing(a)}><Icon name="edit" size={14} /> Edit</button>
-              {!a.primary && <button className="btn btn-outline btn-sm" onClick={() => setPrimaryAddress(a.id)}>Set as default</button>}
-              {!a.primary && <button className="btn btn-ghost btn-sm danger" onClick={() => removeAddress(a.id)}><Icon name="trash" size={14} /></button>}
-            </div>
-          </div>
-        ))}
-        <button className="addr-add" onClick={() => setEditing('new')}><Icon name="plus" size={26} /><span>Add new address</span></button>
-      </div>
+          ))}
+          <button className="addr-add" onClick={() => setEditing('new')}><Icon name="plus" size={26} /><span>Add new address</span></button>
+        </div>
+      )}
       {editing && (
         <Modal title={editing === 'new' ? 'Add a new address' : 'Edit address'} sub="Where should we deliver your orders?" onClose={close}>
-          <AddressForm initial={editing === 'new' ? null : editing} onSave={d => { saveAddress(d); close(); }} onCancel={close} />
+          <AddressForm initial={editing === 'new' ? null : editing} onSave={async d => { await saveAddress(d); close(); }} onCancel={close} />
         </Modal>
       )}
     </>
