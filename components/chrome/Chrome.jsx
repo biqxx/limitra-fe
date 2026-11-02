@@ -342,6 +342,7 @@ function MobileMenu({ open, onClose }) {
             )}
           <div className="mm-sec">Earn with Limitra</div>
           <a className="mm-link" onClick={() => nav('microstores')}><span className="row" style={{ gap: 12 }}><Icon name="store" size={18} />MicroStores <span className="nav-badge-new">New</span></span><Icon name="chevright" size={16} /></a>
+          <a className="mm-link" onClick={() => nav('celebrityStores')}><span className="row" style={{ gap: 12 }}><Icon name="star" size={18} />Celebrity Stores</span><Icon name="chevright" size={16} /></a>
           <a className="mm-link" onClick={() => nav('affiliate')}><span className="row" style={{ gap: 12 }}><Icon name="share" size={18} />Become an Affiliate</span><Icon name="chevright" size={16} /></a>
           <div className="mm-sec">Account</div>
           <a className="mm-link" onClick={() => nav('account')}><span className="row" style={{ gap: 12 }}><Icon name="user" size={18} />My account</span><Icon name="chevright" size={16} /></a>
@@ -379,6 +380,8 @@ export function Header() {
           <span className="row" style={{ gap: 8 }}><Icon name="truck" size={15} /> Free Delivery <b>Nationwide</b></span>
           <div className="row" style={{ gap: 20 }}>
             <a onClick={() => go('affiliate')} style={{ cursor: 'pointer' }}>Become an Affiliate</a>
+            <a onClick={() => go('microstores')} style={{ cursor: 'pointer' }}>MicroStores</a>
+            <a onClick={() => go('celebrityStores')} style={{ cursor: 'pointer' }}>Celebrity Stores</a>
             <a onClick={() => go('help')} style={{ cursor: 'pointer' }}>Help Center</a>
             <a onClick={() => go('orders')} style={{ cursor: 'pointer' }}>Track Order</a>
             <ThemeToggle />
@@ -437,6 +440,7 @@ export function Header() {
           <span style={{ flex: 1 }} />
           <a className="nav-link deals" onClick={() => go('shop', 'deals')}><Icon name="flame" size={15} fill="currentColor" /> Deals</a>
           <a className={'nav-link' + (route.name === 'microstores' ? ' active' : '')} onClick={() => go('microstores')}><Icon name="store" size={16} /> MicroStores <span className="nav-badge-new">New</span></a>
+          <a className={'nav-link nav-collapsible' + (route.name === 'celebrityStores' ? ' active' : '')} onClick={() => go('celebrityStores')}>Celebrity Stores</a>
           <a className={'nav-link nav-collapsible' + (route.name === 'affiliate' ? ' active' : '')} onClick={() => go('affiliate')}>Affiliate</a>
           <a className="nav-link" onClick={() => go('videos')}><Icon name="video" size={16} /> Videos</a>
           <a className="nav-link soft" onClick={() => go('help')}><Icon name="headset" size={16} /> Support</a>
@@ -484,7 +488,7 @@ export function Footer() {
   ['Shop', [['Phones & Tablets', () => go('shop', 'phones')], ['Computers & Accessories', () => go('shop', 'computing')], ['Electronics', () => go('shop', 'electronics')], ['Women’s Fashion', () => go('shop', 'womens')], ['All deals', () => go('shop', 'deals')]]],
   ['Account', [['My account', () => go('account')], ['Orders', () => go('orders')], ['Wishlist', () => go('wishlist')], ['Track order', () => go('orders')], ['Sign in', () => go('auth', 'signin')]]],
   ['Support', [['Help center', () => go('help')], ['About us', () => go('about')], ['Videos', () => go('videos')], ['Channels', () => go('channels')], ['Contact us', () => go('help', 'contact')]]],
-  ['Earn from Limitra', [['Limitra MicroStores', () => go('microstores')], ['Become an Affiliate', () => go('affiliate')], ['Affiliate dashboard', () => router.push('/affiliate/dashboard')], ['Careers', () => go('careers')]]]];
+  ['Earn from Limitra', [['Limitra MicroStores', () => go('microstores')], ['Limitra Celebrity Stores', () => go('celebrityStores')], ['Become an Affiliate', () => go('affiliate')], ['Affiliate dashboard', () => router.push('/affiliate/dashboard')], ['Careers', () => go('careers')]]]];
 
   return (
     <footer className="site-foot">
