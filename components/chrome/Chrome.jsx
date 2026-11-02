@@ -518,13 +518,15 @@ Fast nationwide delivery.</p>
             )}
           </div>
         </div>
-        {cols.map(([t, links]) =>
-        <div key={t} className="foot-col">
-            <h5>{t}</h5>
-            {links.map(([lb, fn]) => <a key={lb} onClick={fn}>{lb}</a>)}
-          </div>
-        )}
-        <div className="foot-col">
+        <div className="foot-cols-grid">
+          {cols.map(([t, links]) =>
+          <div key={t} className="foot-col">
+              <h5>{t}</h5>
+              {links.map(([lb, fn]) => <a key={lb} onClick={fn}>{lb}</a>)}
+            </div>
+          )}
+        </div>
+        <div className="foot-col foot-col-contact">
           <h5>Stay connected</h5>
           <span className="row" style={{ gap: 8, color: 'var(--text-muted)' }}><Icon name="mail" size={16} /> support@limitra.com.ng</span>
           <span className="row" style={{ gap: 8, color: 'var(--text-muted)', margin: '10px 0' }}><Icon name="phone" size={16} /> +234 700 LIMITRA</span>
@@ -534,6 +536,23 @@ Fast nationwide delivery.</p>
             <span className="pay txt">Mastercard</span>
             <span className="pay txt">Bank Transfer</span>
           </div>
+        </div>
+        {/* mobile-only — the mockup shows social icons + a plain contact block
+            (no payment icons) below the link grid instead of inside the brand
+            block, which is hidden entirely on mobile. Duplicated rather than
+            reordered via flex/grid `order`, since the social icons are nested
+            inside .foot-brand on desktop and can't be pulled out of a hidden
+            parent with CSS alone. */}
+        <div className="foot-social foot-social-mobile">
+          {SOCIALS.map(([label, href, path]) => <a key={label} href={href} target="_blank" rel="noopener noreferrer" aria-label={label} title={label} className={'soc soc-' + label.toLowerCase()}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={path} /></svg>
+            </a>
+          )}
+        </div>
+        <div className="foot-col-contact-mobile">
+          <h5>Stay connected</h5>
+          <span className="row" style={{ gap: 8, color: 'var(--text-muted)' }}><Icon name="mail" size={16} /> support@limitra.com.ng</span>
+          <span className="row" style={{ gap: 8, color: 'var(--text-muted)', marginTop: 10 }}><Icon name="phone" size={16} /> +234 700 LIMITRA</span>
         </div>
       </div>
       <div className="foot-bottom wrap">
