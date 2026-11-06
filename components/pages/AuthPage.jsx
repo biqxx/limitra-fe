@@ -36,19 +36,43 @@ const SOCIAL_KEYS = ['WhatsApp', 'Facebook', 'Instagram', 'X'];
 function OtpInput({ onChange }) {
   const [vals, setVals] = useState(['', '', '', '', '', '']);
   const refs = useRef([]);
-  const set = (i, v) => {
-    v = v.replace(/\D/g, '').slice(-1);
+  // Distributes `digits` across the boxes starting at `from`, focuses the
+  // next empty one (or the last box once full) and reports the joined code.
+  const fill = (from, digits) => {
     const n = [...vals];
-    n[i] = v;
+    let idx = from;
+    for (const ch of digits) {
+      if (idx > 5) break;
+      n[idx] = ch;
+      idx++;
+    }
     setVals(n);
-    if (v && i < 5) refs.current[i + 1]?.focus();
+    onChange?.(n.join(''));
+    refs.current[Math.min(idx, 5)]?.focus();
+  };
+  const set = (i, v) => {
+    const digits = v.replace(/\D/g, '');
+    if (digits.length > 1) { fill(i, digits); return; } // autofill can land more than one char at once
+    const n = [...vals];
+    n[i] = digits;
+    setVals(n);
+    if (digits && i < 5) refs.current[i + 1]?.focus();
     onChange?.(n.join(''));
   };
   const key = (i, e) => {if (e.key === 'Backspace' && !vals[i] && i > 0) refs.current[i - 1]?.focus();};
+  // maxLength=1 below makes the browser truncate a pasted code down to a
+  // single character before React ever sees it — pulling the full clipboard
+  // text here instead is what actually lets pasting a 6-digit code work.
+  const paste = (i, e) => {
+    const digits = (e.clipboardData?.getData('text') || '').replace(/\D/g, '');
+    if (!digits) return;
+    e.preventDefault();
+    fill(i, digits);
+  };
   return (
     <div className="otp-row">
       {vals.map((v, i) =>
-      <input key={i} ref={(el) => refs.current[i] = el} className={'otp-box' + (v ? ' filled' : '')} inputMode="numeric" maxLength={1} value={v} onChange={(e) => set(i, e.target.value)} onKeyDown={(e) => key(i, e)} autoFocus={i === 0} />
+      <input key={i} ref={(el) => refs.current[i] = el} className={'otp-box' + (v ? ' filled' : '')} inputMode="numeric" maxLength={1} value={v} onChange={(e) => set(i, e.target.value)} onKeyDown={(e) => key(i, e)} onPaste={(e) => paste(i, e)} autoFocus={i === 0} />
       )}
     </div>);
 
