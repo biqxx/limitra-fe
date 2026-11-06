@@ -109,7 +109,7 @@ export function AuthPage({ mode = 'signin' }) {
     e.preventDefault();
     const er = {};
     if (m === 'signup' && !f.name.trim()) er.name = 'Enter your name';
-    if (m !== 'otp') {
+    if (m !== 'otp' && m !== 'reset') {
       const v = f.id.trim();
       if (idm === 'email') {if (!/^\S+@\S+\.\S+$/.test(v)) er.id = 'Enter a valid email';} else
       if (idm === 'WhatsApp') {if (v.replace(/\D/g, '').length < 10) er.id = 'Enter a valid WhatsApp number';} else
@@ -118,13 +118,12 @@ export function AuthPage({ mode = 'signin' }) {
     // password only applies to the email method
     if (!isSocial && (m === 'signin' || m === 'signup') && f.pass.length < 6) er.pass = 'At least 6 characters';
     if (!isSocial && m === 'signup' && f.confirm !== f.pass) er.confirm = 'Passwords don’t match';
-    if (m === 'otp') {
-      if (otp.length < 6) er.otp = 'Enter the 6-digit code';
-      // the forgot-password OTP screen doubles as the new-password step
-      if (otpFrom === 'forgot') {
-        if (f.pass.length < 6) er.pass = 'At least 6 characters';
-        if (f.confirm !== f.pass) er.confirm = 'Passwords don’t match';
-      }
+    if (m === 'otp' && otp.length < 6) er.otp = 'Enter the 6-digit code';
+    // reset is its own screen now (see m === 'otp' && otpFrom === 'forgot' below,
+    // which just moves on to here rather than submitting anything itself)
+    if (m === 'reset') {
+      if (f.pass.length < 6) er.pass = 'At least 6 characters';
+      if (f.confirm !== f.pass) er.confirm = 'Passwords don’t match';
     }
     setErrs(er);
     setFormError('');
@@ -182,25 +181,54 @@ export function AuthPage({ mode = 'signin' }) {
       return;
     }
 
-    if (m === 'otp' && (otpFrom === 'signup' || otpFrom === 'forgot')) {
+    if (m === 'otp' && otpFrom === 'forgot') {
+      // Nothing to call yet — the backend only verifies the code together
+      // with the new password (authApi.resetPassword takes otp+password in
+      // one request), so this step just moves on to the password screen and
+      // holds onto the code until that final submit.
+      setLoading(false);
+      setM('reset');
+      return;
+    }
+
+    if (m === 'otp' && otpFrom === 'signup') {
       try {
-        if (otpFrom === 'forgot') {
-          await authApi.resetPassword({ email: pendingEmail, otp, password: f.pass });
-          setLoading(false);
-          toast('Password reset — sign in with your new password');
-          setF((s) => ({ ...s, pass: '', confirm: '' }));
-          setM('signin');
-        } else {
-          await authApi.verifyEmail({ email: pendingEmail, otp });
-          const verified = await refreshUser();
-          setLoading(false);
-          toast('Verified!');
-          try { window.dispatchEvent(new Event('lim:signup')); } catch (e) {}
-          go(verified?.role === 'admin' ? 'admin' : 'account');
-        }
+        await authApi.verifyEmail({ email: pendingEmail, otp });
+        const verified = await refreshUser();
+        setLoading(false);
+        toast('Verified!');
+        try { window.dispatchEvent(new Event('lim:signup')); } catch (e) {}
+        go(verified?.role === 'admin' ? 'admin' : 'account');
       } catch (err) {
         setLoading(false);
-        applyErrors(err, { otp: 'otp', pass: 'password' });
+        applyErrors(err, { otp: 'otp' });
+      }
+      return;
+    }
+
+    if (m === 'reset') {
+      try {
+        // password_confirmation isn't in the documented request schema, but
+        // the live backend's `confirmed` validation rule requires it anyway
+        // (confirmed live: omitting it fails with "password field
+        // confirmation does not match" even when the two fields match).
+        await authApi.resetPassword({ email: pendingEmail, otp, password: f.pass, password_confirmation: f.confirm });
+        setLoading(false);
+        toast('Password reset — sign in with your new password');
+        setF((s) => ({ ...s, pass: '', confirm: '' }));
+        setM('signin');
+      } catch (err) {
+        setLoading(false);
+        const fe = err instanceof ApiError && err.status === 422 ? fieldErrorsFrom(err) : {};
+        if (fe.otp) {
+          // the code itself was rejected (wrong/expired) — that's only
+          // fixable back on the code screen, not here
+          setM('otp');
+          setErrs({ otp: fe.otp });
+          setFormError('');
+        } else {
+          applyErrors(err, { pass: 'password' });
+        }
       }
       return;
     }
@@ -227,7 +255,8 @@ export function AuthPage({ mode = 'signin' }) {
     signin: ['Welcome back', 'Sign in to continue to your Limitra account.'],
     signup: ['Create your account', 'Join Limitra for verified tech and exclusive deals.'],
     forgot: ['Reset password', 'Enter your email and we’ll send you a 6-digit code.'],
-    otp: ['Verify it’s you', `We sent a 6-digit code to ${otpDest}.`]
+    otp: ['Verify it’s you', `We sent a 6-digit code to ${otpDest}.`],
+    reset: ['Set a new password', 'Choose a new password for your account.']
   };
 
   const submitLabel = isSocial ?
@@ -287,18 +316,24 @@ export function AuthPage({ mode = 'signin' }) {
               <FormAlert>{formError}</FormAlert>
               <OtpInput onChange={setOtp} />
               {errs.otp && <span className="err-msg">{errs.otp}</span>}
-              {otpFrom === 'forgot' &&
-              <div style={{ marginTop: 18, display: 'grid', gap: 14 }}>
-                  <AuthField label="New password" type={show ? 'text' : 'password'} icon="lock" value={f.pass} onChange={(v) => setF((s) => ({ ...s, pass: v }))} err={errs.pass} placeholder="••••••••" right={show ? 'Hide' : 'Show'} onRight={() => setShow((s) => !s)} />
-                  <AuthField label="Confirm new password" type={show ? 'text' : 'password'} icon="lock" value={f.confirm} onChange={(v) => setF((s) => ({ ...s, confirm: v }))} err={errs.confirm} placeholder="••••••••" />
-                </div>
-              }
               <button className="btn btn-primary btn-block btn-lg" type="submit" disabled={loading} style={{ marginTop: 22 }}>
-                {loading ? <span className="auth-spin" /> : 'Verify & continue'}
+                {loading ? <span className="auth-spin" /> : (otpFrom === 'forgot' ? 'Continue' : 'Verify & continue')}
               </button>
               <p className="muted" style={{ textAlign: 'center', marginTop: 16, fontSize: 13.5 }}>
                 Didn’t get the code? {resend > 0 ? <span>Resend in {resend}s</span> : <a className="link-btn" onClick={resendCode}>Resend code</a>}
               </p>
+            </form> :
+
+          m === 'reset' ?
+          <form onSubmit={submit}>
+              <FormAlert>{formError}</FormAlert>
+              <div style={{ display: 'grid', gap: 14 }}>
+                <AuthField label="New password" type={show ? 'text' : 'password'} icon="lock" value={f.pass} onChange={(v) => setF((s) => ({ ...s, pass: v }))} err={errs.pass} placeholder="••••••••" right={show ? 'Hide' : 'Show'} onRight={() => setShow((s) => !s)} />
+                <AuthField label="Confirm new password" type={show ? 'text' : 'password'} icon="lock" value={f.confirm} onChange={(v) => setF((s) => ({ ...s, confirm: v }))} err={errs.confirm} placeholder="••••••••" />
+              </div>
+              <button className="btn btn-primary btn-block btn-lg" type="submit" disabled={loading} style={{ marginTop: 22 }}>
+                {loading ? <span className="auth-spin" /> : 'Reset password'}
+              </button>
             </form> :
 
           <form onSubmit={submit} className="auth-form">
@@ -344,7 +379,8 @@ export function AuthPage({ mode = 'signin' }) {
           <p className="auth-switch">
             {m === 'signin' && <>New to Limitra? <a className="link-btn" onClick={() => setM('signup')}>Create an account</a></>}
             {m === 'signup' && <>Already have an account? <a className="link-btn" onClick={() => setM('signin')}>Sign in</a></>}
-            {(m === 'forgot' || m === 'otp') && <><a className="link-btn" onClick={() => setM('signin')}>← Back to sign in</a></>}
+            {(m === 'forgot' || m === 'otp') && <><a className="link-btn" onClick={() => { setM('signin'); setErrs({}); setFormError(''); }}>← Back to sign in</a></>}
+            {m === 'reset' && <><a className="link-btn" onClick={() => { setM('otp'); setErrs({}); setFormError(''); }}>← Re-enter code</a></>}
           </p>
 
           {m === 'signup' && <p className="auth-terms">By creating an account you agree to Limitra’s <a>Terms</a> and <a>Privacy Policy</a>.</p>}
