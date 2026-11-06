@@ -55,7 +55,7 @@ function OtpInput({ onChange }) {
 }
 
 export function AuthPage({ mode = 'signin' }) {
-  const { go, toast, refreshUser } = useStore();
+  const { go, toast, refreshUser, user, isAuthenticated, authLoading } = useStore();
   const [m, setM] = useState(mode);
   const [otpFrom, setOtpFrom] = useState('signup');
   const [idm, setIdm] = useState('email'); // identifier method
@@ -67,6 +67,16 @@ export function AuthPage({ mode = 'signin' }) {
   const [resend, setResend] = useState(28);
   const [otp, setOtp] = useState('');
   const [pendingEmail, setPendingEmail] = useState('');
+
+  // Already signed in (e.g. a stale bookmark or the back button landed here
+  // with a valid session already in place) — there's nothing to do on any
+  // auth screen in that case, send them on to where signing in normally
+  // goes. Waits for authLoading to resolve first so a real signed-out visitor
+  // doesn't get stuck on a blank screen during the brief session check.
+  useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
+    go(user?.role === 'admin' ? 'admin' : 'account');
+  }, [authLoading, isAuthenticated, user, go]);
 
   useEffect(() => {setM(mode);setErrs({});setFormError('');setIdm('email');}, [mode]);
   useEffect(() => {if (m === 'signup' || m === 'forgot') setIdm('email');}, [m]);
@@ -223,6 +233,8 @@ export function AuthPage({ mode = 'signin' }) {
   const submitLabel = isSocial ?
   <>Continue with {idm} <Icon name="arrowr" size={17} /></> :
   m === 'signin' ? 'Sign in' : m === 'signup' ? 'Create account' : 'Send code';
+
+  if (!authLoading && isAuthenticated) return null; // redirecting away, see effect above
 
   return (
     <div className="auth-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) go('home'); }}>
