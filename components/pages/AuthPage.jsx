@@ -55,7 +55,7 @@ function OtpInput({ onChange }) {
 }
 
 export function AuthPage({ mode = 'signin' }) {
-  const { go, toast, refreshUser } = useStore();
+  const { go, toast, refreshUser, mergeLocalCart } = useStore();
   const [m, setM] = useState(mode);
   const [otpFrom, setOtpFrom] = useState('signup');
   const [idm, setIdm] = useState('email'); // identifier method
@@ -126,6 +126,7 @@ export function AuthPage({ mode = 'signin' }) {
       try {
         await authApi.login({ email: f.id.trim(), password: f.pass });
         const signedIn = await refreshUser();
+        await mergeLocalCart();
         setLoading(false);
         toast('Welcome back!');
         go(signedIn?.role === 'admin' ? 'admin' : 'account');
@@ -183,6 +184,7 @@ export function AuthPage({ mode = 'signin' }) {
         } else {
           await authApi.verifyEmail({ email: pendingEmail, otp });
           const verified = await refreshUser();
+          await mergeLocalCart();
           setLoading(false);
           toast('Verified!');
           try { window.dispatchEvent(new Event('lim:signup')); } catch (e) {}

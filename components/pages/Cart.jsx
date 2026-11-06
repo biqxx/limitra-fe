@@ -22,9 +22,11 @@ export function OrderSummary({ items, promo, ship, children, cta, onCta, ctaIcon
   const sub = items.reduce((s, it) => s + unitPriceOf(it, byId(it.id)) * it.qty, 0);
   const disc = promo ? Math.round(sub * promo.pct) : 0;
   const shipping = ship == null ? 0 : ship;
-  const beforeCredit = Math.max(0, sub - disc) + shipping;
-  const credit = useCredit ? Math.min(walletBalance, beforeCredit) : 0;
-  const total = beforeCredit - credit;
+  // Lim Cash only ever offsets the merchandise total, never delivery — shipping
+  // is added back in after credit, not before, so credit can't cover it.
+  const payable = Math.max(0, sub - disc);
+  const credit = useCredit ? Math.min(walletBalance, payable) : 0;
+  const total = payable - credit + shipping;
   return (
     <aside className="summary card">
       <h3>Order summary</h3>
@@ -163,7 +165,7 @@ export function CartPage() {
 }
 
 /* ---------------- CHECKOUT ---------------- */
-const STEPS = [['Shipping', 'location'], ['Payment', 'card'], ['Review', 'check']];
+const STEPS = [['Contact', 'location'], ['Payment', 'card'], ['Review', 'check']];
 
 function Stepper({ step }) {
   return (
@@ -462,9 +464,9 @@ export function CheckoutPage() {
               </div>
               {(() => {
                 const disc = promo ? Math.round(cartTotal * promo.pct) : 0;
-                const beforeCredit = Math.max(0, cartTotal - disc) + shipFee;
-                const credit = useCredit ? Math.min(walletBalance, beforeCredit) : 0;
-                const total = beforeCredit - credit;
+                const payable = Math.max(0, cartTotal - disc);
+                const credit = useCredit ? Math.min(walletBalance, payable) : 0;
+                const total = payable - credit + shipFee;
                 return (
                   <div className="review-block review-totals">
                     <div className="rb-head"><span><Icon name="dollar" size={16} /> Order total</span></div>
@@ -483,7 +485,7 @@ export function CheckoutPage() {
           <div className="co-nav">
             <button className="btn btn-ghost" onClick={() => step === 0 ? go('cart') : setStep(s => s - 1)}><Icon name="chevleft" size={16} /> {step === 0 ? 'Back to cart' : 'Back'}</button>
             {step < 2
-              ? <button className="btn btn-primary btn-lg" onClick={next}>Continue <Icon name="arrowr" size={17} /></button>
+              ? <button className="btn btn-primary btn-lg" disabled={step === 0 && !activeAddr} onClick={next}>Continue <Icon name="arrowr" size={17} /></button>
               : <button className="btn btn-accent btn-lg" disabled={placing} onClick={placeOrder}><Icon name="lock" size={17} /> {placing ? 'Placing order…' : 'Place order'}</button>}
           </div>
         </div>

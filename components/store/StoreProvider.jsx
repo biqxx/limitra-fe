@@ -21,6 +21,13 @@ const CAT_TINTS = [
   ['rgba(201,137,10,.12)', 'rgba(201,137,10,.04)'],
 ];
 
+// The real cart resource's items array isn't documented in the OpenAPI spec
+// (seen live under both `items` and `cart_items`) — this picks whichever key
+// a given cart object actually has, consistently, for both reading and the
+// optimistic local mutations below.
+const cartItemsKeyOf = (rc) => (rc?.cart_items && !rc?.items ? 'cart_items' : 'items');
+const favProductId = (f) => f.product_id ?? f.product?.id;
+
 const StoreCtx = createContext(null);
 export const useStore = () => useContext(StoreCtx);
 
@@ -406,6 +413,11 @@ export function StoreProvider({ children }) {
      already accounts for any per-variant price override) is snapshotted onto the
      guest-cart line so a later price change doesn't retroactively reprice
      something already sitting in someone's cart — see unitPriceOf() in lib/data.js. */
+  // Optimistic: every mutation below updates `remoteCart` locally first (so
+  // the UI reacts instantly instead of waiting out the real API's 1-2s round
+  // trip), fires the real request in the background, then always re-fetches
+  // to reconcile — swapping any temporary id for the real one on success, or
+  // dropping the optimistic change and surfacing an error on failure.
   const addToCart = useCallback(async (product, opts = {}, qty = 1) => {
     const variants = opts.variants || {};
     const unitPrice = opts.unitPrice ?? product.price;
@@ -420,12 +432,22 @@ export function StoreProvider({ children }) {
       toast(`Added to cart · ${product.name.split(',')[0]}`);
       return;
     }
+    setRemoteCart(rc => {
+      const itemsKey = cartItemsKeyOf(rc);
+      const items = rc?.[itemsKey] || [];
+      const existing = items.find(it => it.product_id === product.id);
+      const nextItems = existing
+        ? items.map(it => it.product_id === product.id ? { ...it, quantity: (it.quantity || 0) + qty } : it)
+        : [...items, { id: `temp-${product.id}-${Date.now()}`, product_id: product.id, quantity: qty }];
+      return { ...(rc || {}), [itemsKey]: nextItems };
+    });
+    toast(`Added to cart · ${product.name.split(',')[0]}`);
     try {
       await cartApi.addToActive({ product_id: product.id, quantity: qty });
-      await refreshRemoteCart();
-      toast(`Added to cart · ${product.name.split(',')[0]}`);
     } catch (e) {
       toast(messageFrom(e), 'error');
+    } finally {
+      await refreshRemoteCart();
     }
   }, [isAuthenticated, toast, refreshRemoteCart]);
 
@@ -434,22 +456,34 @@ export function StoreProvider({ children }) {
       setLocalCart(c => qty <= 0 ? c.filter(i => i.key !== key) : c.map(i => i.key === key ? { ...i, qty } : i));
       return;
     }
+    setRemoteCart(rc => {
+      const itemsKey = cartItemsKeyOf(rc);
+      const items = rc?.[itemsKey] || [];
+      const nextItems = qty <= 0 ? items.filter(it => it.id !== key) : items.map(it => it.id === key ? { ...it, quantity: qty } : it);
+      return { ...(rc || {}), [itemsKey]: nextItems };
+    });
     try {
       if (qty <= 0) await cartApi.removeItem(remoteCart?.id, key);
       else await cartItemsApi.updateQty(key, qty);
-      await refreshRemoteCart();
     } catch (e) {
       toast(messageFrom(e), 'error');
+    } finally {
+      await refreshRemoteCart();
     }
   }, [isAuthenticated, remoteCart, refreshRemoteCart, toast]);
 
   const removeItem = useCallback(async (key) => {
     if (!isAuthenticated) { setLocalCart(c => c.filter(i => i.key !== key)); return; }
+    setRemoteCart(rc => {
+      const itemsKey = cartItemsKeyOf(rc);
+      return { ...(rc || {}), [itemsKey]: (rc?.[itemsKey] || []).filter(it => it.id !== key) };
+    });
     try {
       await cartApi.removeItem(remoteCart?.id, key);
-      await refreshRemoteCart();
     } catch (e) {
       toast(messageFrom(e), 'error');
+    } finally {
+      await refreshRemoteCart();
     }
   }, [isAuthenticated, remoteCart, refreshRemoteCart, toast]);
 
@@ -458,6 +492,30 @@ export function StoreProvider({ children }) {
     try { if (remoteCart?.id) await cartApi.clear(remoteCart.id); } catch (e) { /* order creation may already have closed this cart */ }
     await refreshRemoteCart();
   }, [isAuthenticated, remoteCart, refreshRemoteCart]);
+
+  /* Carries a guest's local cart over into their real account cart right
+     after they sign in — otherwise the backend cart (the one checkout
+     actually reads) starts empty and whatever they added before signing in
+     just vanishes. There's no documented anonymous-cart-session mechanism
+     this app participates in (POST /cart/merge expects an
+     `anonymous_cart_token` this app never obtains), so this replays each
+     local line into the real cart via the same addToActive() call used
+     everywhere else instead. Left for the caller to invoke right after a
+     successful sign-in/signup-verify, not on every session restore — a
+     plain page refresh of an already-signed-in session has no guest cart to
+     merge. Leaves localCart untouched on failure so nothing is lost. */
+  const mergeLocalCart = useCallback(async () => {
+    if (localCart.length === 0) return;
+    try {
+      for (const it of localCart) {
+        await cartApi.addToActive({ product_id: it.id, quantity: it.qty });
+      }
+      setLocalCart([]);
+      await refreshRemoteCart();
+    } catch (e) {
+      toast('Some items from your cart couldn’t be saved to your account', 'error');
+    }
+  }, [localCart, refreshRemoteCart, toast]);
 
   /* wishlist — same guest-local / signed-in-real split as cart above.
      favoritesApi.remove takes the favorite record's own id, not the product id,
@@ -471,19 +529,27 @@ export function StoreProvider({ children }) {
       });
       return;
     }
-    const existing = favorites.find(f => f.product_id === id);
-    try {
-      if (existing) {
+    const existing = favorites.find(f => favProductId(f) === id);
+    if (existing) {
+      setFavorites(fs => fs.filter(f => f.id !== existing.id));
+      toast('Removed from wishlist');
+      try {
         await favoritesApi.remove(existing.id);
-        setFavorites(fs => fs.filter(f => f.id !== existing.id));
-        toast('Removed from wishlist');
-      } else {
-        const created = await favoritesApi.add(id);
-        setFavorites(fs => [...fs, created && created.id ? created : { id: Date.now(), product_id: id }]);
-        toast('Saved to wishlist');
+      } catch (e) {
+        setFavorites(fs => [...fs, existing]); // revert
+        toast(messageFrom(e), 'error');
       }
-    } catch (e) {
-      toast(messageFrom(e), 'error');
+    } else {
+      const tempId = `temp-${id}-${Date.now()}`;
+      setFavorites(fs => [...fs, { id: tempId, product_id: id }]);
+      toast('Saved to wishlist');
+      try {
+        const created = await favoritesApi.add(id);
+        if (created?.id) setFavorites(fs => fs.map(f => f.id === tempId ? created : f));
+      } catch (e) {
+        setFavorites(fs => fs.filter(f => f.id !== tempId)); // revert
+        toast(messageFrom(e), 'error');
+      }
     }
   }, [isAuthenticated, favorites, toast]);
 
@@ -515,7 +581,7 @@ export function StoreProvider({ children }) {
   /* remote cart item shape is undocumented in the API spec — checked defensively
      against a couple of plausible field names, and needs live verification once
      /products (and therefore real cart items) actually exist. */
-  const remoteCartItems = remoteCart?.items || remoteCart?.cart_items || [];
+  const remoteCartItems = remoteCart?.[cartItemsKeyOf(remoteCart)] || [];
   const cart = isAuthenticated
     ? remoteCartItems.map(it => ({ key: it.id, id: it.product_id, qty: it.quantity, variants: {} }))
     : localCart;
@@ -523,7 +589,7 @@ export function StoreProvider({ children }) {
   // (the real backend has no guest cart, so there's nothing to quote against
   // until checkout itself requires sign-in).
   const cartId = remoteCart?.id ?? null;
-  const wish = isAuthenticated ? favorites.map(f => f.product_id) : localWish;
+  const wish = isAuthenticated ? favorites.map(favProductId) : localWish;
 
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const cartTotal = isAuthenticated
@@ -534,7 +600,7 @@ export function StoreProvider({ children }) {
     theme, toggleTheme, route, go,
     user, isAuthenticated, authLoading, logout, refreshUser,
     catalogLoading, catalogVersion, loadCatalog,
-    cart, addToCart, setQty, removeItem, clearCart, cartCount, cartTotal, cartId,
+    cart, addToCart, setQty, removeItem, clearCart, mergeLocalCart, cartCount, cartTotal, cartId,
     wish, toggleWish,
     addresses, addressesLoading, loadAddresses, saveAddress, removeAddress, setPrimaryAddress,
     cards, saveCard, removeCard, setPrimaryCard,
