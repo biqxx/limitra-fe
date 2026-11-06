@@ -220,9 +220,9 @@
   .hero-eyebrow { margin-bottom: 0; }
   .hero-sub { display: none; }
   .hero-inline-trust { display: none; }
-  .hero-cta { margin-top: 4px; justify-content: center; flex-wrap: nowrap; gap: 8px; }
-  .hero-cta .btn { flex: 0 1 auto; min-width: 0; max-width: none; justify-content: center; padding: 9px 16px; font-size: 12px; white-space: nowrap; }
-  .hero-cta .btn svg { width: 14px; height: 14px; }
+  .hero-copy .hero-cta { margin-top: 4px; justify-content: center; flex-wrap: nowrap; gap: 8px; }
+  .hero-copy .hero-cta .btn { flex: 0 1 auto; min-width: 0; max-width: none; justify-content: center; padding: 9px 16px; font-size: 12px; white-space: nowrap; }
+  .hero-copy .hero-cta .btn svg { width: 14px; height: 14px; }
   .hero-arrow.edge { display: none; }
   .hero-scrim { background: linear-gradient(180deg, rgba(4,16,52,.55) 0%, rgba(5,22,74,.8) 100%); }
   .hero-offer { display: none; }
@@ -254,11 +254,11 @@
   .promo-card { padding: 26px; }
   .promo-card h3 { font-size: 24px; }
   .promo-ph { width: 100px; height: 100px; }
-  .why-card { display: grid; grid-template-columns: auto 1fr; column-gap: 14px; row-gap: 7px; align-items: center; padding: 16px; }
+  .why-card { display: grid; grid-template-columns: auto 1fr; column-gap: 14px; row-gap: 7px; align-items: center; padding: 16px; min-width: 0; }
   .why-card > .why-ic { grid-column: 1; grid-row: 1; }
   .why-card > div { display: contents; }
-  .why-card > div > b { grid-column: 2; grid-row: 1; margin-bottom: 0; }
-  .why-card > div > p { grid-column: 1 / -1; grid-row: 2; }
+  .why-card > div > b { grid-column: 2; grid-row: 1; margin-bottom: 0; min-width: 0; }
+  .why-card > div > p { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
 }
 
 /* promote modal (homepage affiliate picks) */

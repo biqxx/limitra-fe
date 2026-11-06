@@ -6,7 +6,8 @@
 .about-hero .hero-cta { justify-content: center; }
 
 .about-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: -36px 0 48px; position: relative; z-index: 2; }
-.about-stat { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 20px; box-shadow: var(--shadow-sm); }
+.about-stat { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 20px; box-shadow: var(--shadow-sm); min-width: 0; }
+.about-stat > div { min-width: 0; }
 .about-stat-ic { width: 46px; height: 46px; border-radius: var(--r-md); background: var(--primary-soft); color: var(--primary); display: grid; place-items: center; flex: none; }
 .about-stat b { font-family: var(--font-display); font-weight: 700; font-size: 24px; display: block; line-height: 1.1; }
 .about-stat small { font-size: 12.5px; }

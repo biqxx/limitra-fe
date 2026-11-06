@@ -92,9 +92,9 @@ function HeroSlide({ slide, showChips, showStats }) {
       <img className="hero-bg" src={slide.img} alt={slide.title.join(' ')} style={slide.pos ? { objectPosition: slide.pos } : null} />
       <span className="hero-scrim" />
       <div className="hero-overlay">
-        <div className="hero-copy" style={{ width: "560px" }}>
+        <div className="hero-copy" style={{ width: "560px", maxWidth: "100%" }}>
           {slide.eyebrow && <span className="hero-eyebrow">{slide.eyebrow}</span>}
-          <h1 style={{ width: "600px" }}>{slide.title[0]}<br /><span className="hl">{slide.title[1]}</span>{slide.title[2]}</h1>
+          <h1 style={{ width: "600px", maxWidth: "100%" }}>{slide.title[0]}<br /><span className="hl">{slide.title[1]}</span>{slide.title[2]}</h1>
           <p className="hero-sub">{slide.body}</p>
           {showStats &&
           <div className="hero-inline-trust">
