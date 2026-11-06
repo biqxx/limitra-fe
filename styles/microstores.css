@@ -56,11 +56,12 @@
 
 /* featured stores */
 .ms-stores { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; }
-.ms-store-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.ms-store-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .ms-store-head { display: flex; align-items: center; gap: 11px; }
 .ms-store-avatar { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: #fff; flex: none; }
+.ms-store-head > div { min-width: 0; flex: 1; }
 .ms-store-head b { display: block; font-family: var(--font-display); font-weight: 700; font-size: 14.5px; }
-.ms-store-head small { color: var(--text-faint); font-size: 11.5px; }
+.ms-store-head small { display: block; color: var(--text-faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ms-store-thumbs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .ms-store-thumb { position: relative; aspect-ratio: 1; border-radius: var(--r-sm); overflow: hidden; }
 .ms-store-thumb .ph span { font-size: 7px; }

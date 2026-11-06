@@ -82,7 +82,7 @@ export function CelebrityStoresPage() {
             <h2>More than commissions. It&rsquo;s your brand.</h2>
             <p className="muted" style={{ marginTop: 10, textWrap: 'pretty' }}>With Limitra Celebrity Stores, you get the tools, support and flexibility to turn your audience into a thriving online business. Not just a link.</p>
           </div>
-          <div className="aff-perks" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+          <div className="aff-perks five">
             {STORE_ADVANTAGE.map(([ic, t, b]) => (
               <div key={t} className="aff-perk card">
                 <span className="aff-perk-ic"><Icon name={ic} size={20} /></span>

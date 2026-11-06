@@ -51,7 +51,7 @@ export function PerformanceTierBlock({ eyebrow = 'Your performance, every 90 day
           <h2>{title}</h2>
           {desc && <p className="muted" style={{ marginTop: 10, textWrap: 'pretty' }}>{desc}</p>}
         </div>
-        <div className="aff-tiers" style={{ gridTemplateColumns: `repeat(${tiers.length}, 1fr)` }}>
+        <div className={'aff-tiers' + (tiers.length === 5 ? ' five' : '')}>
           {tiers.map(t => (
             <div key={t.key} className={'aff-tier card' + (t.featured ? ' featured' : '')}>
               {t.tag && <span className="aff-tier-tag">{t.tag}</span>}
