@@ -7,7 +7,7 @@ import { naira, byId, REAL_IMG, slugify, setCategories, setSubcats, setProducts,
 import { applyStoredVariants } from '@/lib/variantsStore';
 import { routeFor, parseRoute } from '@/lib/routes';
 import { getToken, clearTokens } from '@/lib/auth';
-import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi } from '@/lib/api/endpoints';
+import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
 // cosmetic placeholder tints, cycled per category — the backend has no color/theme
@@ -114,6 +114,16 @@ export function StoreProvider({ children }) {
     }
   }, []);
 
+  /* real wallet balance ("Lim Cash" in the UI) — signed-in only. Loaded
+     alongside cart/addresses once a session resolves. Response shape isn't in
+     the OpenAPI schema (generic SuccessResponse) — balance is read
+     defensively at the call site below. */
+  const [wallet, setWallet] = useState(null);
+  const loadWallet = useCallback(async () => {
+    try { setWallet(await walletApi.get()); } catch (e) { setWallet(null); }
+  }, []);
+  const walletBalance = Number(wallet?.balance ?? wallet?.data?.balance ?? 0);
+
   /* real session — resolves who's signed in from a stored JWT.
      lib/api/endpoints.js: authApi.me() (id/username/email/role) + profileApi.get()
      (first_name/last_name/phone/etc.) together make up the real profile.
@@ -123,7 +133,7 @@ export function StoreProvider({ children }) {
      instead of reading back a `user` that may not have re-rendered into its
      closure yet. */
   const refreshUser = useCallback(async () => {
-    if (!getToken()) { setUser(null); setRemoteCart(null); setFavorites([]); setAddresses([]); setAuthLoading(false); return null; }
+    if (!getToken()) { setUser(null); setRemoteCart(null); setFavorites([]); setAddresses([]); setWallet(null); setAuthLoading(false); return null; }
     try {
       const me = await authApi.me();
       // profileApi.get() 404s/500s for accounts with no profile row yet (seen
@@ -135,6 +145,7 @@ export function StoreProvider({ children }) {
       setUser(resolved);
       loadCartAndFavorites();
       loadAddresses();
+      loadWallet();
       return resolved;
     } catch (e) {
       setUser(null); clearTokens();
@@ -142,7 +153,7 @@ export function StoreProvider({ children }) {
     } finally {
       setAuthLoading(false);
     }
-  }, [loadCartAndFavorites, loadAddresses]);
+  }, [loadCartAndFavorites, loadAddresses, loadWallet]);
   useEffect(() => { refreshUser(); }, [refreshUser]);
 
   const logout = useCallback(async () => {
@@ -152,6 +163,7 @@ export function StoreProvider({ children }) {
     setRemoteCart(null);
     setFavorites([]);
     setAddresses([]);
+    setWallet(null);
   }, []);
 
   /* catalog — categories + products, both public (no auth) endpoints. Mutates
@@ -507,6 +519,10 @@ export function StoreProvider({ children }) {
   const cart = isAuthenticated
     ? remoteCartItems.map(it => ({ key: it.id, id: it.product_id, qty: it.quantity, variants: {} }))
     : localCart;
+  // Needed by checkoutApi.quote({cart_id}) — only meaningful for signed-in users
+  // (the real backend has no guest cart, so there's nothing to quote against
+  // until checkout itself requires sign-in).
+  const cartId = remoteCart?.id ?? null;
   const wish = isAuthenticated ? favorites.map(f => f.product_id) : localWish;
 
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
@@ -518,10 +534,11 @@ export function StoreProvider({ children }) {
     theme, toggleTheme, route, go,
     user, isAuthenticated, authLoading, logout, refreshUser,
     catalogLoading, catalogVersion, loadCatalog,
-    cart, addToCart, setQty, removeItem, clearCart, cartCount, cartTotal,
+    cart, addToCart, setQty, removeItem, clearCart, cartCount, cartTotal, cartId,
     wish, toggleWish,
     addresses, addressesLoading, loadAddresses, saveAddress, removeAddress, setPrimaryAddress,
     cards, saveCard, removeCard, setPrimaryCard,
+    wallet, walletBalance, loadWallet,
     toasts, toast,
     query, setQuery,
     searchHistory, addSearch, clearSearch,
