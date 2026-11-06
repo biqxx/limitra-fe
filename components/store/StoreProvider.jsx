@@ -7,7 +7,7 @@ import { naira, byId, REAL_IMG, slugify, setCategories, setSubcats, setProducts,
 import { applyStoredVariants } from '@/lib/variantsStore';
 import { routeFor, parseRoute } from '@/lib/routes';
 import { getToken, clearTokens } from '@/lib/auth';
-import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi } from '@/lib/api/endpoints';
+import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
 // cosmetic placeholder tints, cycled per category — the backend has no color/theme
@@ -40,7 +40,6 @@ export function StoreProvider({ children }) {
   const [favorites, setFavorites] = useState([]); // [{id, product_id, ...}], signed-in users only
   const [addresses, setAddresses] = useState([]);
   const [cards, setCards] = useState([]);
-  const addressesRef = useRef(addresses); addressesRef.current = addresses;
   const cardsRef = useRef(cards); cardsRef.current = cards;
   const [toasts, setToasts] = useState([]);
   const [query, setQuery] = useState('');
@@ -55,8 +54,10 @@ export function StoreProvider({ children }) {
   const tid = useRef(0);
 
   /* hydrate from localStorage once on mount (avoids SSR/client markup mismatch).
-     addresses/cards/referral have no fake seed anymore — they start empty until
-     a real backend (or, for addresses/cards, the user's own local entries) fills them in.
+     cards/referral have no fake seed anymore — they start empty until a real
+     backend (or, for cards, the user's own local entries) fills them in.
+     Addresses are no longer part of this — see loadAddresses() below, which
+     reads from the real addressesApi instead of localStorage.
      `hydrated` gates every persist-effect below: without it, a persist effect's
      first run (same commit as this one, before these setState calls have landed)
      would still see the pre-hydration default and write it straight back over
@@ -68,7 +69,6 @@ export function StoreProvider({ children }) {
     try { setTheme(localStorage.getItem('lim_theme') || 'light'); } catch (e) {}
     try { setLocalCart(JSON.parse(localStorage.getItem('lim_cart') || '[]')); } catch (e) {}
     try { setLocalWish(JSON.parse(localStorage.getItem('lim_wish') || '[]')); } catch (e) {}
-    try { setAddresses(JSON.parse(localStorage.getItem('lim_addr') || '[]')); } catch (e) {}
     try { setCards(JSON.parse(localStorage.getItem('lim_cards') || '[]')); } catch (e) {}
     try { setSearchHistory(JSON.parse(localStorage.getItem('lim_search') || '[]')); } catch (e) {}
     try {
@@ -99,6 +99,31 @@ export function StoreProvider({ children }) {
     } catch (e) { setFavorites([]); }
   }, []);
 
+  /* real addresses — also signed-in only (401 without a token, confirmed live).
+     Loaded alongside cart/favorites once a session resolves. */
+  const [addressesLoading, setAddressesLoading] = useState(false);
+  const loadAddresses = useCallback(async () => {
+    setAddressesLoading(true);
+    try {
+      const list = await addressesApi.list();
+      setAddresses(Array.isArray(list) ? list : list?.data || list?.items || []);
+    } catch (e) {
+      setAddresses([]);
+    } finally {
+      setAddressesLoading(false);
+    }
+  }, []);
+
+  /* real wallet balance ("Lim Cash" in the UI) — signed-in only. Loaded
+     alongside cart/addresses once a session resolves. Response shape isn't in
+     the OpenAPI schema (generic SuccessResponse) — balance is read
+     defensively at the call site below. */
+  const [wallet, setWallet] = useState(null);
+  const loadWallet = useCallback(async () => {
+    try { setWallet(await walletApi.get()); } catch (e) { setWallet(null); }
+  }, []);
+  const walletBalance = Number(wallet?.balance ?? wallet?.data?.balance ?? 0);
+
   /* real session — resolves who's signed in from a stored JWT.
      lib/api/endpoints.js: authApi.me() (id/username/email/role) + profileApi.get()
      (first_name/last_name/phone/etc.) together make up the real profile.
@@ -108,7 +133,7 @@ export function StoreProvider({ children }) {
      instead of reading back a `user` that may not have re-rendered into its
      closure yet. */
   const refreshUser = useCallback(async () => {
-    if (!getToken()) { setUser(null); setRemoteCart(null); setFavorites([]); setAuthLoading(false); return null; }
+    if (!getToken()) { setUser(null); setRemoteCart(null); setFavorites([]); setAddresses([]); setWallet(null); setAuthLoading(false); return null; }
     try {
       const me = await authApi.me();
       // profileApi.get() 404s/500s for accounts with no profile row yet (seen
@@ -119,6 +144,8 @@ export function StoreProvider({ children }) {
       const resolved = { ...me, ...profile };
       setUser(resolved);
       loadCartAndFavorites();
+      loadAddresses();
+      loadWallet();
       return resolved;
     } catch (e) {
       setUser(null); clearTokens();
@@ -126,7 +153,7 @@ export function StoreProvider({ children }) {
     } finally {
       setAuthLoading(false);
     }
-  }, [loadCartAndFavorites]);
+  }, [loadCartAndFavorites, loadAddresses, loadWallet]);
   useEffect(() => { refreshUser(); }, [refreshUser]);
 
   const logout = useCallback(async () => {
@@ -135,6 +162,8 @@ export function StoreProvider({ children }) {
     setUser(null);
     setRemoteCart(null);
     setFavorites([]);
+    setAddresses([]);
+    setWallet(null);
   }, []);
 
   /* catalog — categories + products, both public (no auth) endpoints. Mutates
@@ -284,7 +313,6 @@ export function StoreProvider({ children }) {
      pre-hydration default never gets written back over real stored data. */
   useEffect(() => { if (!hydrated) return; try { localStorage.setItem('lim_cart', JSON.stringify(localCart)); } catch (e) {} }, [localCart, hydrated]);
   useEffect(() => { if (!hydrated) return; try { localStorage.setItem('lim_wish', JSON.stringify(localWish)); } catch (e) {} }, [localWish, hydrated]);
-  useEffect(() => { if (!hydrated) return; try { localStorage.setItem('lim_addr', JSON.stringify(addresses)); } catch (e) {} }, [addresses, hydrated]);
   useEffect(() => { if (!hydrated) return; try { localStorage.setItem('lim_cards', JSON.stringify(cards)); } catch (e) {} }, [cards, hydrated]);
   useEffect(() => { if (!hydrated) return; try { localStorage.setItem('lim_search', JSON.stringify(searchHistory)); } catch (e) {} }, [searchHistory, hydrated]);
   useEffect(() => { if (!hydrated) return; try { localStorage.setItem('lim_referral', JSON.stringify(referral)); } catch (e) {} }, [referral, hydrated]);
@@ -298,24 +326,49 @@ export function StoreProvider({ children }) {
   }, []);
   const clearSearch = useCallback(() => setSearchHistory([]), []);
 
-  /* addresses — client-local for now: addressesApi (lib/api/endpoints.js) isn't
-     deployed on the backend yet (404s live as of the last check). Swap this for
-     real calls once it is. */
-  const saveAddress = useCallback((data) => {
-    setAddresses(list => {
-      const exists = data.id && list.some(a => a.id === data.id);
-      const makeP = !!data.primary;
-      if (exists) {
-        return list.map(a => a.id === data.id ? { ...a, ...data } : (makeP ? { ...a, primary: false } : a));
+  /* addresses — real backend calls (addressesApi, lib/api/endpoints.js), confirmed
+     live (401 without a token, not 404 — a stale earlier check here had wrongly
+     assumed the route wasn't deployed). Errors are toasted AND rethrown so the
+     calling form (AddressForm) can turn field-level errors into inline messages
+     and keep its modal open instead of silently closing on failure. */
+  const saveAddress = useCallback(async (data) => {
+    const { id, ...rest } = data;
+    const payload = { ...rest, is_default: !!rest.is_default };
+    try {
+      if (id) {
+        const updated = await addressesApi.update(id, payload);
+        const merged = { id, ...payload, ...updated };
+        setAddresses(list => list.map(a => a.id === id ? merged : (payload.is_default ? { ...a, is_default: false } : a)));
+        toast('Address updated');
+        return merged;
       }
-      const next = { ...data, id: data.id || Date.now() };
-      const base = makeP ? list.map(a => ({ ...a, primary: false })) : list;
-      return [...base, next];
-    });
-    toast(data.id && addressesRef.current.some(a => a.id === data.id) ? 'Address updated' : 'Address added');
+      const created = await addressesApi.create(payload);
+      setAddresses(list => payload.is_default ? [...list.map(a => ({ ...a, is_default: false })), created] : [...list, created]);
+      toast('Address added');
+      return created;
+    } catch (e) {
+      toast(messageFrom(e), 'error');
+      throw e;
+    }
   }, []);
-  const removeAddress = useCallback((id) => { setAddresses(list => list.filter(a => a.id !== id)); toast('Address removed'); }, []);
-  const setPrimaryAddress = useCallback((id) => { setAddresses(list => list.map(a => ({ ...a, primary: a.id === id }))); toast('Default address updated'); }, []);
+  const removeAddress = useCallback(async (id) => {
+    try {
+      await addressesApi.remove(id);
+      setAddresses(list => list.filter(a => a.id !== id));
+      toast('Address removed');
+    } catch (e) {
+      toast(messageFrom(e), 'error');
+    }
+  }, []);
+  const setPrimaryAddress = useCallback(async (id) => {
+    try {
+      await addressesApi.setDefault(id);
+      setAddresses(list => list.map(a => ({ ...a, is_default: a.id === id })));
+      toast('Default address updated');
+    } catch (e) {
+      toast(messageFrom(e), 'error');
+    }
+  }, []);
 
   /* saved cards — also client-local. savedCardsApi is live, but creating a real
      card needs a payment-gateway tokenization step (card_token) that doesn't
@@ -466,6 +519,10 @@ export function StoreProvider({ children }) {
   const cart = isAuthenticated
     ? remoteCartItems.map(it => ({ key: it.id, id: it.product_id, qty: it.quantity, variants: {} }))
     : localCart;
+  // Needed by checkoutApi.quote({cart_id}) — only meaningful for signed-in users
+  // (the real backend has no guest cart, so there's nothing to quote against
+  // until checkout itself requires sign-in).
+  const cartId = remoteCart?.id ?? null;
   const wish = isAuthenticated ? favorites.map(f => f.product_id) : localWish;
 
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
@@ -477,10 +534,11 @@ export function StoreProvider({ children }) {
     theme, toggleTheme, route, go,
     user, isAuthenticated, authLoading, logout, refreshUser,
     catalogLoading, catalogVersion, loadCatalog,
-    cart, addToCart, setQty, removeItem, clearCart, cartCount, cartTotal,
+    cart, addToCart, setQty, removeItem, clearCart, cartCount, cartTotal, cartId,
     wish, toggleWish,
-    addresses, saveAddress, removeAddress, setPrimaryAddress,
+    addresses, addressesLoading, loadAddresses, saveAddress, removeAddress, setPrimaryAddress,
     cards, saveCard, removeCard, setPrimaryCard,
+    wallet, walletBalance, loadWallet,
     toasts, toast,
     query, setQuery,
     searchHistory, addSearch, clearSearch,

@@ -1,24 +1,29 @@
 'use client';
 /* LIMITRA, Cart & Checkout flow — ported from legacy/pages-cart.jsx */
 import { Fragment, useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
-import { Modal, AddressForm, CardForm, CardBrandMark, Field } from '@/components/forms/Shared';
+import { Modal, AddressForm, Field } from '@/components/forms/Shared';
 import { Thumb, REAL_IMG, QtyStepper, Breadcrumbs, EmptyState } from '@/components/ui/Shared';
 import { naira, byId, unitPriceOf } from '@/lib/data';
-import { ordersApi } from '@/lib/api/endpoints';
+import { ordersApi, checkoutApi, paymentsApi, promotionsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
+
+// Real payment_method values the backend accepts (POST /checkout/quote) — the
+// UI's own radio values (card/transfer/cod) map to these at submit time.
+const PAYMENT_METHOD_API = { card: 'card', transfer: 'bank_transfer', cod: 'cash_on_delivery' };
 
 const SHIP_FEE = 3500;
 const FREE_SHIP = 150000;
 
 export function OrderSummary({ items, promo, ship, children, cta, onCta, ctaIcon, useCredit, onToggleCredit }) {
-  const { referral } = useStore();
+  const { walletBalance } = useStore();
   const sub = items.reduce((s, it) => s + unitPriceOf(it, byId(it.id)) * it.qty, 0);
   const disc = promo ? Math.round(sub * promo.pct) : 0;
   const shipping = ship == null ? 0 : ship;
   const beforeCredit = Math.max(0, sub - disc) + shipping;
-  const credit = useCredit ? Math.min(referral.credit, beforeCredit) : 0;
+  const credit = useCredit ? Math.min(walletBalance, beforeCredit) : 0;
   const total = beforeCredit - credit;
   return (
     <aside className="summary card">
@@ -27,11 +32,11 @@ export function OrderSummary({ items, promo, ship, children, cta, onCta, ctaIcon
       {disc > 0 && <div className="sum-row"><span className="muted">Discount <span className="badge badge-soft" style={{ marginLeft: 4 }}>{promo.code}</span></span><b style={{ color: 'var(--success)' }}>−{naira(disc)}</b></div>}
       <div className="sum-row"><span className="muted">Delivery</span>{shipping === 0 ? <b style={{ color: 'var(--success)' }}>Free</b> : <b>{naira(shipping)}</b>}</div>
       {children}
-      {referral.credit > 0 && onToggleCredit && (
+      {walletBalance > 0 && onToggleCredit && (
         <label className="credit-row">
           <input type="checkbox" checked={!!useCredit} onChange={e => onToggleCredit(e.target.checked)} />
           <span className="cbox"><Icon name="check" size={12} stroke={3} /></span>
-          <span className="credit-label"><span className="credit-label-main">Apply Lim Cash <img src="/assets/limcash.png" alt="" className="limcash-ic sm" /></span><small className="muted">{naira(referral.credit)} available</small></span>
+          <span className="credit-label"><span className="credit-label-main">Apply Lim Cash <img src="/assets/limcash.png" alt="" className="limcash-ic sm" /></span><small className="muted">{naira(walletBalance)} available</small></span>
           {credit > 0 && <b style={{ color: 'var(--success)' }}>−{naira(credit)}</b>}
         </label>
       )}
@@ -45,50 +50,48 @@ export function OrderSummary({ items, promo, ship, children, cta, onCta, ctaIcon
   );
 }
 
-function PromoBox({ promo, setPromo }) {
-  const { rewards } = useStore();
+function PromoBox({ promo, setPromo, cartId }) {
   const [code, setCode] = useState('');
   const [err, setErr] = useState('');
-  // active won pct-coupons usable here
-  const wonPct = (rewards || []).filter(r => r.status === 'Active' && r.kind === 'pct');
-  const apply = (forced) => {
-    const c = (forced || code).trim().toUpperCase();
-    const valid = { LIMITRA10: 0.10, TECH15: 0.15, WELCOME: 0.05 };
-    const won = wonPct.find(r => r.code.toUpperCase() === c);
-    const affCodes = JSON.parse(localStorage.getItem('lim_aff_promos') || '[]');
-    const aff = affCodes.find(a => a.code.toUpperCase() === c && a.active !== false);
-    if (won) { setPromo({ code: won.code, pct: won.value }); setErr(''); }
-    else if (aff) { setPromo({ code: aff.code, pct: aff.pct, aff: aff.affName }); setErr(''); }
-    else if (valid[c]) { setPromo({ code: c, pct: valid[c] }); setErr(''); }
-    else { setErr('Invalid or expired code'); setPromo(null); }
+  const [checking, setChecking] = useState(false);
+  const apply = async () => {
+    const c = code.trim().toUpperCase();
+    if (!c) return;
+    if (!cartId) { setErr('Sign in to apply a promo code'); return; }
+    setChecking(true);
+    try {
+      // Response shape isn't documented (generic SuccessResponse) — read the
+      // discount percentage defensively (as a whole number like 15, or
+      // already a fraction like 0.15); falls back to 0 if neither is present,
+      // the code still "applies" server-side at checkout either way, just
+      // shown with no visible discount here.
+      const res = await promotionsApi.validate(c, cartId);
+      const raw = Number(res?.discount_percentage ?? res?.percentage ?? res?.pct ?? 0);
+      const pct = raw > 1 ? raw / 100 : raw;
+      setPromo({ code: c, pct });
+      setErr('');
+    } catch (e) {
+      setErr(messageFrom(e));
+      setPromo(null);
+    } finally {
+      setChecking(false);
+    }
   };
   return (
     <div className="promo-box">
       <div className="v-label" style={{ marginBottom: 8 }}>Promo code</div>
-      {wonPct.length > 0 && !promo && (
-        <button className="promo-suggest" onClick={() => apply(wonPct[0].code)}>
-          <span className="ps-ic"><Icon name="gift" size={16} /></span>
-          <span className="ps-body">
-            <span className="ps-label">Your reward</span>
-            <span className="ps-code">{wonPct[0].code}</span>
-          </span>
-          <span className="ps-off">{Math.round(wonPct[0].value * 100)}% off</span>
-          <span className="ps-apply">Apply</span>
-        </button>
-      )}
       <div className="row" style={{ gap: 8 }}>
-        <input className={'input' + (err ? ' err' : '')} placeholder="e.g. LIMITRA10" value={code} onChange={e => { setCode(e.target.value); setErr(''); }} />
-        <button className="btn btn-ghost" onClick={() => apply()} style={{ flex: 'none' }}>Apply</button>
+        <input className={'input' + (err ? ' err' : '')} placeholder="Enter code" value={code} onChange={e => { setCode(e.target.value); setErr(''); }} />
+        <button className="btn btn-ghost" disabled={checking} onClick={apply} style={{ flex: 'none' }}>{checking ? 'Checking…' : 'Apply'}</button>
       </div>
       {err && <span className="err-msg" style={{ marginTop: 6, display: 'block' }}>{err}</span>}
-      {promo && <span className="row" style={{ gap: 6, color: 'var(--success)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, marginTop: 8 }}><Icon name="check" size={14} stroke={3} /> {promo.code} applied, {Math.round(promo.pct * 100)}% off{promo.aff ? ' · via ' + promo.aff : ''}</span>}
-      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Try <b>LIMITRA10</b>, <b>TECH15</b> or <b>WELCOME</b></p>
+      {promo && <span className="row" style={{ gap: 6, color: 'var(--success)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, marginTop: 8 }}><Icon name="check" size={14} stroke={3} /> {promo.code} applied</span>}
     </div>
   );
 }
 
 export function CartPage() {
-  const { cart, setQty, removeItem, clearCart, go, toast, referral, promo, setPromo } = useStore();
+  const { cart, setQty, removeItem, clearCart, go, toast, cartId, promo, setPromo } = useStore();
   const [useCredit, setUseCredit] = useState(false);
   useEffect(() => { try { setUseCredit(localStorage.getItem('lim_use_credit') === '1'); } catch (e) {} }, []);
   const toggleCredit = (v) => { setUseCredit(v); localStorage.setItem('lim_use_credit', v ? '1' : '0'); };
@@ -152,7 +155,7 @@ export function CartPage() {
         </div>
 
         <OrderSummary items={cart} promo={promo} cta="Proceed to checkout" ctaIcon="lock" onCta={() => go('checkout')} useCredit={useCredit} onToggleCredit={toggleCredit}>
-          <PromoBox promo={promo} setPromo={setPromo} />
+          <PromoBox promo={promo} setPromo={setPromo} cartId={cartId} />
         </OrderSummary>
       </div>
     </div></div>
@@ -179,33 +182,67 @@ function Stepper({ step }) {
 }
 
 export function CheckoutPage() {
-  const { cart, cartTotal, clearCart, go, toast, addresses, cards, saveAddress, saveCard, referral, redeemCredit, promo, user, isAuthenticated } = useStore();
+  const { cart, cartTotal, cartId, clearCart, go, toast, addresses, saveAddress, walletBalance, promo, user, isAuthenticated } = useStore();
+  const searchParams = useSearchParams();
   const [step, setStep] = useState(0);
   const [orderId, setOrderId] = useState(null);
+  const [transferInfo, setTransferInfo] = useState(null); // real bank_transfer details, once we have them
   const [placing, setPlacing] = useState(false);
+  const [resolvingReturn, setResolvingReturn] = useState(false);
+  const [placeError, setPlaceError] = useState('');
   const [idemKey] = useState(() => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()));
   const [useCredit, setUseCreditState] = useState(false);
   useEffect(() => { try { setUseCreditState(localStorage.getItem('lim_use_credit') === '1'); } catch (e) {} }, []);
   const setUseCredit = (v) => { setUseCreditState(v); localStorage.setItem('lim_use_credit', v ? '1' : '0'); };
-  const primaryAddr = addresses.find(a => a.primary) || addresses[0];
-  const primaryCard = cards.find(c => c.primary) || cards[0];
+  const primaryAddr = addresses.find(a => a.is_default) || addresses[0];
   const [selAddr, setSelAddr] = useState(primaryAddr ? primaryAddr.id : null);
-  const [selCard, setSelCard] = useState(primaryCard ? primaryCard.id : null);
   const [email, setEmail] = useState(user?.email || '');
   useEffect(() => { if (user?.email) setEmail(e => e || user.email); }, [user]);
   const [method, setMethod] = useState('standard');
   const [payMethod, setPayMethod] = useState('card');
   const [addrModal, setAddrModal] = useState(false);
-  const [cardModal, setCardModal] = useState(false);
-  const [xferModal, setXferModal] = useState(false);
-  const [xferDone, setXferDone] = useState(false);
-  const [xferCopied, setXferCopied] = useState('');
   const [errs, setErrs] = useState({});
 
   const activeAddr = addresses.find(a => a.id === selAddr);
-  const activeCard = cards.find(c => c.id === selCard);
 
   useEffect(() => { window.scrollTo({ top: 0 }); }, [step]);
+
+  // Returning from a payment gateway's hosted page (card/bank_transfer
+  // redirect via `callback_url`). The exact query param a gateway appends
+  // isn't documented anywhere in this app — `reference`/`trxref` (Paystack)
+  // and `transaction_id`/`tx_ref` (Flutterwave) are checked defensively
+  // since either is plausible. The order itself already exists (created
+  // before the redirect); this only confirms whether payment succeeded.
+  useEffect(() => {
+    const ref = searchParams.get('reference') || searchParams.get('trxref') || searchParams.get('transaction_id') || searchParams.get('tx_ref');
+    if (!ref) return;
+    const retOrderId = searchParams.get('order_id');
+    (async () => {
+      setResolvingReturn(true);
+      try {
+        const status = await paymentsApi.statusByReference(ref);
+        const raw = String(status?.status ?? status?.data?.status ?? '').toLowerCase();
+        const ok = ['success', 'successful', 'completed', 'paid'].includes(raw);
+        if (ok) {
+          setOrderId(retOrderId || status?.order_id || ref);
+        } else {
+          setPlaceError(raw ? `Payment ${raw} — you can try again from your cart.` : 'We couldn’t confirm this payment. Check your orders page or try again.');
+        }
+      } catch (e) {
+        setPlaceError(messageFrom(e));
+      } finally {
+        setResolvingReturn(false);
+      }
+    })();
+  }, [searchParams]);
+
+  if (resolvingReturn) {
+    return (
+      <div className="page page-fade"><div className="wrap">
+        <EmptyState icon="lock" title="Confirming your payment…" body="This only takes a moment." />
+      </div></div>
+    );
+  }
 
   if (!isAuthenticated && !orderId) {
     return (
@@ -223,8 +260,7 @@ export function CheckoutPage() {
     );
   }
 
-  const addNewAddress = (d) => { const id = Date.now(); saveAddress({ ...d, id }); setSelAddr(id); setAddrModal(false); };
-  const addNewCard = (d) => { const id = Date.now(); saveCard({ ...d, id }); setSelCard(id); setCardModal(false); };
+  const addNewAddress = async (d) => { const created = await saveAddress(d); setSelAddr(created.id); setAddrModal(false); };
 
   const validateShip = () => {
     const e = {};
@@ -232,36 +268,88 @@ export function CheckoutPage() {
     if (!/^\S+@\S+\.\S+$/.test(email)) e.email = 'Enter a valid email';
     setErrs(e); return Object.keys(e).length === 0;
   };
-  const validatePay = () => {
-    if (payMethod !== 'card') { setErrs({}); return true; }
-    const e = {};
-    if (!activeCard) e.card = 'Select or add a card';
-    setErrs(e); return Object.keys(e).length === 0;
-  };
 
   const next = () => {
     if (step === 0 && !validateShip()) return;
-    if (step === 1 && !validatePay()) return;
     setStep(s => s + 1);
   };
-  const placeOrder = async (skipXfer) => {
-    if (payMethod === 'transfer' && !xferDone && !skipXfer) { setXferModal(true); return; }
+
+  const placeOrder = async () => {
     if (placing) return;
     setPlacing(true);
+    setPlaceError('');
+    const apiMethod = PAYMENT_METHOD_API[payMethod];
     try {
+      // Quote prices the cart against the chosen address/method/promo/credit;
+      // orders.create() then converts the most recent quote for this cart
+      // into a real order (its own request body is just an idempotency key —
+      // see lib/api/endpoints.js).
+      await checkoutApi.quote({
+        cart_id: cartId,
+        address_id: selAddr,
+        delivery_method: method,
+        payment_method: apiMethod,
+        promotion_code: promo?.code || undefined,
+        use_wallet_credit: useCredit || undefined,
+      });
       const order = await ordersApi.create(idemKey);
-      if (useCredit) { const applied = redeemCredit(Math.min(referral.credit, cartTotal + shipFee)); if (applied > 0) toast(`${naira(applied)} credit applied`); }
-      setOrderId(order?.id || order?.order_number || idemKey);
+      const newOrderId = order?.id ?? order?.order_id ?? order?.order_number ?? order?.data?.id ?? null;
+
+      // The order exists from here on regardless of payment outcome — the
+      // cart's job is done (re-quoting the same items into a second order
+      // would be wrong), so it's cleared now rather than only on confirmed
+      // payment.
       await clearCart();
-      toast('Order placed successfully!');
+
+      if (apiMethod === 'cash_on_delivery') {
+        setOrderId(newOrderId ?? idemKey);
+        toast('Order placed successfully!');
+        return;
+      }
+
+      const callbackUrl = new URL('/checkout', window.location.origin);
+      if (newOrderId) callbackUrl.searchParams.set('order_id', newOrderId);
+      // Response shape isn't documented (generic SuccessResponse) — read a
+      // hosted-page redirect URL defensively under any plausible field name.
+      const payment = await paymentsApi.initialize({
+        order_id: newOrderId,
+        method: apiMethod,
+        callback_url: callbackUrl.toString(),
+      }, idemKey + '-pay');
+      const redirectUrl = payment?.authorization_url ?? payment?.payment_url ?? payment?.checkout_url ?? payment?.url ?? payment?.data?.authorization_url;
+      if (redirectUrl) {
+        window.location.href = redirectUrl;
+        return; // navigating away
+      }
+
+      if (apiMethod === 'bank_transfer') {
+        const info = {
+          bank: payment?.bank_name ?? payment?.account?.bank_name,
+          account: payment?.account_number ?? payment?.account?.account_number,
+          name: payment?.account_name ?? payment?.account?.account_name,
+          amount: payment?.amount ?? payment?.data?.amount,
+          reference: payment?.reference ?? payment?.payment_reference ?? payment?.data?.reference,
+        };
+        if (info.account) {
+          setTransferInfo(info);
+          setOrderId(newOrderId ?? idemKey);
+          return;
+        }
+      }
+
+      // Order exists but we got neither a redirect nor usable transfer
+      // details back — surface this rather than claim a success we can't
+      // confirm (the order itself is safe; Idempotency-Key means retrying
+      // "Place order" won't double-create it).
+      setPlaceError('Order placed, but payment could not be started. Please try again, or check your orders page.');
     } catch (err) {
-      toast(messageFrom(err), 'error');
+      setPlaceError(messageFrom(err));
     } finally {
       setPlacing(false);
     }
   };
 
-  if (orderId) return <OrderSuccess orderId={orderId} email={email} method={method} />;
+  if (orderId) return <OrderSuccess orderId={orderId} email={email} method={method} pending={!!transferInfo} transferInfo={transferInfo} />;
 
   const shipFee = method === 'express' ? 5000 : 0;
   const methodLabel = { standard: 'Standard delivery · 10–14 days (Free)', express: 'Express delivery · 5–7 days', pickup: 'Pickup station' }[method];
@@ -290,9 +378,9 @@ export function CheckoutPage() {
                       <input type="radio" name="addr" checked={selAddr === a.id} onChange={() => setSelAddr(a.id)} />
                       <span className="rc-radio" />
                       <div className="ap-body">
-                        <div className="row" style={{ gap: 8 }}><b>{a.label}</b>{a.primary && <span className="badge badge-soft" style={{ fontSize: 10 }}>Default</span>}</div>
-                        <p className="muted">{a.name} · {a.line}, {a.city}{a.state ? ', ' + a.state : ''}</p>
-                        <p className="muted" style={{ fontSize: 12.5 }}>{a.phone}</p>
+                        <div className="row" style={{ gap: 8 }}><b>{a.type === 'billing' ? 'Billing' : 'Delivery'} address</b>{a.is_default && <span className="badge badge-soft" style={{ fontSize: 10 }}>Default</span>}</div>
+                        <p className="muted">{[a.address_line_1, a.address_line_2].filter(Boolean).join(', ')}, {a.city}{a.state ? ', ' + a.state : ''}</p>
+                        {a.landmark && <p className="muted" style={{ fontSize: 12.5 }}>Near {a.landmark}</p>}
                       </div>
                       <button type="button" className="ap-edit" onClick={(e) => { e.preventDefault(); setSelAddr(a.id); setAddrModal('edit-' + a.id); }} title="Edit"><Icon name="edit" size={15} /></button>
                     </label>
@@ -304,6 +392,13 @@ export function CheckoutPage() {
               <Field label="Order updates will be sent here" full value={email} onChange={setEmail} err={errs.email} placeholder="you@email.com" />
 
               <h4 className="co-sub">Delivery method</h4>
+              {/* TODO: these options/fees are still a hardcoded UI list, not
+                  sourced from the real GET /delivery/options endpoint — the
+                  "standard"/"express"/"pickup" values sent as delivery_method
+                  below are a guess at what the backend expects, not confirmed
+                  against real option identifiers. Fine for now since the quote
+                  step is authoritative on price either way, but should be
+                  swapped for the real endpoint in a follow-up pass. */}
               <div className="radio-cards">
                 {[['standard', 'Standard delivery', '10–14 days', 0, false, 2000], ['express', 'Express delivery', '5–7 days', 5000, false, 0], ['pickup', 'Pickup station', 'Temporarily unavailable', 0, true, 0]].map(([val, t, sub, fee, disabled, was]) => (
                   <label key={val} className={'radio-card' + (method === val ? ' on' : '') + (disabled ? ' disabled' : '')}>
@@ -332,38 +427,10 @@ export function CheckoutPage() {
               </div>
 
               {payMethod === 'card' && (
-                <div style={{ marginTop: 22 }}>
-                  <div className="row between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-                    <h4 className="co-sub" style={{ margin: 0 }}>Your saved cards</h4>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setCardModal(true)}><Icon name="plus" size={15} /> Add new card</button>
-                  </div>
-                  {errs.card && <span className="err-msg" style={{ marginBottom: 10, display: 'block' }}>{errs.card}</span>}
-                  {cards.length === 0 ? (
-                    <button className="addr-add" onClick={() => setCardModal(true)} style={{ width: '100%', minHeight: 110 }}><Icon name="plus" size={24} /><span>Add a payment card</span></button>
-                  ) : (
-                    <div className="card-select">
-                      {cards.map(c => (
-                        <label key={c.id} className={'card-pick' + (selCard === c.id ? ' on' : '')}>
-                          <input type="radio" name="card" checked={selCard === c.id} onChange={() => setSelCard(c.id)} />
-                          <span className="rc-radio" />
-                          <CardBrandMark brand={c.brand} />
-                          <div className="cp-body"><b>•••• {c.last}</b><small className="muted">{c.name} · exp {c.exp}</small></div>
-                          {c.primary && <span className="badge badge-soft" style={{ fontSize: 10 }}>Default</span>}
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <div className="co-note" style={{ marginTop: 18 }}><Icon name="lock" size={17} />You’ll securely enter your card details on the next screen.</div>
               )}
               {payMethod === 'transfer' && (
-                <div className={'xfer-status' + (xferDone ? ' ok' : '')} style={{ marginTop: 18 }}>
-                  <Icon name={xferDone ? 'check' : 'info'} size={17} />
-                  <div style={{ flex: 1 }}>
-                    <b>{xferDone ? 'Transfer confirmed' : 'Bank transfer selected'}</b>
-                    <p className="muted" style={{ margin: '2px 0 0' }}>{xferDone ? 'We’ll verify your payment and process the order.' : 'You’ll get the account details when you place your order.'}</p>
-                  </div>
-                  {xferDone && <button className="btn btn-outline btn-sm" onClick={() => setXferModal(true)}>View details</button>}
-                </div>
+                <div className="co-note" style={{ marginTop: 18 }}><Icon name="info" size={17} />You’ll get the account details to transfer to once you place your order.</div>
               )}
               {payMethod === 'cod' && <div className="co-note"><Icon name="info" size={17} />Have the exact amount ready. Our rider accepts cash and card on delivery.</div>}
             </div>
@@ -374,14 +441,12 @@ export function CheckoutPage() {
               <h3 className="co-h">Review your order</h3>
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="location" size={16} /> Delivery to</span><button className="link-btn" onClick={() => setStep(0)}>Edit</button></div>
-                {activeAddr && <p><b>{activeAddr.name}</b> <span className="badge badge-soft" style={{ fontSize: 10 }}>{activeAddr.label}</span><br />{activeAddr.line}, {activeAddr.city}{activeAddr.state ? ', ' + activeAddr.state : ''}<br />{activeAddr.phone} · {email}</p>}
+                {activeAddr && <p><b>{activeAddr.type === 'billing' ? 'Billing address' : 'Delivery address'}</b><br />{[activeAddr.address_line_1, activeAddr.address_line_2].filter(Boolean).join(', ')}, {activeAddr.city}{activeAddr.state ? ', ' + activeAddr.state : ''}<br />{email}</p>}
                 <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>{methodLabel}</div>
               </div>
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="card" size={16} /> Payment</span><button className="link-btn" onClick={() => setStep(1)}>Edit</button></div>
-                <p>{payMethod === 'card'
-                  ? (activeCard ? activeCard.brand + ' ending ' + activeCard.last : 'Card')
-                  : (payMethod === 'transfer' ? 'Bank transfer' : 'Pay on delivery')}</p>
+                <p>{{ card: 'Credit / Debit card', transfer: 'Bank transfer', cod: 'Pay on delivery' }[payMethod]}</p>
               </div>
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="bag" size={16} /> {cart.reduce((s, i) => s + i.qty, 0)} items</span><button className="link-btn" onClick={() => go('cart')}>Edit cart</button></div>
@@ -398,7 +463,7 @@ export function CheckoutPage() {
               {(() => {
                 const disc = promo ? Math.round(cartTotal * promo.pct) : 0;
                 const beforeCredit = Math.max(0, cartTotal - disc) + shipFee;
-                const credit = useCredit ? Math.min(referral.credit, beforeCredit) : 0;
+                const credit = useCredit ? Math.min(walletBalance, beforeCredit) : 0;
                 const total = beforeCredit - credit;
                 return (
                   <div className="review-block review-totals">
@@ -414,11 +479,12 @@ export function CheckoutPage() {
             </div>
           )}
 
+          {placeError && <span className="err-msg" style={{ display: 'block', marginBottom: 12 }}>{placeError}</span>}
           <div className="co-nav">
             <button className="btn btn-ghost" onClick={() => step === 0 ? go('cart') : setStep(s => s - 1)}><Icon name="chevleft" size={16} /> {step === 0 ? 'Back to cart' : 'Back'}</button>
             {step < 2
               ? <button className="btn btn-primary btn-lg" onClick={next}>Continue <Icon name="arrowr" size={17} /></button>
-              : <button className="btn btn-accent btn-lg" disabled={placing} onClick={() => placeOrder()}><Icon name="lock" size={17} /> {placing ? 'Placing order…' : 'Place order'}</button>}
+              : <button className="btn btn-accent btn-lg" disabled={placing} onClick={placeOrder}><Icon name="lock" size={17} /> {placing ? 'Placing order…' : 'Place order'}</button>}
           </div>
         </div>
 
@@ -429,68 +495,50 @@ export function CheckoutPage() {
         <Modal title={typeof addrModal === 'string' && addrModal.startsWith('edit-') ? 'Edit address' : 'Add a new address'} sub="Where should we deliver your order?" onClose={() => setAddrModal(false)}>
           <AddressForm
             initial={typeof addrModal === 'string' && addrModal.startsWith('edit-') ? addresses.find(a => a.id === Number(addrModal.slice(5))) : null}
-            onSave={(d) => { if (d.id) { saveAddress(d); setSelAddr(d.id); setAddrModal(false); } else { addNewAddress(d); } }}
+            onSave={async (d) => { if (d.id) { await saveAddress(d); setSelAddr(d.id); setAddrModal(false); } else { await addNewAddress(d); } }}
             onCancel={() => setAddrModal(false)} />
         </Modal>
       )}
-      {cardModal && (
-        <Modal title="Add a new card" sub="Saved securely for faster checkout." width={460} onClose={() => setCardModal(false)}>
-          <CardForm initial={null} onSave={addNewCard} onCancel={() => setCardModal(false)} />
-        </Modal>
-      )}
-      {xferModal && (() => {
-        const disc = promo ? Math.round(cartTotal * promo.pct) : 0;
-        const beforeCredit = Math.max(0, cartTotal - disc) + shipFee;
-        const creditUse = useCredit ? Math.min(referral.credit, beforeCredit) : 0;
-        const due = Math.max(0, beforeCredit - creditUse);
-        const namePart = (user?.username || user?.email || 'GUEST').split(/[@\s]/)[0].toUpperCase();
-        const ref = 'LMT-' + String(Math.abs(cartTotal)).slice(-4) + '-' + namePart;
-        const copy = (txt, key) => { navigator.clipboard?.writeText(txt); setXferCopied(key); toast('Copied'); setTimeout(() => setXferCopied(''), 1600); };
-        return (
-          <Modal title="Complete your bank transfer" sub="Transfer the exact amount to the account below." width={440} onClose={() => setXferModal(false)}>
-            <div className="xfer-amt">
-              <span className="muted">Amount to transfer</span>
-              <b>{naira(due)}</b>
-            </div>
-            <div className="xfer-rows">
-              {[['Bank', 'Providus Bank', 'bank'], ['Account number', '9701234567', 'acct'], ['Account name', 'Limitra Technologies Ltd', 'name'], ['Reference', ref, 'ref']].map(([label, value, key]) => (
-                <div className="xfer-row" key={key}>
-                  <span className="muted">{label}</span>
-                  <div className="xfer-val">
-                    <b className={key === 'acct' ? 'mono lg' : ''}>{value}</b>
-                    <button className="xfer-copy" onClick={() => copy(value, key)} aria-label={'Copy ' + label}>
-                      <Icon name={xferCopied === key ? 'check' : 'copy'} size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="co-note" style={{ marginTop: 14 }}><Icon name="info" size={16} />Include the reference so we can match your payment automatically.</div>
-            <div className="row" style={{ gap: 10, marginTop: 18 }}>
-              <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setXferModal(false)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 1.4 }} onClick={() => { setXferDone(true); setXferModal(false); toast('Transfer confirmed — placing your order'); setTimeout(() => placeOrder(true), 400); }}>
-                <Icon name="check" size={17} /> I’ve made this transfer
-              </button>
-            </div>
-          </Modal>
-        );
-      })()}
     </div></div>
   );
 }
 
-export function OrderSuccess({ orderId, email, method }) {
-  const { go } = useStore();
+export function OrderSuccess({ orderId, email, method, pending, transferInfo }) {
+  const { go, toast } = useStore();
+  const [copied, setCopied] = useState('');
   const eta = method === 'pickup' ? 'Ready for pickup in 10–14 days' : 'In 10–14 days';
+  const copy = (txt, key) => { navigator.clipboard?.writeText(txt); setCopied(key); toast('Copied'); setTimeout(() => setCopied(''), 1600); };
   return (
     <div className="page page-fade"><div className="wrap">
       <div className="success-screen">
-        <div className="success-check"><Icon name="check" size={48} stroke={3} /></div>
-        <h1>Order confirmed!</h1>
-        <p className="muted">Thank you for your order. A confirmation has been sent to <b>{email || 'your email'}</b>.</p>
+        <div className="success-check"><Icon name={pending ? 'info' : 'check'} size={48} stroke={3} /></div>
+        <h1>{pending ? 'Order placed — awaiting payment' : 'Order confirmed!'}</h1>
+        <p className="muted">{pending
+          ? 'We’ll process your order as soon as your bank transfer is confirmed.'
+          : <>Thank you for your order. A confirmation has been sent to <b>{email || 'your email'}</b>.</>}</p>
+        {pending && transferInfo && (
+          <div className="success-card card" style={{ textAlign: 'left', marginBottom: 16 }}>
+            <p className="muted" style={{ marginBottom: 10 }}>Transfer the exact amount to:</p>
+            <div className="xfer-rows">
+              {[['Bank', transferInfo.bank, 'bank'], ['Account number', transferInfo.account, 'acct'], ['Account name', transferInfo.name, 'name'], ['Amount', transferInfo.amount != null ? naira(Number(transferInfo.amount)) : null, 'amt'], ['Reference', transferInfo.reference, 'ref']]
+                .filter(([, value]) => value)
+                .map(([label, value, key]) => (
+                  <div className="xfer-row" key={key}>
+                    <span className="muted">{label}</span>
+                    <div className="xfer-val">
+                      <b className={key === 'acct' ? 'mono lg' : ''}>{value}</b>
+                      <button className="xfer-copy" onClick={() => copy(value, key)} aria-label={'Copy ' + label}>
+                        <Icon name={copied === key ? 'check' : 'copy'} size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
         <div className="success-card card">
           <div className="row between"><span className="muted">Order number</span><b style={{ fontFamily: 'var(--font-display)', fontSize: 17 }}>{orderId}</b></div>
-          <div className="row between" style={{ marginTop: 12 }}><span className="muted">Estimated delivery</span><b style={{ color: 'var(--success)' }}>{eta}</b></div>
+          {!pending && <div className="row between" style={{ marginTop: 12 }}><span className="muted">Estimated delivery</span><b style={{ color: 'var(--success)' }}>{eta}</b></div>}
         </div>
         <div className="row" style={{ gap: 12, justifyContent: 'center', marginTop: 26, flexWrap: 'wrap' }}>
           <button className="btn btn-primary btn-lg" onClick={() => go('tracking', orderId)}><Icon name="truck" size={18} /> Track order</button>
