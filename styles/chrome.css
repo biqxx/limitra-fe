@@ -99,7 +99,12 @@
 
 /* ---- nav ---- */
 .nav-bar { background: var(--surface); border-bottom: 1px solid var(--border); height: 52px; position: relative; }
-.nav-bar .wrap.row { gap: 2px !important; flex-wrap: nowrap; overflow: visible; }
+/* When the category links + utility links don't all fit, scroll horizontally
+   instead of silently overflowing past the edge (overflow:visible) or hiding
+   items (the old @media nav-collapsible rule, removed below) — every link
+   stays reachable at any width down to where the mobile nav takes over. */
+.nav-bar .wrap.row { gap: 2px !important; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
+.nav-bar .wrap.row::-webkit-scrollbar { display: none; }
 .nav-cat { position: relative; display: inline-flex; align-items: stretch; }
 .nav-cat-chev { opacity: .6; transition: transform .2s var(--ease); }
 .nav-cat:hover .nav-cat-chev { transform: rotate(180deg); opacity: 1; }
@@ -137,11 +142,6 @@
 .nav-link.deals svg { transform: translateY(-2px); }
 .nav-link.soft { color: var(--text-faint); font-weight: 600; font-size: 13px; padding: 8px 9px; }
 .nav-badge-new { background: var(--accent); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 10px; letter-spacing: .03em; padding: 2px 6px; border-radius: var(--r-pill); line-height: 1.4; }
-
-/* collapse nav-bar category links at tablet-range widths (bar still shows >1024px) */
-@media (max-width: 1180px) {
-  .nav-bar .nav-collapsible { display: none !important; }
-}
 
 /* ---- mega ---- */
 .mega { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: var(--shadow-lg); z-index: 40; display: grid; grid-template-columns: 1fr 320px; gap: 28px; padding: 26px max(28px, calc((100vw - var(--maxw))/2 + 28px)); animation: megaIn .22s var(--ease); }
