@@ -14,15 +14,6 @@ const MS_TRUST = [
   ['spark', 'AI content tools for your store'],
 ];
 
-const MS_PREVIEW = [
-  { label: 'Phones', price: '₦680,000', tint: ['rgba(4,56,182,.12)', 'rgba(4,56,182,.04)'] },
-  { label: 'Beauty', price: '₦72,000', tint: ['rgba(246,114,8,.14)', 'rgba(246,114,8,.05)'] },
-  { label: 'Fashion', price: '₦48,000', tint: ['rgba(16,122,69,.12)', 'rgba(16,122,69,.04)'] },
-  { label: 'Home', price: '₦85,000', tint: ['rgba(142,85,230,.12)', 'rgba(142,85,230,.04)'] },
-];
-
-const MS_PERKS = ['Personal store URL', 'Curate multiple products', 'Store analytics', 'AI content studio'];
-
 const MS_STEPS = [
   ['store', 'Create your store', 'Pick a name and claim your unique, shareable store URL in seconds.'],
   ['cart', 'Choose products', 'Pick from millions of products across every category on Limitra.'],
@@ -55,7 +46,7 @@ export function MicroStoresPage() {
           <div className="ms-hero-copy">
             <span className="badge badge-soft">Limitra MicroStores™</span>
             <h1>Become a Limitra<br /><span className="hl">MicroStore Partner</span></h1>
-            <p>Curate products, share your own storefront and earn on every delivered sale. Limitra still handles inventory, pricing, checkout, payment, fulfillment and returns — you just build the audience.</p>
+            <p>Curate products, share your own storefront and earn on every delivered sale. Limitra still handles inventory, pricing, checkout, payment, fulfillment and returns&hellip; you just build the audience. Earn <b>commissions</b> on valid orders.</p>
             <div className="hero-cta">
               <button className="btn btn-accent btn-lg" onClick={() => go('auth', 'signup')}>Become a MicroStore Partner <Icon name="arrowr" size={18} /></button>
               <button className="btn btn-ghost-light btn-lg" onClick={() => go('microstoresExplore')}>Explore MicroStores</button>
@@ -68,33 +59,7 @@ export function MicroStoresPage() {
           </div>
 
           <div className="ms-hero-visual">
-            <div className="ms-phone">
-              <div className="ms-phone-screen">
-                <div className="ms-phone-head">
-                  <span className="ms-phone-avatar">A</span>
-                  <div><b>Amara&rsquo;s MicroStore</b><small>Curated by Amara</small></div>
-                </div>
-                <div className="ms-phone-tabs">
-                  {['All', 'Phones', 'Beauty', 'Fashion', 'Home'].map((t, i) => <span key={t} className={i === 0 ? 'on' : ''}>{t}</span>)}
-                </div>
-                <div className="ms-phone-grid">
-                  {MS_PREVIEW.map(p => (
-                    <div key={p.label} className="ms-phone-item">
-                      <div className="ms-phone-thumb"><Placeholder label={p.label} product={{ tint: p.tint }} /></div>
-                      <b>{p.price}</b>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="ms-hero-perks">
-            <span className="ms-hero-perks-ic"><Icon name="store" size={22} /></span>
-            <span className="ms-hero-url"><Icon name="share" size={14} /> limitra.com.ng/amara</span>
-            <div className="ms-hero-perk-list">
-              {MS_PERKS.map(p => <span key={p}><Icon name="check" size={15} stroke={3} /> {p}</span>)}
-            </div>
+            <img src="/assets/img/micro.png" alt="A Limitra MicroStore partner's storefront on her phone" />
           </div>
         </div>
       </section>
