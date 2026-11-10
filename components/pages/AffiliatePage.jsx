@@ -61,19 +61,8 @@ export function AffiliatePage() {
               <span><Icon name="check" size={15} stroke={3} /> Up to 5%</span>
             </div>
           </div>
-          <div className="aff-hero-card">
-            <div className="ahc-top">
-              <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>This month&rsquo;s earnings</span>
-              <span className="status-pill ok">+18%</span>
-            </div>
-            <div className="ahc-amount">₦ 248,500</div>
-            <div className="ahc-bars">
-              {[40, 62, 48, 75, 58, 88, 96].map((h, i) => <span key={i} style={{ height: h + '%' }} className={i === 6 ? 'on' : ''} />)}
-            </div>
-            <div className="ahc-rows">
-              <div className="ahc-row"><span className="ahc-ic"><Icon name="bag" size={15} /></span><div><b>312 orders</b><small className="muted">via your links</small></div><b className="ahc-val">₦198k</b></div>
-              <div className="ahc-row"><span className="ahc-ic"><Icon name="user" size={15} /></span><div><b>1,940 clicks</b><small className="muted">16% conversion</small></div><b className="ahc-val ok">₦50k</b></div>
-            </div>
+          <div className="aff-hero-visual">
+            <img src="/assets/img/affiliate-hero.png" alt="An affiliate sharing their Limitra link, earning 1-5% commission" />
           </div>
         </div>
       </section>

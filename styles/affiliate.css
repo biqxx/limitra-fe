@@ -20,7 +20,9 @@
 .aff-hero-trust span { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 600; font-size: 14px; color: rgba(255,255,255,.9); }
 .aff-hero-trust svg { color: var(--green); }
 
-/* hero earnings card */
+.aff-hero-visual img { display: block; width: 100%; height: auto; max-width: 520px; margin: 0 auto; }
+
+/* hero earnings card — still used by Celebrity Stores' own hero visual */
 .aff-hero-card { background: var(--surface); border-radius: var(--r-xl); padding: 24px; box-shadow: var(--shadow-pop); }
 .ahc-top { display: flex; align-items: center; justify-content: space-between; }
 .ahc-amount { font-family: var(--font-display); font-weight: 700; font-size: 38px; letter-spacing: -.02em; margin: 6px 0 18px; color: var(--text); }
@@ -109,6 +111,7 @@
 @media (max-width: 1024px) {
   .aff-hero-grid { grid-template-columns: 1fr; gap: 36px; }
   .aff-hero-card { max-width: 420px; }
+  .aff-hero-visual img { max-width: 420px; }
   .aff-steps { grid-template-columns: repeat(2, 1fr); gap: 28px 22px; }
   .aff-perks, .aff-perks.five { grid-template-columns: repeat(2, 1fr); }
   .aff-apply-grid { grid-template-columns: 1fr; gap: 32px; }
