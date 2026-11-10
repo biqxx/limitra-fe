@@ -2,23 +2,39 @@
    Shared across the Affiliate, MicroStores and Celebrity Stores landing pages
    (see components/pages/CreatorPrograms.jsx). */
 
+.aff-sec-head h2 .hl { color: var(--accent); }
+
 .cp-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; align-items: stretch; }
-.cp-card { padding: 24px; display: flex; flex-direction: column; gap: 14px; border: 1.5px solid var(--border); }
+.cp-card { position: relative; overflow: hidden; padding: 24px; display: flex; flex-direction: column; gap: 14px; border: 1.5px solid var(--border); background: var(--surface-2); }
 .cp-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-md); }
-.cp-card-head { display: flex; align-items: flex-start; gap: 12px; }
-.cp-card-ic { width: 40px; height: 40px; border-radius: var(--r-md); background: var(--primary-soft); color: var(--primary); display: grid; place-items: center; flex: none; }
-.cp-card.on .cp-card-ic { background: var(--accent); color: #fff; }
-.cp-card-head b { font-family: var(--font-display); font-weight: 700; font-size: 16.5px; display: block; }
-.cp-card-head small { font-size: 12px; display: block; margin-top: 2px; }
-.cp-card-desc { font-size: 13.5px; line-height: 1.55; text-wrap: pretty; flex: none; }
-.cp-card-min { display: flex; align-items: center; gap: 10px; background: var(--surface-2); border-radius: var(--r-md); padding: 10px 12px; }
+.cp-card.dark { background: linear-gradient(160deg, var(--navy) 0%, var(--navy-700) 100%); border-color: transparent; color: #fff; }
+/* .dark's own border-color would otherwise win over .on's (same specificity,
+   .dark declared later) and silently hide the active-page indicator on
+   whichever page the Celebrity Stores card's own page is current on. */
+.cp-card.on.dark { border-color: #fff; box-shadow: 0 0 0 1px #fff, var(--shadow-md); }
+
+.cp-card-photo { position: absolute; top: 0; right: 0; width: 42%; height: 58%; object-fit: cover; object-position: top; -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%); mask-image: linear-gradient(to bottom, #000 72%, transparent 100%); pointer-events: none; }
+
+.cp-card-head { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; max-width: 58%; }
+.cp-card-head b { font-family: var(--font-display); font-weight: 700; font-size: 18px; margin-top: 6px; }
+.cp-card-head small { font-size: 12.5px; color: var(--text-muted); }
+.cp-card.dark .cp-card-head small { color: rgba(255,255,255,.7); }
+.cp-card-desc { position: relative; z-index: 1; font-size: 13.5px; line-height: 1.55; text-wrap: pretty; flex: none; max-width: 58%; color: var(--text-muted); }
+.cp-card.dark .cp-card-desc { color: rgba(255,255,255,.78); }
+
+.cp-card-ribbon { position: relative; z-index: 1; align-self: flex-start; font-family: var(--font-display); font-weight: 700; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: #fff; background: var(--navy); padding: 6px 12px; border-radius: var(--r-pill); }
+.cp-card.dark .cp-card-ribbon { background: var(--accent); }
+
+.cp-card-stats { position: relative; z-index: 1; display: flex; align-items: center; gap: 14px; background: var(--surface); border-radius: var(--r-lg); padding: 14px 16px; box-shadow: var(--shadow-sm); }
+.cp-card-min { display: flex; align-items: center; gap: 10px; flex: none; padding-right: 14px; border-right: 1px solid var(--border); }
 .cp-card-min svg { color: var(--text-faint); flex: none; }
-.cp-card-min b { display: block; font-family: var(--font-display); font-weight: 700; font-size: 15px; line-height: 1.2; }
-.cp-card-min small { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .04em; }
-.cp-card-list { display: flex; flex-direction: column; gap: 9px; flex: 1; }
-.cp-card-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--text-muted); line-height: 1.45; }
+.cp-card-min small { display: block; font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .03em; }
+.cp-card-min b { display: block; font-family: var(--font-display); font-weight: 700; font-size: 17px; line-height: 1.2; color: var(--text); }
+.cp-card-list { display: flex; flex-direction: column; gap: 7px; flex: 1; }
+.cp-card-list li { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: var(--text-muted); line-height: 1.4; }
 .cp-card-list svg { color: var(--success); flex: none; margin-top: 2px; }
-.cp-card-foot { text-align: center; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; }
+.cp-card-foot { position: relative; z-index: 1; text-align: center; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--text-muted); }
+.cp-card.dark .cp-card-foot { color: rgba(255,255,255,.8); }
 
 /* commission rate table */
 .cp-rate-card { padding: 30px; }

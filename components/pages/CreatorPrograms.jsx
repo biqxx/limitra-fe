@@ -6,9 +6,11 @@
    form + FAQ section. Keeping these in one place means the three pages stay
    visually and numerically consistent instead of drifting copies. */
 import { useState } from 'react';
-import { Icon } from '@/components/icons/Icon';
+import { Icon, Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { CREATOR_PROGRAMS } from '@/lib/creatorPrograms';
+
+const CP_PHOTO = '/assets/img/a09d96b52fb7936342b34355ffca656885ce52ff.png';
 
 export function CreatorProgramSwitcher({ active }) {
   const { go } = useStore();
@@ -17,23 +19,28 @@ export function CreatorProgramSwitcher({ active }) {
       <div className="wrap">
         <div className="aff-sec-head">
           <span className="eyebrow">Three ways to earn, one Limitra</span>
-          <h2>Choose your Creator Program</h2>
+          <h2>Choose your <span className="hl">Creator Program</span></h2>
           <p className="muted" style={{ marginTop: 10, textWrap: 'pretty' }}>Whether you are sharing products, building your own store or have a massive audience, there&rsquo;s a place for you.</p>
         </div>
         <div className="cp-switch">
           {CREATOR_PROGRAMS.map(p => (
-            <div key={p.key} className={'cp-card card' + (active === p.key ? ' on' : '')}>
+            <div key={p.key} className={'cp-card card' + (active === p.key ? ' on' : '') + (p.dark ? ' dark' : '')}>
+              <img className="cp-card-photo" src={CP_PHOTO} alt="" aria-hidden="true" />
               <div className="cp-card-head">
-                <span className="cp-card-ic"><Icon name={p.icon} size={20} /></span>
-                <div><b>{p.name}</b><small className="muted">{p.tagline}</small></div>
+                <Logo height={18} white={p.dark} />
+                <b>{p.name}</b>
+                <small>{p.tagline}</small>
               </div>
-              <p className="muted cp-card-desc">{p.desc}</p>
-              <div className="cp-card-min"><Icon name="user" size={16} /><div><b>{p.minValue}</b><small>{p.minSub}</small></div></div>
-              <ul className="cp-card-list">
-                {p.bullets.map(b => <li key={b}><Icon name="check" size={13} stroke={3} /> {b}</li>)}
-              </ul>
+              <p className="cp-card-desc">{p.desc}</p>
+              {p.ribbon && <span className="cp-card-ribbon">{p.ribbon}</span>}
+              <div className="cp-card-stats">
+                <div className="cp-card-min"><Icon name="user" size={18} /><div><small>Minimum</small><b>{p.minValue}</b><small>{p.minSub}</small></div></div>
+                <ul className="cp-card-list">
+                  {p.bullets.map(b => <li key={b}><Icon name="check" size={13} stroke={3} /> {b}</li>)}
+                </ul>
+              </div>
               <button className="btn btn-accent btn-block btn-sm" onClick={() => go(p.route)}>{p.cta} <Icon name="arrowr" size={14} /></button>
-              <span className="cp-card-foot muted">{p.footer}</span>
+              <span className="cp-card-foot">{p.footer}</span>
             </div>
           ))}
         </div>
