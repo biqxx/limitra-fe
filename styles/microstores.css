@@ -45,6 +45,7 @@
 .ms-store-thumbs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .ms-store-thumb { position: relative; aspect-ratio: 1; border-radius: var(--r-sm); overflow: hidden; }
 .ms-store-thumb .ph span { font-size: 7px; }
+.ms-store-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* final CTA */
 .ms-cta { background: linear-gradient(120deg, var(--orange) 0%, #FF8A3D 60%, #FFAE5C 100%); border-radius: var(--r-xl); padding: 40px; text-align: center; }
@@ -117,4 +118,37 @@
 }
 @media (max-width: 560px) {
   .ms-dir-grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- celebrity stores: advantage box + spotlight ---------- */
+.cs-advantage-box { border: 1.5px solid var(--primary); border-radius: var(--r-xl); padding: 36px; }
+.cs-advantage-box .aff-perk { background: var(--surface); }
+/* uniform wallet icon across the box, tinted per card to match the design */
+.cs-advantage-box .aff-perk:nth-child(1) .aff-perk-ic,
+.cs-advantage-box .aff-perk:nth-child(2) .aff-perk-ic { background: var(--primary-soft); color: var(--primary); }
+.cs-advantage-box .aff-perk:nth-child(3) .aff-perk-ic { background: var(--accent-soft); color: var(--accent); }
+.cs-advantage-box .aff-perk:nth-child(4) .aff-perk-ic,
+.cs-advantage-box .aff-perk:nth-child(5) .aff-perk-ic { background: rgba(142,85,230,.14); color: #8E55E6; }
+
+.cs-spotlight { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.cs-spotlight-card { position: relative; border: 1px solid var(--border); border-radius: var(--r-xl); overflow: hidden; background: var(--surface); cursor: pointer; transition: box-shadow .15s, transform .15s; }
+.cs-spotlight-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.cs-spotlight-photo { position: relative; aspect-ratio: 4/3; background: var(--surface-2); }
+.cs-spotlight-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cs-spotlight-photo .ph { height: 100%; }
+.cs-spotlight-caption { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 16px 14px; background: linear-gradient(to top, rgba(0,0,0,.7), transparent); color: #fff; }
+.cs-spotlight-caption b { display: block; font-family: var(--font-display); font-weight: 700; font-size: 16px; }
+.cs-spotlight-caption small { font-size: 12px; opacity: .9; }
+.cs-spotlight-body { padding: 14px 16px 0; }
+.cs-spotlight-body .link-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 700; }
+.cs-spotlight-thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 10px 16px 16px; }
+.cs-spotlight-soon { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; min-height: 280px; background: var(--navy); color: #fff; cursor: default; }
+.cs-spotlight-soon:hover { transform: none; box-shadow: none; }
+.cs-spotlight-soon-ic { width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,.14); display: grid; place-items: center; margin-bottom: 4px; }
+.cs-spotlight-soon-ic img { width: 24px; height: auto; }
+.cs-spotlight-soon small { color: var(--accent); font-weight: 700; }
+
+@media (max-width: 860px) {
+  .cs-advantage-box { padding: 24px; }
+  .cs-spotlight { grid-template-columns: 1fr; }
 }
