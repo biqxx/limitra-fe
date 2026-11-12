@@ -401,11 +401,12 @@ export function CheckoutPage() {
     setPlaceError('');
     const apiMethod = PAYMENT_METHOD_API[payMethod];
     try {
-      // Quote prices the cart against the chosen address/method/promo/credit;
-      // orders.create() then converts the most recent quote for this cart
-      // into a real order (its own request body is just an idempotency key —
-      // see lib/api/endpoints.js).
-      await checkoutApi.quote({
+      // Quote prices the cart against the chosen address/method/promo/credit
+      // and returns a quote_id; ordersApi.create() then needs that quote_id
+      // plus payment_method/contact_email in its own body — contrary to the
+      // spec, which claims no request body at all (confirmed live: order
+      // creation 422s without them). See lib/api/endpoints.js.
+      const quote = await checkoutApi.quote({
         cart_id: cartId,
         address_id: selAddr,
         // PICKUP_METHOD_VALUE is a local sentinel (no zone-matched pickup
@@ -419,7 +420,12 @@ export function CheckoutPage() {
         promotion_code: promo?.code || undefined,
         use_wallet_credit: useCredit || undefined,
       });
-      const order = await ordersApi.create(idemKey);
+      const quoteId = quote?.quote_id ?? quote?.id ?? quote?.data?.quote_id ?? quote?.data?.id;
+      const order = await ordersApi.create({
+        quote_id: quoteId,
+        payment_method: apiMethod,
+        contact_email: email,
+      }, idemKey);
       const newOrderId = order?.id ?? order?.order_id ?? order?.order_number ?? order?.data?.id ?? null;
 
       // The order exists from here on regardless of payment outcome — the
