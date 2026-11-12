@@ -7,7 +7,7 @@ import { useStore } from '@/components/store/StoreProvider';
 import { Modal, AddressForm, Field } from '@/components/forms/Shared';
 import { Thumb, REAL_IMG, QtyStepper, Breadcrumbs, EmptyState } from '@/components/ui/Shared';
 import { naira, byId, unitPriceOf } from '@/lib/data';
-import { ordersApi, checkoutApi, paymentsApi, promotionsApi, deliveryApi } from '@/lib/api/endpoints';
+import { ordersApi, checkoutApi, paymentsApi, promotionsApi, deliveryApi, pickupLocationsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
 // Real payment_method values the backend accepts (POST /checkout/quote) — the
@@ -202,11 +202,16 @@ export function CheckoutPage() {
   const [deliveryOptions, setDeliveryOptions] = useState([]);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
   const [deliveryError, setDeliveryError] = useState('');
+  const [pickupLocations, setPickupLocations] = useState([]);
+  const [pickupLoading, setPickupLoading] = useState(false);
+  const [pickupError, setPickupError] = useState('');
+  const [selectedPickup, setSelectedPickup] = useState(null);
   const [payMethod, setPayMethod] = useState('card');
   const [addrModal, setAddrModal] = useState(false);
   const [errs, setErrs] = useState({});
 
   const activeAddr = addresses.find(a => a.id === selAddr);
+  const selectedOption = deliveryOptions.find(o => o.value === method);
 
   useEffect(() => { window.scrollTo({ top: 0 }); }, [step]);
 
@@ -248,13 +253,21 @@ export function CheckoutPage() {
         // single { zone, methods: [...] }) nest the actual methods one level
         // deeper — flatten those into a plain list of methods.
         if (list.length && list.every(x => Array.isArray(x?.methods))) list = list.flatMap(z => z.methods);
-        const normalized = list.map(o => ({
-          value: String(o.code ?? o.method ?? o.slug ?? o.key ?? o.id ?? o.name ?? ''),
-          label: o.name ?? o.label ?? o.title ?? 'Delivery option',
-          sub: o.description ?? o.eta ?? o.duration ?? o.delivery_time ?? '',
-          fee: Number(o.fee ?? o.price ?? o.amount ?? o.cost ?? 0),
-          disabled: o.available === false || o.is_available === false || !!o.disabled,
-        })).filter(o => o.value);
+        const normalized = list.map(o => {
+          const label = o.name ?? o.label ?? o.title ?? 'Delivery option';
+          return {
+            value: String(o.code ?? o.method ?? o.slug ?? o.key ?? o.id ?? o.name ?? ''),
+            label,
+            sub: o.description ?? o.eta ?? o.duration ?? o.delivery_time ?? '',
+            fee: Number(o.fee ?? o.price ?? o.amount ?? o.cost ?? 0),
+            disabled: o.available === false || o.is_available === false || !!o.disabled,
+            // No field in the undocumented response explicitly flags a pickup-type
+            // method — inferred from its own type/flag fields or, failing that,
+            // its label text, since "pickup" methods need a location picked from
+            // GET /pickup-locations rather than just being delivered.
+            isPickup: !!(o.type === 'pickup' || o.requires_pickup_location || o.is_pickup || /pickup|collect/i.test(label)),
+          };
+        }).filter(o => o.value);
         if (cancelled) return;
         if (normalized.length === 0) console.warn('[delivery] GET /delivery/options returned no usable options — raw response:', res);
         setDeliveryOptions(normalized);
@@ -270,6 +283,42 @@ export function CheckoutPage() {
     })();
     return () => { cancelled = true; };
   }, [cartId, selAddr, activeAddr?.country, activeAddr?.state, activeAddr?.city]);
+
+  // A pickup-type delivery method needs the customer to pick an actual
+  // location from GET /pickup-locations, rather than just a method name —
+  // fetched lazily, only once a pickup-type option is selected.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!selectedOption?.isPickup) { setPickupLocations([]); setSelectedPickup(null); return; }
+      setPickupLoading(true);
+      setPickupError('');
+      try {
+        const res = await pickupLocationsApi.list({
+          country: activeAddr?.country || 'NG',
+          state: activeAddr?.state || undefined,
+          city: activeAddr?.city || undefined,
+        });
+        let list = Array.isArray(res) ? res
+          : (res?.data ?? res?.locations ?? res?.items ?? res?.options ?? res?.results ?? res?.list ?? []);
+        if (!Array.isArray(list)) list = [];
+        const normalized = list.map(o => ({
+          id: o.id ?? o.code ?? o.slug ?? o.key,
+          name: o.name ?? o.label ?? o.title ?? 'Pickup location',
+          address: o.address ?? o.line1 ?? o.description ?? [o.city, o.state].filter(Boolean).join(', '),
+        })).filter(o => o.id != null);
+        if (cancelled) return;
+        if (normalized.length === 0) console.warn('[pickup] GET /pickup-locations returned no usable locations — raw response:', res);
+        setPickupLocations(normalized);
+        setSelectedPickup(prev => (prev && normalized.some(o => o.id === prev)) ? prev : (normalized[0]?.id ?? null));
+      } catch (e) {
+        if (!cancelled) setPickupError(messageFrom(e));
+      } finally {
+        if (!cancelled) setPickupLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedOption?.isPickup, activeAddr?.country, activeAddr?.state, activeAddr?.city]);
 
   // Returning from a payment gateway's hosted page (card/bank_transfer
   // redirect via `callback_url`). The exact query param a gateway appends
@@ -331,6 +380,7 @@ export function CheckoutPage() {
     if (!activeAddr) e.addr = 'Select or add a delivery address';
     if (!/^\S+@\S+\.\S+$/.test(email)) e.email = 'Enter a valid email';
     if (!method) e.method = 'Select a delivery method';
+    if (selectedOption?.isPickup && !selectedPickup) e.pickup = 'Select a pickup location';
     setErrs(e); return Object.keys(e).length === 0;
   };
 
@@ -353,6 +403,9 @@ export function CheckoutPage() {
         cart_id: cartId,
         address_id: selAddr,
         delivery_method: method,
+        // Not in the documented quote schema, but sent defensively when a
+        // pickup-type method is selected — see the pickup-locations effect.
+        pickup_location_id: selectedOption?.isPickup ? selectedPickup || undefined : undefined,
         payment_method: apiMethod,
         promotion_code: promo?.code || undefined,
         use_wallet_credit: useCredit || undefined,
@@ -413,8 +466,6 @@ export function CheckoutPage() {
       setPlacing(false);
     }
   };
-
-  const selectedOption = deliveryOptions.find(o => o.value === method);
 
   if (orderId) return <OrderSuccess orderId={orderId} email={email} eta={selectedOption?.sub} pending={!!transferInfo} transferInfo={transferInfo} />;
 
@@ -481,6 +532,32 @@ export function CheckoutPage() {
                   ))}
                 </div>
               )}
+
+              {selectedOption?.isPickup && (
+                <div style={{ marginTop: 16 }}>
+                  <h4 className="co-sub">Pickup location</h4>
+                  {errs.pickup && <span className="err-msg" style={{ marginBottom: 10, display: 'block' }}>{errs.pickup}</span>}
+                  {pickupLoading ? (
+                    <p className="muted">Loading pickup locations…</p>
+                  ) : pickupError ? (
+                    <div className="co-note" style={{ color: 'var(--danger)' }}>
+                      <Icon name="info" size={17} />{pickupError}
+                    </div>
+                  ) : pickupLocations.length === 0 ? (
+                    <p className="muted">No pickup locations are available for this address.</p>
+                  ) : (
+                    <div className="radio-cards">
+                      {pickupLocations.map(p => (
+                        <label key={p.id} className={'radio-card' + (selectedPickup === p.id ? ' on' : '')}>
+                          <input type="radio" name="pickup" checked={selectedPickup === p.id} onChange={() => setSelectedPickup(p.id)} />
+                          <span className="rc-radio" />
+                          <div className="rc-body"><b>{p.name}</b>{p.address && <small>{p.address}</small>}</div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -515,6 +592,7 @@ export function CheckoutPage() {
                 <div className="rb-head"><span><Icon name="location" size={16} /> Delivery to</span><button className="link-btn" onClick={() => setStep(0)}>Edit</button></div>
                 {activeAddr && <p><b>{activeAddr.recipient_name || (activeAddr.type === 'billing' ? 'Billing address' : 'Delivery address')}</b>{activeAddr.phone && <> · {activeAddr.phone}</>}<br />{[activeAddr.line1 ?? activeAddr.address_line_1, activeAddr.line2 ?? activeAddr.address_line_2].filter(Boolean).join(', ')}, {activeAddr.city}{activeAddr.state ? ', ' + activeAddr.state : ''}<br />{email}</p>}
                 <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>{methodLabel}</div>
+                {selectedOption?.isPickup && (() => { const p = pickupLocations.find(l => l.id === selectedPickup); return p ? <div className="muted" style={{ fontSize: 13 }}>Pickup at: <b>{p.name}</b>{p.address ? ` — ${p.address}` : ''}</div> : null; })()}
               </div>
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="card" size={16} /> Payment</span><button className="link-btn" onClick={() => setStep(1)}>Edit</button></div>
