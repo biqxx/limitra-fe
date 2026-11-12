@@ -10,6 +10,7 @@ import { Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { useStore } from '@/components/store/StoreProvider';
 import { naira, PRODUCTS, CATEGORIES } from '@/lib/data';
 import { getVariants, setVariants, applyStoredVariants } from '@/lib/variantsStore';
+import { cartesianCombos, defaultSku, groupsFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
 import { productsApi, categoriesApi, adminProductsApi, sourcingApi, adminOrdersApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { Kpi } from '@/components/charts/Charts';
@@ -69,63 +70,6 @@ let ADMIN_EXTRA_CATS = [];
 // by comboKey() so it survives regardless of group ordering. saveAdminProduct
 // cross-multiplies the groups with variantStock to build the flat payload the
 // backend actually validates.
-function comboKey(attributes) {
-  return Object.entries(attributes || {})
-    .filter(([, v]) => v != null && v !== '')
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}:${v}`)
-    .join('|');
-}
-
-function cartesianCombos(groups) {
-  const usable = (groups || []).filter(g => g?.name && Array.isArray(g.options) && g.options.length);
-  if (!usable.length) return [];
-  const label = (g, o) => (g.type === 'color' ? o.name : o.label);
-  const attrSets = usable.reduce(
-    (acc, g) => acc.flatMap(attrs => g.options.map(o => ({ ...attrs, [g.name]: label(g, o) }))),
-    [{}]
-  );
-  return attrSets.map(attributes => ({ attributes, key: comboKey(attributes) }));
-}
-
-function slugPart(s) {
-  return String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 12);
-}
-
-function defaultSku(productName, attributes) {
-  const parts = [slugPart(productName).slice(0, 6) || 'PROD', ...Object.values(attributes || {}).map(v => slugPart(v).slice(0, 4))];
-  return parts.filter(Boolean).join('-');
-}
-
-// Best-effort reconstruction of authoring groups from the backend's flat
-// records, for a product whose variants were set up on a different browser
-// (so this browser's localStorage copy is empty) — loses colour swatches and
-// per-option price overrides since the backend never stored those.
-function groupsFromFlatVariants(flat) {
-  const order = [];
-  const sets = new Map();
-  (flat || []).forEach(v => {
-    const attrs = v?.attributes && typeof v.attributes === 'object' ? v.attributes : {};
-    Object.entries(attrs).forEach(([name, value]) => {
-      if (value == null || value === '') return;
-      if (!sets.has(name)) { sets.set(name, new Set()); order.push(name); }
-      sets.get(name).add(String(value));
-    });
-  });
-  return order.map(name => ({ name, type: 'text', options: [...sets.get(name)].map(label => ({ label, price: null })) }));
-}
-
-function stockMapFromFlatVariants(flat) {
-  const map = {};
-  (flat || []).forEach(v => {
-    if (!v || typeof v !== 'object') return;
-    const attrs = v.attributes && typeof v.attributes === 'object' ? v.attributes : {};
-    const key = comboKey(attrs);
-    if (key) map[key] = { sku: v.sku || '', stock: v.stock ?? '' };
-  });
-  return map;
-}
-
 export const mapAdminProduct = (p) => {
   const flatVariants = Array.isArray(p.variants) ? p.variants.filter(v => v && typeof v === 'object') : [];
   const localGroups = getVariants(p.id);

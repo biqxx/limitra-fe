@@ -9,13 +9,20 @@ import { ShareButton } from '@/components/share/Share';
 import { VideoStage, VID_POSTER, VIDEOS } from '@/components/video/Video';
 import { CATEGORIES, naira, byId, bySlug, byCat, effectivePrice } from '@/lib/data';
 import { productsApi } from '@/lib/api/endpoints';
+import { comboKey, groupsFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
 
 function mapProductDetails(product) {
   const firstImage = Array.isArray(product.images) ? product.images[0] : null;
   const imageUrl = typeof firstImage === 'string' ? firstImage : firstImage?.url || firstImage?.path;
-  const variants = Array.isArray(product.variants)
-    ? product.variants.filter(group => group?.name && Array.isArray(group.options))
-    : [];
+  // The real backend returns `variants` as a flat array of per-SKU records
+  // ({sku, attributes, stock}, confirmed live via a 422 on product creation)
+  // — NOT the {name,type,options} "attribute group" shape this page renders
+  // (swatches/chips per dimension). Reconstruct the groups from the flat
+  // records so a product with real backend variants actually shows them;
+  // variantStock keeps the per-combination stock for availability checks.
+  const flatVariants = Array.isArray(product.variants) ? product.variants.filter(v => v && typeof v === 'object') : [];
+  const variants = groupsFromFlatVariants(flatVariants);
+  const variantStock = stockMapFromFlatVariants(flatVariants);
   const specs = Array.isArray(product.specifications)
     ? product.specifications.filter(spec => spec?.name).map(spec => [spec.name, spec.value ?? ''])
     : [];
@@ -37,6 +44,7 @@ function mapProductDetails(product) {
     bestseller: Boolean(product.is_bestseller),
     specs,
     variants,
+    variantStock,
   };
 }
 
@@ -183,6 +191,19 @@ export function ProductPage({ id }) {
   const variants = Array.isArray(product.variants) ? product.variants : [];
   const variantKey = JSON.stringify(selected);
   const price = effectivePrice(product, selected);
+  // Real per-combination stock (e.g. "Red / 256GB" sold out while "Blue / 256GB"
+  // isn't) only exists once every group has a selection — falls back to the
+  // product's overall stock otherwise, same as before this existed.
+  const selectedAttributes = {};
+  variants.forEach(g => {
+    const sel = selected[g.name];
+    if (sel != null) selectedAttributes[g.name] = g.type === 'color' ? sel.name : sel.label;
+  });
+  const comboStockRec = variants.length && Object.keys(selectedAttributes).length === variants.length
+    ? product.variantStock?.[comboKey(selectedAttributes)]
+    : null;
+  const comboStock = comboStockRec ? Number(comboStockRec.stock) || 0 : null;
+  const comboOutOfStock = comboStock != null && comboStock <= 0;
   const buy = (checkout) => {
     const selectedVariants = {};
     variants.forEach(g => {
@@ -211,7 +232,7 @@ export function ProductPage({ id }) {
             <span className="muted" style={{ fontSize: 13 }}>·</span>
             <a className="link-btn" onClick={() => setTab('reviews')}>{product.reviews.toLocaleString()} reviews</a>
             <span className="muted" style={{ fontSize: 13 }}>·</span>
-            <span className="row" style={{ gap: 5, color: 'var(--success)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13 }}><Icon name="check" size={14} stroke={3} /> {product.stock > 0 ? 'In stock' : 'Out of stock'}</span>
+            <span className="row" style={{ gap: 5, color: comboOutOfStock ? 'var(--red)' : 'var(--success)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13 }}><Icon name="check" size={14} stroke={3} /> {comboOutOfStock ? 'Out of stock for this option' : product.stock > 0 ? 'In stock' : 'Out of stock'}</span>
           </div>
 
           <div className="pdp-price">
@@ -256,11 +277,15 @@ export function ProductPage({ id }) {
 
           <div className="buy-row">
             <QtyStepper value={qty} onChange={q => setQty(Math.max(1, q))} />
-            <button className="btn btn-primary btn-lg" style={{ flex: 1 }} onClick={() => buy(false)}><Icon name="cart" size={18} /> Add to cart</button>
-            <button className="btn btn-accent btn-lg" style={{ flex: 1 }} onClick={() => buy(true)}>Buy now</button>
+            <button className="btn btn-primary btn-lg" style={{ flex: 1 }} disabled={comboOutOfStock} onClick={() => buy(false)}><Icon name="cart" size={18} /> Add to cart</button>
+            <button className="btn btn-accent btn-lg" style={{ flex: 1 }} disabled={comboOutOfStock} onClick={() => buy(true)}>Buy now</button>
             <ShareButton product={product} className="btn btn-outline btn-lg share-btn icon-only" compact />
           </div>
-          {product.stock <= 5 && <p className="stock-warn"><Icon name="flame" size={14} fill="currentColor" /> Only {product.stock} left, order soon</p>}
+          {comboOutOfStock
+            ? <p className="stock-warn"><Icon name="flame" size={14} fill="currentColor" /> That option is out of stock — try a different selection above.</p>
+            : comboStock != null && comboStock <= 5
+              ? <p className="stock-warn"><Icon name="flame" size={14} fill="currentColor" /> Only {comboStock} left for this option, order soon</p>
+              : product.stock <= 5 && <p className="stock-warn"><Icon name="flame" size={14} fill="currentColor" /> Only {product.stock} left, order soon</p>}
 
           <div className="pdp-perks">
             {[['truck', 'Free delivery', 'Nationwide in 10–14 days'], ['refresh', '7-day returns', 'No questions asked'], ['shield', 'Warranty', specs.find(s => s[0] === 'Warranty')?.[1] || '12 months']].map(([ic, t, s]) => (
