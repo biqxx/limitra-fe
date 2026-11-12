@@ -111,7 +111,8 @@ export function EloAI() {
     if (!convId) {
       const res = await aiConversationsApi.create({ channel: 'web' });
       const data = res?.data ?? res;
-      convId = data?.id ?? data?.conversation_id;
+      convId = data?.id ?? data?.conversation_id ?? data?.conversation?.id;
+      if (!convId) throw new Error('Conversation was created but no id came back in the response.');
       setConversationId(convId);
     }
     const clientMessageId = genClientMessageId();
