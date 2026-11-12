@@ -179,8 +179,47 @@ function Dashboard() {
   );
 }
 
+const RETURN_REASONS = ['Item damaged or defective', 'Wrong item received', 'Not as described', 'No longer needed', 'Other'];
+
+function ReturnModal({ order, saving, onClose, onSave }) {
+  const [reason, setReason] = useState(RETURN_REASONS[0]);
+  const [note, setNote] = useState('');
+  return (
+    <Modal title={`Request a return · #${order.id}`} sub="We'll review this and follow up on next steps." onClose={onClose}>
+      <label className="adm-field" style={{ marginBottom: 14 }}>
+        <span>Reason</span>
+        <select value={reason} onChange={e => setReason(e.target.value)}>
+          {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </label>
+      <label className="adm-field">
+        <span>Details (optional)</span>
+        <textarea rows="4" value={note} onChange={e => setNote(e.target.value)} placeholder="Anything else that would help us process this" />
+      </label>
+      <div className="row" style={{ gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+        <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => onSave({ reason, note: note.trim() || undefined })} disabled={saving}>{saving ? 'Submitting…' : 'Submit request'}</button>
+      </div>
+    </Modal>
+  );
+}
+
 function OrderList({ orders }) {
-  const { go } = useStore();
+  const { go, toast } = useStore();
+  const [returning, setReturning] = useState(null); // order object or null
+  const [saving, setSaving] = useState(false);
+  const submitReturn = async (data) => {
+    setSaving(true);
+    try {
+      await ordersApi.requestReturn(returning.id, data);
+      toast('Return request submitted');
+      setReturning(null);
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div className="order-list">
       {orders.map(o => (
@@ -194,10 +233,12 @@ function OrderList({ orders }) {
           </div>
           <div className="or-actions">
             {o.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => go('tracking', o.id)}><Icon name="truck" size={15} /> Track</button>}
+            {o.status === 'delivered' && <button className="btn btn-ghost btn-sm" onClick={() => setReturning(o)}><Icon name="refresh" size={15} /> Request return</button>}
             <button className="btn btn-ghost btn-sm" onClick={() => go('shop', 'all')}>Buy again</button>
           </div>
         </div>
       ))}
+      {returning && <ReturnModal order={returning} saving={saving} onClose={() => setReturning(null)} onSave={submitReturn} />}
     </div>
   );
 }
