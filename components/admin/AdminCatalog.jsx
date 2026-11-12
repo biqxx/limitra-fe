@@ -31,7 +31,7 @@ let ADMIN_EXTRA_CATS = [];
 // `images`/`specifications`). Prefer whatever the backend actually returns;
 // fall back to the localStorage copy (lib/variantsStore.js) only for
 // products saved before the backend supported this field at all.
-export const mapAdminProduct = (p) => ({
+const mapAdminProduct = (p) => ({
   id: p.id,
   slug: p.slug,
   name: p.name,
@@ -237,9 +237,38 @@ export function AdminProducts({ editId }) {
         </table>{loaded && list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager page={pPage} pages={pPages} onPage={pSet} /></div>
       </div>
       {editing && <ProductEditDrawer key={`${editing.id}:${(editing._raw?.sources || []).map(source => source.id).join(',')}`} draft={editing} onClose={closeEditing} onSave={async (d) => {
+        const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
+        const sources = d._raw?.sources || [];
+        const sourced = Boolean(sources.length);
+        const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft', variants: d.variants || [] };
+        if (!sourced) body.price = Number(d.price) || 0;
         try {
-          const productId = await saveAdminProduct(d, t);
-          if (productId == null) return; // blocked (pricing issue) — leave the drawer open
+          let productId = d.id;
+          if (d._new) {
+            const created = await adminProductsApi.create(body);
+            productId = created?.id ?? productId;
+            t(d.status === 'active' ? 'Product created and published' : 'Product created');
+          } else {
+            if (body.status === 'active' && sourced) {
+              const unapprovable = sources.find(source => !['approved', 'pending_approval'].includes(source.pricing_status));
+              if (unapprovable) {
+                t(pricingIssueMessage(unapprovable));
+                return;
+              }
+
+              for (const source of sources.filter(source => source.pricing_status === 'pending_approval')) {
+                await sourcingApi.approvePrice(source.id, source.current_price_quote?.id);
+              }
+            }
+            await adminProductsApi.update(d.id, body);
+            t(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
+          }
+          // Kept as a defensive fallback alongside the real field above —
+          // in case the backend accepts `variants` but doesn't actually
+          // persist/echo it back on GET, this keeps the admin's input from
+          // silently vanishing on next load (same reasoning as before this
+          // field existed in the spec at all, see lib/variantsStore.js).
+          if (productId != null) setVariants(productId, d.variants || []);
           await loadProducts();
           closeEditing();
         } catch (e) {
