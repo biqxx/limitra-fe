@@ -25,7 +25,13 @@ let ADMIN_EXTRA_CATS = [];
 // is_featured, etc. — none of which the public OpenAPI spec documents. Mapped
 // here into the flat shape this table/drawer already expect; `_raw` keeps the
 // untouched record around for anything not mapped.
-const mapAdminProduct = (p) => ({
+// `variants` IS now documented on POST /admin/products (array type, though
+// its `items` are mistyped as plain strings — the same schema-generation
+// artifact seen elsewhere in this spec for clearly-object arrays like
+// `images`/`specifications`). Prefer whatever the backend actually returns;
+// fall back to the localStorage copy (lib/variantsStore.js) only for
+// products saved before the backend supported this field at all.
+export const mapAdminProduct = (p) => ({
   id: p.id,
   slug: p.slug,
   name: p.name,
@@ -35,11 +41,11 @@ const mapAdminProduct = (p) => ({
   category: p.category?.slug || 'all',
   status: p.status || 'draft',
   desc: p.description || '',
-  variants: getVariants(p.id),
+  variants: (Array.isArray(p.variants) && p.variants.length) ? p.variants : getVariants(p.id),
   _raw: p,
 });
 
-const productToDraft = (p) => ({
+export const productToDraft = (p) => ({
   id: p.id,
   name: p.name,
   brand: p.brand,
@@ -70,6 +76,44 @@ const pricingIssueMessage = (source) => {
   }
   return 'Recalculate and approve the supplier price before activating this product.';
 };
+
+// Shared by AdminProducts' own editor and AdminSourcing's "Review product"
+// modal (reviewing a just-imported product without leaving the Sourcing
+// page) — builds the request body, runs the sourced-pricing approval flow
+// when publishing a sourced product, creates or updates the product, and
+// persists variants (see mapAdminProduct's comment on why both the real
+// field and the localStorage fallback are written). Returns the product id
+// on success, or null if blocked (pricing issue) — caller decides what to
+// do next (close a drawer, reload a list, etc.), this never does either.
+export async function saveAdminProduct(d, toast) {
+  const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
+  const sources = d._raw?.sources || [];
+  const sourced = Boolean(sources.length);
+  const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft', variants: d.variants || [] };
+  if (!sourced) body.price = Number(d.price) || 0;
+
+  let productId = d.id;
+  if (d._new) {
+    const created = await adminProductsApi.create(body);
+    productId = created?.id ?? productId;
+    toast(d.status === 'active' ? 'Product created and published' : 'Product created');
+  } else {
+    if (body.status === 'active' && sourced) {
+      const unapprovable = sources.find(source => !['approved', 'pending_approval'].includes(source.pricing_status));
+      if (unapprovable) {
+        toast(pricingIssueMessage(unapprovable));
+        return null;
+      }
+      for (const source of sources.filter(source => source.pricing_status === 'pending_approval')) {
+        await sourcingApi.approvePrice(source.id, source.current_price_quote?.id);
+      }
+    }
+    await adminProductsApi.update(d.id, body);
+    toast(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
+  }
+  if (productId != null) setVariants(productId, d.variants || []);
+  return productId;
+}
 
 // /admin/products/[id] renders this same list page with that product's edit
 // drawer pre-opened (see app/admin/products/[id]/page.js) rather than being a
@@ -193,33 +237,9 @@ export function AdminProducts({ editId }) {
         </table>{loaded && list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager page={pPage} pages={pPages} onPage={pSet} /></div>
       </div>
       {editing && <ProductEditDrawer key={`${editing.id}:${(editing._raw?.sources || []).map(source => source.id).join(',')}`} draft={editing} onClose={closeEditing} onSave={async (d) => {
-        const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
-        const sources = d._raw?.sources || [];
-        const sourced = Boolean(sources.length);
-        const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft' };
-        if (!sourced) body.price = Number(d.price) || 0;
         try {
-          let productId = d.id;
-          if (d._new) {
-            const created = await adminProductsApi.create(body);
-            productId = created?.id ?? productId;
-            t(d.status === 'active' ? 'Product created and published' : 'Product created');
-          } else {
-            if (body.status === 'active' && sourced) {
-              const unapprovable = sources.find(source => !['approved', 'pending_approval'].includes(source.pricing_status));
-              if (unapprovable) {
-                t(pricingIssueMessage(unapprovable));
-                return;
-              }
-
-              for (const source of sources.filter(source => source.pricing_status === 'pending_approval')) {
-                await sourcingApi.approvePrice(source.id, source.current_price_quote?.id);
-              }
-            }
-            await adminProductsApi.update(d.id, body);
-            t(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
-          }
-          if (productId != null) setVariants(productId, d.variants || []);
+          const productId = await saveAdminProduct(d, t);
+          if (productId == null) return; // blocked (pricing issue) — leave the drawer open
           await loadProducts();
           closeEditing();
         } catch (e) {
@@ -334,7 +354,7 @@ function VariantsEditor({ variants, onChange }) {
   );
 }
 
-function ProductEditDrawer({ draft, onClose, onSave }) {
+export function ProductEditDrawer({ draft, onClose, onSave }) {
   const addToast = useAdminToast();
   const [f, setF] = useState({ ...draft, variants: draft.variants || draft._raw?.variants || [] });
   const [pricingBusy, setPricingBusy] = useState(false);
