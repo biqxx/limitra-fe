@@ -7,7 +7,7 @@ import { SocialMark } from '@/components/ui/SocialMark';
 import { Breadcrumbs, EmptyState, ProductCard } from '@/components/ui/Shared';
 import { Modal, AddressForm, CardForm, CardBrandMark, Field } from '@/components/forms/Shared';
 import { naira, SOCIAL_GLYPHS, byId } from '@/lib/data';
-import { profileApi, ordersApi } from '@/lib/api/endpoints';
+import { profileApi, ordersApi, favoritesApi, sharedWishlistsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
 // GET /orders and /orders/{id} have no documented response shape (generic
@@ -504,17 +504,82 @@ export function AccountPage({ tab }) {
 /* ---------------- WISHLIST ---------------- */
 export function WishlistPage() {
   const { wish, go, toast } = useStore();
+  const [sharing, setSharing] = useState(false);
   const items = wish.map(id => byId(id)).filter(Boolean);
+  const shareWishlist = async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const res = await favoritesApi.share();
+      const data = res?.data ?? res;
+      const token = data?.token ?? data?.share_token ?? data?.code;
+      const url = data?.url ?? data?.share_url ?? data?.link
+        ?? (token ? `${window.location.origin}/shared-wishlist/${token}` : null);
+      if (!url) { toast('Could not generate a share link'); return; }
+      try { await navigator.clipboard.writeText(url); toast('Wishlist link copied'); }
+      catch (e) { toast(url); }
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSharing(false);
+    }
+  };
   return (
     <AccountShell active="wishlist">
       <div className="row between" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
         <h1 style={{ fontSize: 26 }}>My wishlist <span className="muted" style={{ fontWeight: 600, fontSize: 16 }}>· {items.length} saved</span></h1>
-        {items.length > 0 && <button className="btn btn-ghost btn-sm" onClick={() => toast('Wishlist link copied')}><Icon name="share" size={15} /> Share wishlist</button>}
+        {items.length > 0 && <button className="btn btn-ghost btn-sm" onClick={shareWishlist} disabled={sharing}><Icon name="share" size={15} /> {sharing ? 'Sharing…' : 'Share wishlist'}</button>}
       </div>
       {items.length === 0
         ? <EmptyState icon="heart" title="Your wishlist is empty" body="Tap the heart on any product to save it here for later." action="Discover products" onAction={() => go('shop', 'all')} />
         : <div className="shop-grid">{items.map(p => <ProductCard key={p.id} product={p} />)}</div>}
     </AccountShell>
+  );
+}
+
+/* ---------------- SHARED WISHLIST (public) ---------------- */
+export function SharedWishlistPage({ token }) {
+  const { go } = useStore();
+  const [state, setState] = useState({ loaded: false, items: [], owner: null, error: false });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!token) { if (!cancelled) setState(s => ({ ...s, loaded: true, error: true })); return; }
+      try {
+        const res = await sharedWishlistsApi.get(token);
+        const data = res?.data ?? res;
+        const rawItems = data?.items ?? data?.favorites ?? data ?? [];
+        const ids = (Array.isArray(rawItems) ? rawItems : [])
+          .map(f => f.product_id ?? f.product?.id ?? f.id)
+          .filter(id => id != null);
+        const owner = data?.owner?.name ?? data?.user?.name
+          ?? ([data?.user?.first_name, data?.user?.last_name].filter(Boolean).join(' ') || null);
+        if (!cancelled) setState({ loaded: true, items: ids.map(byId).filter(Boolean), owner, error: false });
+      } catch (e) {
+        if (!cancelled) setState({ loaded: true, items: [], owner: null, error: true });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  if (!state.loaded) return <div className="page page-fade"><div className="wrap"><p className="muted" style={{ padding: '40px 0' }}>Loading wishlist…</p></div></div>;
+
+  if (state.error) {
+    return (
+      <div className="page page-fade"><div className="wrap">
+        <EmptyState icon="heart" title="This wishlist link isn't valid" body="It may have expired or been removed." action="Go to shop" onAction={() => go('shop', 'all')} />
+      </div></div>
+    );
+  }
+
+  return (
+    <div className="page page-fade"><div className="wrap">
+      <h1 style={{ fontSize: 26, marginBottom: 6 }}>{state.owner ? `${state.owner}'s wishlist` : 'Shared wishlist'}</h1>
+      <p className="muted" style={{ marginBottom: 18 }}>{state.items.length} item{state.items.length === 1 ? '' : 's'} saved</p>
+      {state.items.length === 0
+        ? <EmptyState icon="heart" title="This wishlist is empty" body="Nothing has been saved here yet." action="Go to shop" onAction={() => go('shop', 'all')} />
+        : <div className="shop-grid">{state.items.map(p => <ProductCard key={p.id} product={p} />)}</div>}
+    </div></div>
   );
 }
 
