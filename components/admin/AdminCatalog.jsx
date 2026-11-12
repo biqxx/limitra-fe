@@ -25,6 +25,12 @@ let ADMIN_EXTRA_CATS = [];
 // is_featured, etc. — none of which the public OpenAPI spec documents. Mapped
 // here into the flat shape this table/drawer already expect; `_raw` keeps the
 // untouched record around for anything not mapped.
+// `variants` IS now documented on POST /admin/products (array type, though
+// its `items` are mistyped as plain strings — the same schema-generation
+// artifact seen elsewhere in this spec for clearly-object arrays like
+// `images`/`specifications`). Prefer whatever the backend actually returns;
+// fall back to the localStorage copy (lib/variantsStore.js) only for
+// products saved before the backend supported this field at all.
 const mapAdminProduct = (p) => ({
   id: p.id,
   slug: p.slug,
@@ -35,7 +41,7 @@ const mapAdminProduct = (p) => ({
   category: p.category?.slug || 'all',
   status: p.status || 'draft',
   desc: p.description || '',
-  variants: getVariants(p.id),
+  variants: (Array.isArray(p.variants) && p.variants.length) ? p.variants : getVariants(p.id),
   _raw: p,
 });
 
@@ -196,7 +202,7 @@ export function AdminProducts({ editId }) {
         const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
         const sources = d._raw?.sources || [];
         const sourced = Boolean(sources.length);
-        const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft' };
+        const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft', variants: d.variants || [] };
         if (!sourced) body.price = Number(d.price) || 0;
         try {
           let productId = d.id;
@@ -219,6 +225,11 @@ export function AdminProducts({ editId }) {
             await adminProductsApi.update(d.id, body);
             t(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
           }
+          // Kept as a defensive fallback alongside the real field above —
+          // in case the backend accepts `variants` but doesn't actually
+          // persist/echo it back on GET, this keeps the admin's input from
+          // silently vanishing on next load (same reasoning as before this
+          // field existed in the spec at all, see lib/variantsStore.js).
           if (productId != null) setVariants(productId, d.variants || []);
           await loadProducts();
           closeEditing();
