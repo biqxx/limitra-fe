@@ -189,15 +189,24 @@ export function AdminDelivery() {
     } catch (error) { toast(messageFrom(error)); }
   };
 
+  // PUT .../zones/{zone}/methods/{method} is a full replace, not a partial
+  // patch — confirmed live: calls with only some fields 422 on whichever ones
+  // were left out (fee, then estimated_days_min/max). So every call here
+  // resends the complete set, merging in whatever one field actually changed.
+  const zoneMethodBody = (zm, method, overrides) => ({
+    active: zm ? zm.active !== false : true,
+    fee: Number(zm?.fee ?? method?.fee ?? 0),
+    estimated_days_min: Number(zm?.estimated_days_min ?? zm?.min_days ?? method?.min_days ?? 1) || 1,
+    estimated_days_max: Number(zm?.estimated_days_max ?? zm?.max_days ?? method?.max_days ?? 1) || 1,
+    ...overrides,
+  });
+
   const attachMethod = async (zone) => {
     const methodId = attachPick[zone.id];
     if (!methodId) return;
-    // PUT .../zones/{zone}/methods/{method} requires fee on every call (confirmed
-    // live 422) — default to the method's own base fee, overridable afterward via
-    // the zone-method row's fee input.
     const method = methods.find(m => String(m.id) === String(methodId));
     try {
-      await adminDeliveryZonesApi.setMethod(zone.id, methodId, { active: true, fee: Number(method?.fee) || 0 });
+      await adminDeliveryZonesApi.setMethod(zone.id, methodId, zoneMethodBody(null, method, {}));
       toast('Method attached to zone');
       setAttachPick(cur => ({ ...cur, [zone.id]: '' }));
       await loadAll();
@@ -206,19 +215,20 @@ export function AdminDelivery() {
 
   const toggleZoneMethodActive = async (zone, zm) => {
     const methodId = zm.id ?? zm.method_id ?? zm.method?.id;
-    const fee = zm.fee ?? zm.method?.fee ?? methods.find(m => String(m.id) === String(methodId))?.fee ?? 0;
+    const method = zm.method || methods.find(m => String(m.id) === String(methodId));
     try {
-      await adminDeliveryZonesApi.setMethod(zone.id, methodId, { active: !(zm.active !== false), fee: Number(fee) || 0 });
+      await adminDeliveryZonesApi.setMethod(zone.id, methodId, zoneMethodBody(zm, method, { active: !(zm.active !== false) }));
       toast('Updated');
       await loadAll();
     } catch (error) { toast(messageFrom(error)); }
   };
 
-  const setZoneMethodFee = async (zone, zm, fee) => {
+  const setZoneMethodField = async (zone, zm, overrides) => {
     const methodId = zm.id ?? zm.method_id ?? zm.method?.id;
+    const method = zm.method || methods.find(m => String(m.id) === String(methodId));
     try {
-      await adminDeliveryZonesApi.setMethod(zone.id, methodId, { active: zm.active !== false, fee: Number(fee) || 0 });
-      toast('Fee updated');
+      await adminDeliveryZonesApi.setMethod(zone.id, methodId, zoneMethodBody(zm, method, overrides));
+      toast('Updated');
       await loadAll();
     } catch (error) { toast(messageFrom(error)); }
   };
@@ -304,13 +314,22 @@ export function AdminDelivery() {
                     ) : zoneMethods.map(zm => {
                       const m = zm.method || methods.find(x => String(x.id) === String(zm.id ?? zm.method_id)) || {};
                       const active = zm.active !== false;
+                      const curFee = Number(zm.fee ?? m.fee) || 0;
+                      const curMin = Number(zm.estimated_days_min ?? zm.min_days ?? m.min_days) || 1;
+                      const curMax = Number(zm.estimated_days_max ?? zm.max_days ?? m.max_days) || 1;
                       return (
-                        <div key={zm.id ?? zm.method_id} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', gap: 10 }}>
+                        <div key={zm.id ?? zm.method_id} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', gap: 10, flexWrap: 'wrap' }}>
                           <div><b style={{ fontSize: 13 }}>{m.name ?? zm.name ?? 'Method'}</b></div>
                           <div className="row" style={{ gap: 8 }}>
                             <span className="muted" style={{ fontSize: 12.5 }}>₦</span>
-                            <input type="number" min="0" defaultValue={Number(zm.fee ?? m.fee) || 0} style={{ width: 90 }}
-                              onBlur={e => { const v = Number(e.target.value) || 0; if (v !== Number(zm.fee ?? m.fee ?? 0)) setZoneMethodFee(zone, zm, v); }} />
+                            <input type="number" min="0" defaultValue={curFee} style={{ width: 80 }} title="Fee"
+                              onBlur={e => { const v = Number(e.target.value) || 0; if (v !== curFee) setZoneMethodField(zone, zm, { fee: v }); }} />
+                            <input type="number" min="0" defaultValue={curMin} style={{ width: 54 }} title="Min days"
+                              onBlur={e => { const v = Number(e.target.value) || 1; if (v !== curMin) setZoneMethodField(zone, zm, { estimated_days_min: v }); }} />
+                            <span className="muted" style={{ fontSize: 12.5 }}>–</span>
+                            <input type="number" min="0" defaultValue={curMax} style={{ width: 54 }} title="Max days"
+                              onBlur={e => { const v = Number(e.target.value) || 1; if (v !== curMax) setZoneMethodField(zone, zm, { estimated_days_max: v }); }} />
+                            <span className="muted" style={{ fontSize: 12.5 }}>days</span>
                             <button className={'adm-chip' + (active ? ' on' : '')} onClick={() => toggleZoneMethodActive(zone, zm)}>{active ? 'Active' : 'Inactive'}</button>
                           </div>
                         </div>
