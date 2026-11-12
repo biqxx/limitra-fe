@@ -37,16 +37,16 @@ function zoneDraft(zone) {
     active: zone ? zone.active !== false : true,
   };
 }
+// Confirmed live (GET /admin/delivery-methods): a method is only
+// {id, code, name, type, active} — fee/eta live entirely on the per-zone
+// attachment (the pivot — see zoneMethodBody below), not on the method
+// itself, despite looking like a plausible place for a "base" fee/eta.
 function methodDraft(method) {
   return {
     id: method?.id ?? null,
     name: method?.name || '',
     code: method?.code || '',
     type: method?.type || 'standard',
-    description: method?.description || method?.eta || '',
-    fee: method?.fee ?? method?.price ?? 0,
-    min_days: method?.min_days ?? '',
-    max_days: method?.max_days ?? '',
     active: method ? method.active !== false : true,
   };
 }
@@ -162,10 +162,6 @@ export function AdminDelivery() {
       name: draftMethod.name.trim(),
       code: draftMethod.code.trim() || slugify(draftMethod.name),
       type: draftMethod.type,
-      description: draftMethod.description.trim() || undefined,
-      fee: Math.max(0, Number(draftMethod.fee) || 0),
-      min_days: draftMethod.min_days === '' ? undefined : Number(draftMethod.min_days),
-      max_days: draftMethod.max_days === '' ? undefined : Number(draftMethod.max_days),
       active: draftMethod.active,
     };
     try {
@@ -193,20 +189,23 @@ export function AdminDelivery() {
   // patch — confirmed live: calls with only some fields 422 on whichever ones
   // were left out (fee, then estimated_days_min/max). So every call here
   // resends the complete set, merging in whatever one field actually changed.
-  const zoneMethodBody = (zm, method, overrides) => ({
-    active: zm ? zm.active !== false : true,
-    fee: Number(zm?.fee ?? method?.fee ?? 0),
-    estimated_days_min: Number(zm?.estimated_days_min ?? zm?.min_days ?? method?.min_days ?? 1) || 1,
-    estimated_days_max: Number(zm?.estimated_days_max ?? zm?.max_days ?? method?.max_days ?? 1) || 1,
+  // Confirmed live (GET /admin/delivery-zones): the zone-specific fee/eta/
+  // active for an attached method live under that method's own `pivot`
+  // object, not flat on the method — a method with no pivot yet is a fresh
+  // attach, defaulted to fee 0 / 1–1 days / active.
+  const zoneMethodBody = (pivot, overrides) => ({
+    active: pivot ? pivot.active !== false : true,
+    fee: Number(pivot?.fee) || 0,
+    estimated_days_min: Number(pivot?.estimated_days_min) || 1,
+    estimated_days_max: Number(pivot?.estimated_days_max) || 1,
     ...overrides,
   });
 
   const attachMethod = async (zone) => {
     const methodId = attachPick[zone.id];
     if (!methodId) return;
-    const method = methods.find(m => String(m.id) === String(methodId));
     try {
-      await adminDeliveryZonesApi.setMethod(zone.id, methodId, zoneMethodBody(null, method, {}));
+      await adminDeliveryZonesApi.setMethod(zone.id, methodId, zoneMethodBody(null, {}));
       toast('Method attached to zone');
       setAttachPick(cur => ({ ...cur, [zone.id]: '' }));
       await loadAll();
@@ -214,20 +213,17 @@ export function AdminDelivery() {
   };
 
   const toggleZoneMethodActive = async (zone, zm) => {
-    const methodId = zm.id ?? zm.method_id ?? zm.method?.id;
-    const method = zm.method || methods.find(m => String(m.id) === String(methodId));
+    const pivot = zm.pivot;
     try {
-      await adminDeliveryZonesApi.setMethod(zone.id, methodId, zoneMethodBody(zm, method, { active: !(zm.active !== false) }));
+      await adminDeliveryZonesApi.setMethod(zone.id, zm.id, zoneMethodBody(pivot, { active: !(pivot ? pivot.active !== false : true) }));
       toast('Updated');
       await loadAll();
     } catch (error) { toast(messageFrom(error)); }
   };
 
   const setZoneMethodField = async (zone, zm, overrides) => {
-    const methodId = zm.id ?? zm.method_id ?? zm.method?.id;
-    const method = zm.method || methods.find(m => String(m.id) === String(methodId));
     try {
-      await adminDeliveryZonesApi.setMethod(zone.id, methodId, zoneMethodBody(zm, method, overrides));
+      await adminDeliveryZonesApi.setMethod(zone.id, zm.id, zoneMethodBody(zm.pivot, overrides));
       toast('Updated');
       await loadAll();
     } catch (error) { toast(messageFrom(error)); }
@@ -293,7 +289,7 @@ export function AdminDelivery() {
           ) : zones.map(zone => {
             const open = expanded.has(zone.id);
             const zoneMethods = asList(zone.methods ?? zone.delivery_methods);
-            const attachedIds = new Set(zoneMethods.map(zm => String(zm.id ?? zm.method_id ?? zm.method?.id)));
+            const attachedIds = new Set(zoneMethods.map(zm => String(zm.id)));
             const unattached = methods.filter(m => !attachedIds.has(String(m.id)));
             return (
               <section className="cat-group" key={zone.id}>
@@ -312,14 +308,14 @@ export function AdminDelivery() {
                     {zoneMethods.length === 0 ? (
                       <p className="muted" style={{ margin: '4px 0 12px' }}>No methods attached to this zone yet.</p>
                     ) : zoneMethods.map(zm => {
-                      const m = zm.method || methods.find(x => String(x.id) === String(zm.id ?? zm.method_id)) || {};
-                      const active = zm.active !== false;
-                      const curFee = Number(zm.fee ?? m.fee) || 0;
-                      const curMin = Number(zm.estimated_days_min ?? zm.min_days ?? m.min_days) || 1;
-                      const curMax = Number(zm.estimated_days_max ?? zm.max_days ?? m.max_days) || 1;
+                      const pivot = zm.pivot;
+                      const active = pivot ? pivot.active !== false : true;
+                      const curFee = Number(pivot?.fee) || 0;
+                      const curMin = Number(pivot?.estimated_days_min) || 1;
+                      const curMax = Number(pivot?.estimated_days_max) || 1;
                       return (
-                        <div key={zm.id ?? zm.method_id} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', gap: 10, flexWrap: 'wrap' }}>
-                          <div><b style={{ fontSize: 13 }}>{m.name ?? zm.name ?? 'Method'}</b></div>
+                        <div key={zm.id} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', gap: 10, flexWrap: 'wrap' }}>
+                          <div><b style={{ fontSize: 13 }}>{zm.name ?? 'Method'}</b></div>
                           <div className="row" style={{ gap: 8 }}>
                             <span className="muted" style={{ fontSize: 12.5 }}>₦</span>
                             <input type="number" min="0" defaultValue={curFee} style={{ width: 80 }} title="Fee"
@@ -359,8 +355,7 @@ export function AdminDelivery() {
           ) : methods.map(method => (
             <div className="cat-parent-row" key={method.id}>
               <div className="cat-icon"><Icon name="truck" size={19} /></div>
-              <div className="cat-main"><b>{method.name}</b><small>{[method.type, method.code, method.description, (method.min_days != null && method.max_days != null) ? `${method.min_days}–${method.max_days} days` : null].filter(Boolean).join(' · ')}</small></div>
-              <span className="cat-products">{method.fee ? `₦ ${Number(method.fee).toLocaleString('en-NG')}` : 'Free'}</span>
+              <div className="cat-main"><b>{method.name}</b><small>{[method.type, method.code].filter(Boolean).join(' · ')}</small></div>
               <span className={'adm-pill ' + (method.active !== false ? 'ok' : 'muted')}>{method.active !== false ? 'Active' : 'Inactive'}</span>
               <div className="adm-rowact">
                 <button onClick={() => toggleMethodActive(method)} title={method.active !== false ? 'Deactivate' : 'Activate'} aria-label={method.active !== false ? 'Deactivate' : 'Activate'}><Icon name={method.active !== false ? 'eye' : 'check'} size={15} /></button>
@@ -402,7 +397,7 @@ export function AdminDelivery() {
       )}
 
       {draftMethod && (
-        <Drawer title={draftMethod.id ? 'Edit method' : 'Add method'} sub="Attach this to one or more zones to make it selectable at checkout." saving={saving} canSave={!!draftMethod.name.trim()} onClose={() => setDraftMethod(null)} onSave={saveMethod} saveLabel={draftMethod.id ? 'Save changes' : 'Add method'}>
+        <Drawer title={draftMethod.id ? 'Edit method' : 'Add method'} sub="Attach this to a zone afterward to set its fee and ETA there." saving={saving} canSave={!!draftMethod.name.trim()} onClose={() => setDraftMethod(null)} onSave={saveMethod} saveLabel={draftMethod.id ? 'Save changes' : 'Add method'}>
           <label className="adm-field"><span>Method name</span><input value={draftMethod.name} onChange={e => setDraftMethod(c => ({ ...c, name: e.target.value }))} placeholder="e.g. Express delivery" autoFocus /></label>
           <div className="adm-field-row">
             <label className="adm-field"><span>Code</span><input value={draftMethod.code} onChange={e => setDraftMethod(c => ({ ...c, code: e.target.value }))} placeholder={slugify(draftMethod.name) || 'auto from name'} /></label>
@@ -411,12 +406,6 @@ export function AdminDelivery() {
                 {METHOD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </label>
-          </div>
-          <label className="adm-field"><span>Description</span><input value={draftMethod.description} onChange={e => setDraftMethod(c => ({ ...c, description: e.target.value }))} placeholder="e.g. 5–7 business days" /></label>
-          <div className="adm-field-row">
-            <label className="adm-field"><span>Fee (₦)</span><input type="number" min="0" value={draftMethod.fee} onChange={e => setDraftMethod(c => ({ ...c, fee: e.target.value }))} /></label>
-            <label className="adm-field"><span>Min days</span><input type="number" min="0" value={draftMethod.min_days} onChange={e => setDraftMethod(c => ({ ...c, min_days: e.target.value }))} /></label>
-            <label className="adm-field"><span>Max days</span><input type="number" min="0" value={draftMethod.max_days} onChange={e => setDraftMethod(c => ({ ...c, max_days: e.target.value }))} /></label>
           </div>
           <div className="cat-options">
             <label><input type="checkbox" checked={draftMethod.active} onChange={e => setDraftMethod(c => ({ ...c, active: e.target.checked }))} /><span><b>Active</b><small>Inactive methods won&apos;t appear at checkout.</small></span></label>
