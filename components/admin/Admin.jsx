@@ -18,6 +18,7 @@ export { AdminProducts, AdminOrders, AdminCoupons, AdminInventory } from './Admi
 export { AdminCategories } from './AdminCategories';
 export { AdminDelivery } from './AdminDelivery';
 export { AdminReturns } from './AdminReturns';
+export { AdminSupport } from './AdminSupport';
 export { AdminPricing } from './AdminPricing';
 export { AdminCustomers, AdminAffiliates, AdminReferrals } from './AdminPeople';
 export { AdminSpin, AdminVideos, AdminElo } from './AdminEngagement';
