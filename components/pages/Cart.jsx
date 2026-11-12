@@ -17,6 +17,14 @@ const PAYMENT_METHOD_API = { card: 'card', transfer: 'bank_transfer', cod: 'cash
 const SHIP_FEE = 3500;
 const FREE_SHIP = 150000;
 
+// Pickup only reliably works today when every pickup location is shown
+// regardless of delivery-zone matching (zone/method admin config is still
+// being set up and GET /delivery/options often comes back empty) — so it's
+// offered as its own always-visible option alongside whatever real options
+// /delivery/options returns, not gated behind one of those options being a
+// zone-matched pickup method.
+const PICKUP_METHOD_VALUE = '__pickup__';
+
 export function OrderSummary({ items, promo, ship, children, cta, onCta, ctaIcon, useCredit, onToggleCredit }) {
   const { walletBalance } = useStore();
   const sub = items.reduce((s, it) => s + unitPriceOf(it, byId(it.id)) * it.qty, 0);
@@ -212,6 +220,7 @@ export function CheckoutPage() {
 
   const activeAddr = addresses.find(a => a.id === selAddr);
   const selectedOption = deliveryOptions.find(o => o.value === method);
+  const isPickupMode = method === PICKUP_METHOD_VALUE;
 
   useEffect(() => { window.scrollTo({ top: 0 }); }, [step]);
 
@@ -284,28 +293,25 @@ export function CheckoutPage() {
     return () => { cancelled = true; };
   }, [cartId, selAddr, activeAddr?.country, activeAddr?.state, activeAddr?.city]);
 
-  // A pickup-type delivery method needs the customer to pick an actual
-  // location from GET /pickup-locations, rather than just a method name —
-  // fetched lazily, only once a pickup-type option is selected.
+  // Every pickup location is fetched unconditionally, with no address/zone
+  // filter — delivery-zone/method admin config is still being set up and
+  // GET /delivery/options often comes back empty, so pickup is offered as
+  // its own standalone option (see PICKUP_METHOD_VALUE) rather than gated
+  // behind a zone-matched pickup method actually showing up there.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!selectedOption?.isPickup) { setPickupLocations([]); setSelectedPickup(null); return; }
       setPickupLoading(true);
       setPickupError('');
       try {
-        const res = await pickupLocationsApi.list({
-          country: activeAddr?.country || 'NG',
-          state: activeAddr?.state || undefined,
-          city: activeAddr?.city || undefined,
-        });
+        const res = await pickupLocationsApi.list();
         let list = Array.isArray(res) ? res
           : (res?.data ?? res?.locations ?? res?.items ?? res?.options ?? res?.results ?? res?.list ?? []);
         if (!Array.isArray(list)) list = [];
-        const normalized = list.map(o => ({
+        const normalized = list.filter(o => o.active !== false).map(o => ({
           id: o.id ?? o.code ?? o.slug ?? o.key,
           name: o.name ?? o.label ?? o.title ?? 'Pickup location',
-          address: o.address ?? o.line1 ?? o.description ?? [o.city, o.state].filter(Boolean).join(', '),
+          address: o.line1 ?? o.address ?? o.description ?? [o.city, o.state].filter(Boolean).join(', '),
         })).filter(o => o.id != null);
         if (cancelled) return;
         if (normalized.length === 0) console.warn('[pickup] GET /pickup-locations returned no usable locations — raw response:', res);
@@ -318,7 +324,7 @@ export function CheckoutPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedOption?.isPickup, activeAddr?.country, activeAddr?.state, activeAddr?.city]);
+  }, []);
 
   // Returning from a payment gateway's hosted page (card/bank_transfer
   // redirect via `callback_url`). The exact query param a gateway appends
@@ -380,7 +386,7 @@ export function CheckoutPage() {
     if (!activeAddr) e.addr = 'Select or add a delivery address';
     if (!/^\S+@\S+\.\S+$/.test(email)) e.email = 'Enter a valid email';
     if (!method) e.method = 'Select a delivery method';
-    if (selectedOption?.isPickup && !selectedPickup) e.pickup = 'Select a pickup location';
+    if (isPickupMode && !selectedPickup) e.pickup = 'Select a pickup location';
     setErrs(e); return Object.keys(e).length === 0;
   };
 
@@ -402,10 +408,13 @@ export function CheckoutPage() {
       await checkoutApi.quote({
         cart_id: cartId,
         address_id: selAddr,
-        delivery_method: method,
+        // PICKUP_METHOD_VALUE is a local sentinel (no zone-matched pickup
+        // method is guaranteed to exist) — 'pickup' is sent instead, matching
+        // the `type` value confirmed required on admin delivery methods.
+        delivery_method: isPickupMode ? 'pickup' : method,
         // Not in the documented quote schema, but sent defensively when a
         // pickup-type method is selected — see the pickup-locations effect.
-        pickup_location_id: selectedOption?.isPickup ? selectedPickup || undefined : undefined,
+        pickup_location_id: isPickupMode ? selectedPickup || undefined : undefined,
         payment_method: apiMethod,
         promotion_code: promo?.code || undefined,
         use_wallet_credit: useCredit || undefined,
@@ -467,10 +476,10 @@ export function CheckoutPage() {
     }
   };
 
-  if (orderId) return <OrderSuccess orderId={orderId} email={email} eta={selectedOption?.sub} pending={!!transferInfo} transferInfo={transferInfo} />;
+  if (orderId) return <OrderSuccess orderId={orderId} email={email} eta={isPickupMode ? 'Ready for pickup' : selectedOption?.sub} pending={!!transferInfo} transferInfo={transferInfo} />;
 
-  const shipFee = selectedOption?.fee ?? 0;
-  const methodLabel = selectedOption ? `${selectedOption.label}${selectedOption.sub ? ' · ' + selectedOption.sub : ''}${selectedOption.fee === 0 ? ' (Free)' : ''}` : '';
+  const shipFee = isPickupMode ? 0 : (selectedOption?.fee ?? 0);
+  const methodLabel = isPickupMode ? 'Pickup station (Free)' : (selectedOption ? `${selectedOption.label}${selectedOption.sub ? ' · ' + selectedOption.sub : ''}${selectedOption.fee === 0 ? ' (Free)' : ''}` : '');
 
   return (
     <div className="page page-fade"><div className="wrap page-narrow">
@@ -512,13 +521,13 @@ export function CheckoutPage() {
 
               <h4 className="co-sub">Delivery method</h4>
               {errs.method && <span className="err-msg" style={{ marginBottom: 10, display: 'block' }}>{errs.method}</span>}
-              {deliveryLoading || (!selAddr && addresses.length > 0) ? (
-                <p className="muted">Loading delivery options…</p>
-              ) : deliveryError ? (
-                <div className="co-note" style={{ color: 'var(--danger)' }}>
+              {(deliveryLoading || (!selAddr && addresses.length > 0)) && <p className="muted" style={{ marginBottom: 10 }}>Loading delivery options…</p>}
+              {deliveryError && (
+                <div className="co-note" style={{ color: 'var(--danger)', marginBottom: 10 }}>
                   <Icon name="info" size={17} />{deliveryError}
                 </div>
-              ) : deliveryOptions.length === 0 ? (
+              )}
+              {deliveryOptions.length === 0 && pickupLocations.length === 0 && !deliveryLoading && !pickupLoading ? (
                 <p className="muted">No delivery options are available for this address.</p>
               ) : (
                 <div className="radio-cards">
@@ -530,10 +539,18 @@ export function CheckoutPage() {
                       {o.disabled ? <span className="rc-soon">Unavailable</span> : <span className="rc-price">{o.fee === 0 ? 'Free' : naira(o.fee)}</span>}
                     </label>
                   ))}
+                  {pickupLocations.length > 0 && (
+                    <label className={'radio-card' + (isPickupMode ? ' on' : '')}>
+                      <input type="radio" name="ship" checked={isPickupMode} onChange={() => setMethod(PICKUP_METHOD_VALUE)} />
+                      <span className="rc-radio" />
+                      <div className="rc-body"><b>Pickup station</b><small>Collect from any available location</small></div>
+                      <span className="rc-price">Free</span>
+                    </label>
+                  )}
                 </div>
               )}
 
-              {selectedOption?.isPickup && (
+              {isPickupMode && (
                 <div style={{ marginTop: 16 }}>
                   <h4 className="co-sub">Pickup location</h4>
                   {errs.pickup && <span className="err-msg" style={{ marginBottom: 10, display: 'block' }}>{errs.pickup}</span>}
@@ -592,7 +609,7 @@ export function CheckoutPage() {
                 <div className="rb-head"><span><Icon name="location" size={16} /> Delivery to</span><button className="link-btn" onClick={() => setStep(0)}>Edit</button></div>
                 {activeAddr && <p><b>{activeAddr.recipient_name || (activeAddr.type === 'billing' ? 'Billing address' : 'Delivery address')}</b>{activeAddr.phone && <> · {activeAddr.phone}</>}<br />{[activeAddr.line1 ?? activeAddr.address_line_1, activeAddr.line2 ?? activeAddr.address_line_2].filter(Boolean).join(', ')}, {activeAddr.city}{activeAddr.state ? ', ' + activeAddr.state : ''}<br />{email}</p>}
                 <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>{methodLabel}</div>
-                {selectedOption?.isPickup && (() => { const p = pickupLocations.find(l => l.id === selectedPickup); return p ? <div className="muted" style={{ fontSize: 13 }}>Pickup at: <b>{p.name}</b>{p.address ? ` — ${p.address}` : ''}</div> : null; })()}
+                {isPickupMode && (() => { const p = pickupLocations.find(l => l.id === selectedPickup); return p ? <div className="muted" style={{ fontSize: 13 }}>Pickup at: <b>{p.name}</b>{p.address ? ` — ${p.address}` : ''}</div> : null; })()}
               </div>
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="card" size={16} /> Payment</span><button className="link-btn" onClick={() => setStep(1)}>Edit</button></div>
