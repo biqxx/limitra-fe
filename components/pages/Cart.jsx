@@ -7,7 +7,7 @@ import { useStore } from '@/components/store/StoreProvider';
 import { Modal, AddressForm, Field } from '@/components/forms/Shared';
 import { Thumb, REAL_IMG, QtyStepper, Breadcrumbs, EmptyState } from '@/components/ui/Shared';
 import { naira, byId, unitPriceOf } from '@/lib/data';
-import { ordersApi, checkoutApi, paymentsApi, promotionsApi } from '@/lib/api/endpoints';
+import { ordersApi, checkoutApi, paymentsApi, promotionsApi, deliveryApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
 // Real payment_method values the backend accepts (POST /checkout/quote) — the
@@ -198,7 +198,10 @@ export function CheckoutPage() {
   const [selAddr, setSelAddr] = useState(primaryAddr ? primaryAddr.id : null);
   const [email, setEmail] = useState(user?.email || '');
   useEffect(() => { if (user?.email) setEmail(e => e || user.email); }, [user]);
-  const [method, setMethod] = useState('standard');
+  const [method, setMethod] = useState(null);
+  const [deliveryOptions, setDeliveryOptions] = useState([]);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [deliveryError, setDeliveryError] = useState('');
   const [payMethod, setPayMethod] = useState('card');
   const [addrModal, setAddrModal] = useState(false);
   const [errs, setErrs] = useState({});
@@ -206,6 +209,41 @@ export function CheckoutPage() {
   const activeAddr = addresses.find(a => a.id === selAddr);
 
   useEffect(() => { window.scrollTo({ top: 0 }); }, [step]);
+
+  // Real delivery options/fees for this cart+address — see deliveryApi.options
+  // (lib/api/endpoints.js). Refetched on address change since fee/availability
+  // plausibly vary by destination; response field names are undocumented, so
+  // every field is read defensively under several plausible names.
+  useEffect(() => {
+    if (!cartId) return;
+    let cancelled = false;
+    (async () => {
+      setDeliveryLoading(true);
+      setDeliveryError('');
+      try {
+        const res = await deliveryApi.options({ cart_id: cartId, address_id: selAddr || undefined });
+        const list = Array.isArray(res) ? res : (res?.data ?? res?.options ?? res?.items ?? []);
+        const normalized = (Array.isArray(list) ? list : []).map(o => ({
+          value: String(o.code ?? o.method ?? o.slug ?? o.key ?? o.id ?? o.name ?? ''),
+          label: o.name ?? o.label ?? o.title ?? 'Delivery option',
+          sub: o.description ?? o.eta ?? o.duration ?? o.delivery_time ?? '',
+          fee: Number(o.fee ?? o.price ?? o.amount ?? o.cost ?? 0),
+          disabled: o.available === false || o.is_available === false || !!o.disabled,
+        })).filter(o => o.value);
+        if (cancelled) return;
+        setDeliveryOptions(normalized);
+        setMethod(prev => {
+          if (prev && normalized.some(o => o.value === prev)) return prev;
+          return (normalized.find(o => !o.disabled) || normalized[0])?.value ?? null;
+        });
+      } catch (e) {
+        if (!cancelled) setDeliveryError(messageFrom(e));
+      } finally {
+        if (!cancelled) setDeliveryLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [cartId, selAddr]);
 
   // Returning from a payment gateway's hosted page (card/bank_transfer
   // redirect via `callback_url`). The exact query param a gateway appends
@@ -266,6 +304,7 @@ export function CheckoutPage() {
     const e = {};
     if (!activeAddr) e.addr = 'Select or add a delivery address';
     if (!/^\S+@\S+\.\S+$/.test(email)) e.email = 'Enter a valid email';
+    if (!method) e.method = 'Select a delivery method';
     setErrs(e); return Object.keys(e).length === 0;
   };
 
@@ -349,10 +388,12 @@ export function CheckoutPage() {
     }
   };
 
-  if (orderId) return <OrderSuccess orderId={orderId} email={email} method={method} pending={!!transferInfo} transferInfo={transferInfo} />;
+  const selectedOption = deliveryOptions.find(o => o.value === method);
 
-  const shipFee = method === 'express' ? 5000 : 0;
-  const methodLabel = { standard: 'Standard delivery · 10–14 days (Free)', express: 'Express delivery · 5–7 days', pickup: 'Pickup station' }[method];
+  if (orderId) return <OrderSuccess orderId={orderId} email={email} eta={selectedOption?.sub} pending={!!transferInfo} transferInfo={transferInfo} />;
+
+  const shipFee = selectedOption?.fee ?? 0;
+  const methodLabel = selectedOption ? `${selectedOption.label}${selectedOption.sub ? ' · ' + selectedOption.sub : ''}${selectedOption.fee === 0 ? ' (Free)' : ''}` : '';
 
   return (
     <div className="page page-fade"><div className="wrap page-narrow">
@@ -393,23 +434,27 @@ export function CheckoutPage() {
               <Field label="Order updates will be sent here" full value={email} onChange={setEmail} err={errs.email} placeholder="you@email.com" />
 
               <h4 className="co-sub">Delivery method</h4>
-              {/* TODO: these options/fees are still a hardcoded UI list, not
-                  sourced from the real GET /delivery/options endpoint — the
-                  "standard"/"express"/"pickup" values sent as delivery_method
-                  below are a guess at what the backend expects, not confirmed
-                  against real option identifiers. Fine for now since the quote
-                  step is authoritative on price either way, but should be
-                  swapped for the real endpoint in a follow-up pass. */}
-              <div className="radio-cards">
-                {[['standard', 'Standard delivery', '10–14 days', 0, false, 2000], ['express', 'Express delivery', '5–7 days', 5000, false, 0], ['pickup', 'Pickup station', 'Temporarily unavailable', 0, true, 0]].map(([val, t, sub, fee, disabled, was]) => (
-                  <label key={val} className={'radio-card' + (method === val ? ' on' : '') + (disabled ? ' disabled' : '')}>
-                    <input type="radio" name="ship" checked={method === val} disabled={disabled} onChange={() => !disabled && setMethod(val)} />
-                    <span className="rc-radio" />
-                    <div className="rc-body"><b>{t}</b><small>{sub}</small></div>
-                    {disabled ? <span className="rc-soon">Soon</span> : <span className="rc-price">{was ? <><span className="rc-was">{naira(was)}</span> <span className="rc-free">Free</span></> : (fee === 0 ? 'Free' : naira(fee))}</span>}
-                  </label>
-                ))}
-              </div>
+              {errs.method && <span className="err-msg" style={{ marginBottom: 10, display: 'block' }}>{errs.method}</span>}
+              {deliveryLoading ? (
+                <p className="muted">Loading delivery options…</p>
+              ) : deliveryError ? (
+                <div className="co-note" style={{ color: 'var(--danger)' }}>
+                  <Icon name="info" size={17} />{deliveryError}
+                </div>
+              ) : deliveryOptions.length === 0 ? (
+                <p className="muted">No delivery options are available for this address.</p>
+              ) : (
+                <div className="radio-cards">
+                  {deliveryOptions.map(o => (
+                    <label key={o.value} className={'radio-card' + (method === o.value ? ' on' : '') + (o.disabled ? ' disabled' : '')}>
+                      <input type="radio" name="ship" checked={method === o.value} disabled={o.disabled} onChange={() => !o.disabled && setMethod(o.value)} />
+                      <span className="rc-radio" />
+                      <div className="rc-body"><b>{o.label}</b>{o.sub && <small>{o.sub}</small>}</div>
+                      {o.disabled ? <span className="rc-soon">Unavailable</span> : <span className="rc-price">{o.fee === 0 ? 'Free' : naira(o.fee)}</span>}
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -504,10 +549,10 @@ export function CheckoutPage() {
   );
 }
 
-export function OrderSuccess({ orderId, email, method, pending, transferInfo }) {
+export function OrderSuccess({ orderId, email, eta, pending, transferInfo }) {
   const { go, toast } = useStore();
   const [copied, setCopied] = useState('');
-  const eta = method === 'pickup' ? 'Ready for pickup in 10–14 days' : 'In 10–14 days';
+  eta = eta || 'Delivery timing will be confirmed on your order page';
   const copy = (txt, key) => { navigator.clipboard?.writeText(txt); setCopied(key); toast('Copied'); setTimeout(() => setCopied(''), 1600); };
   return (
     <div className="page page-fade"><div className="wrap">
