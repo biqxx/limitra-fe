@@ -137,10 +137,15 @@ function StatusPill({ status }) {
   return <span className={'status-pill ' + (STATUS_TINT[status] || 'info')}>{STATUS_LABEL[status] || status}</span>;
 }
 
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Deliberately not toLocaleDateString — its output depends on the runtime's
+// ICU data, which can differ between the Node server (SSR) and the browser
+// (hydration), producing a React hydration mismatch for text that renders
+// identically either way otherwise.
 function fmtDate(d) {
   if (!d) return '';
   const dt = new Date(d);
-  return isNaN(dt) ? String(d) : dt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+  return isNaN(dt) ? String(d) : `${dt.getDate()} ${MONTHS_SHORT[dt.getMonth()]} ${dt.getFullYear()}`;
 }
 
 function Dashboard() {
