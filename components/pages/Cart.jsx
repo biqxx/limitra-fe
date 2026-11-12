@@ -221,9 +221,21 @@ export function CheckoutPage() {
       setDeliveryLoading(true);
       setDeliveryError('');
       try {
-        const res = await deliveryApi.options({ cart_id: cartId, address_id: selAddr || undefined });
-        const list = Array.isArray(res) ? res : (res?.data ?? res?.options ?? res?.items ?? []);
-        const normalized = (Array.isArray(list) ? list : []).map(o => ({
+        const res = await deliveryApi.options({
+          cart_id: cartId,
+          address_id: selAddr || undefined,
+          country: activeAddr?.country || 'NG',
+          state: activeAddr?.state || undefined,
+          city: activeAddr?.city || undefined,
+        });
+        let list = Array.isArray(res) ? res
+          : (res?.data ?? res?.options ?? res?.items ?? res?.delivery_options ?? res?.methods ?? res?.results ?? res?.list ?? []);
+        if (!Array.isArray(list)) list = [];
+        // Zone-based response shapes ([{ zone, methods: [...] }, ...] or a
+        // single { zone, methods: [...] }) nest the actual methods one level
+        // deeper — flatten those into a plain list of methods.
+        if (list.length && list.every(x => Array.isArray(x?.methods))) list = list.flatMap(z => z.methods);
+        const normalized = list.map(o => ({
           value: String(o.code ?? o.method ?? o.slug ?? o.key ?? o.id ?? o.name ?? ''),
           label: o.name ?? o.label ?? o.title ?? 'Delivery option',
           sub: o.description ?? o.eta ?? o.duration ?? o.delivery_time ?? '',
@@ -231,6 +243,7 @@ export function CheckoutPage() {
           disabled: o.available === false || o.is_available === false || !!o.disabled,
         })).filter(o => o.value);
         if (cancelled) return;
+        if (normalized.length === 0) console.warn('[delivery] GET /delivery/options returned no usable options — raw response:', res);
         setDeliveryOptions(normalized);
         setMethod(prev => {
           if (prev && normalized.some(o => o.value === prev)) return prev;
@@ -243,7 +256,7 @@ export function CheckoutPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [cartId, selAddr]);
+  }, [cartId, selAddr, activeAddr?.country, activeAddr?.state, activeAddr?.city]);
 
   // Returning from a payment gateway's hosted page (card/bank_transfer
   // redirect via `callback_url`). The exact query param a gateway appends
