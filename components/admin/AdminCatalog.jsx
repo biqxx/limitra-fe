@@ -25,21 +25,95 @@ let ADMIN_EXTRA_CATS = [];
 // is_featured, etc. — none of which the public OpenAPI spec documents. Mapped
 // here into the flat shape this table/drawer already expect; `_raw` keeps the
 // untouched record around for anything not mapped.
-const mapAdminProduct = (p) => ({
-  id: p.id,
-  slug: p.slug,
-  name: p.name,
-  brand: p.brand || '',
-  price: Number(p.price) || 0,
-  stock: p.stock ?? 0,
-  category: p.category?.slug || 'all',
-  status: p.status || 'draft',
-  desc: p.description || '',
-  variants: getVariants(p.id),
-  _raw: p,
-});
+// `variants` on the real backend is a FLAT array of per-SKU records —
+// confirmed live via a 422 on POST /admin/products: "variants.0.sku",
+// "variants.0.attributes" and "variants.0.stock" are each required — NOT the
+// {name,type,options:[...]} "attribute group" shape this admin's authoring UI
+// uses (one group per dimension, e.g. Colour/Storage, each option optionally
+// carrying its own price override). The two are reconciled below: `variants`
+// stays the authoring-group shape (from lib/variantsStore.js, since the
+// backend doesn't store colour swatches or per-option price overrides), while
+// `variantStock` carries the real sku/stock per attribute-combination, keyed
+// by comboKey() so it survives regardless of group ordering. saveAdminProduct
+// cross-multiplies the groups with variantStock to build the flat payload the
+// backend actually validates.
+function comboKey(attributes) {
+  return Object.entries(attributes || {})
+    .filter(([, v]) => v != null && v !== '')
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}:${v}`)
+    .join('|');
+}
 
-const productToDraft = (p) => ({
+function cartesianCombos(groups) {
+  const usable = (groups || []).filter(g => g?.name && Array.isArray(g.options) && g.options.length);
+  if (!usable.length) return [];
+  const label = (g, o) => (g.type === 'color' ? o.name : o.label);
+  const attrSets = usable.reduce(
+    (acc, g) => acc.flatMap(attrs => g.options.map(o => ({ ...attrs, [g.name]: label(g, o) }))),
+    [{}]
+  );
+  return attrSets.map(attributes => ({ attributes, key: comboKey(attributes) }));
+}
+
+function slugPart(s) {
+  return String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 12);
+}
+
+function defaultSku(productName, attributes) {
+  const parts = [slugPart(productName).slice(0, 6) || 'PROD', ...Object.values(attributes || {}).map(v => slugPart(v).slice(0, 4))];
+  return parts.filter(Boolean).join('-');
+}
+
+// Best-effort reconstruction of authoring groups from the backend's flat
+// records, for a product whose variants were set up on a different browser
+// (so this browser's localStorage copy is empty) — loses colour swatches and
+// per-option price overrides since the backend never stored those.
+function groupsFromFlatVariants(flat) {
+  const order = [];
+  const sets = new Map();
+  (flat || []).forEach(v => {
+    const attrs = v?.attributes && typeof v.attributes === 'object' ? v.attributes : {};
+    Object.entries(attrs).forEach(([name, value]) => {
+      if (value == null || value === '') return;
+      if (!sets.has(name)) { sets.set(name, new Set()); order.push(name); }
+      sets.get(name).add(String(value));
+    });
+  });
+  return order.map(name => ({ name, type: 'text', options: [...sets.get(name)].map(label => ({ label, price: null })) }));
+}
+
+function stockMapFromFlatVariants(flat) {
+  const map = {};
+  (flat || []).forEach(v => {
+    if (!v || typeof v !== 'object') return;
+    const attrs = v.attributes && typeof v.attributes === 'object' ? v.attributes : {};
+    const key = comboKey(attrs);
+    if (key) map[key] = { sku: v.sku || '', stock: v.stock ?? '' };
+  });
+  return map;
+}
+
+export const mapAdminProduct = (p) => {
+  const flatVariants = Array.isArray(p.variants) ? p.variants.filter(v => v && typeof v === 'object') : [];
+  const localGroups = getVariants(p.id);
+  return {
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    brand: p.brand || '',
+    price: Number(p.price) || 0,
+    stock: p.stock ?? 0,
+    category: p.category?.slug || 'all',
+    status: p.status || 'draft',
+    desc: p.description || '',
+    variants: localGroups.length ? localGroups : groupsFromFlatVariants(flatVariants),
+    variantStock: stockMapFromFlatVariants(flatVariants),
+    _raw: p,
+  };
+};
+
+export const productToDraft = (p) => ({
   id: p.id,
   name: p.name,
   brand: p.brand,
@@ -48,6 +122,8 @@ const productToDraft = (p) => ({
   status: p.status,
   desc: p.desc,
   _stock: p.stock,
+  variants: p.variants,
+  variantStock: p.variantStock,
   _raw: p._raw,
 });
 
@@ -70,6 +146,52 @@ const pricingIssueMessage = (source) => {
   }
   return 'Recalculate and approve the supplier price before activating this product.';
 };
+
+// Shared by AdminProducts' own editor and AdminSourcing's "Review product"
+// modal (reviewing a just-imported product without leaving the Sourcing
+// page) — builds the request body, runs the sourced-pricing approval flow
+// when publishing a sourced product, creates or updates the product, and
+// persists variants (see mapAdminProduct's comment on why both the real
+// field and the localStorage fallback are written). Returns the product id
+// on success, or null if blocked (pricing issue) — caller decides what to
+// do next (close a drawer, reload a list, etc.), this never does either.
+export async function saveAdminProduct(d, toast) {
+  const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
+  const sources = d._raw?.sources || [];
+  const sourced = Boolean(sources.length);
+  const variantsPayload = cartesianCombos(d.variants).map(c => {
+    const rec = d.variantStock?.[c.key] || {};
+    return {
+      sku: String(rec.sku || defaultSku(d.name, c.attributes)).trim(),
+      attributes: c.attributes,
+      stock: Math.max(0, Number(rec.stock) || 0),
+    };
+  });
+  const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft', variants: variantsPayload };
+  if (!sourced) body.price = Number(d.price) || 0;
+
+  let productId = d.id;
+  if (d._new) {
+    const created = await adminProductsApi.create(body);
+    productId = created?.id ?? productId;
+    toast(d.status === 'active' ? 'Product created and published' : 'Product created');
+  } else {
+    if (body.status === 'active' && sourced) {
+      const unapprovable = sources.find(source => !['approved', 'pending_approval'].includes(source.pricing_status));
+      if (unapprovable) {
+        toast(pricingIssueMessage(unapprovable));
+        return null;
+      }
+      for (const source of sources.filter(source => source.pricing_status === 'pending_approval')) {
+        await sourcingApi.approvePrice(source.id, source.current_price_quote?.id);
+      }
+    }
+    await adminProductsApi.update(d.id, body);
+    toast(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
+  }
+  if (productId != null) setVariants(productId, d.variants || []);
+  return productId;
+}
 
 // /admin/products/[id] renders this same list page with that product's edit
 // drawer pre-opened (see app/admin/products/[id]/page.js) rather than being a
@@ -172,13 +294,16 @@ export function AdminProducts({ editId }) {
       </div>
       <div className="panel" style={{ padding: 0 }}>
         <div className="adm-table-wrap"><table className="adm-table">
-          <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Variations</th><th>Status</th><th></th></tr></thead>
           <tbody>{pShown.map(p => (
             <tr key={p.id}>
               <td><div className="adm-prod"><span className="adm-prod-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></span><div><b>{p.name.split(',')[0]}</b><small>{p.brand ? p.brand + ' · ' : ''}{p.slug}</small></div></div></td>
               <td>{CATEGORIES.find(x => x.slug === p.category)?.name || p.category}</td>
               <td><b>{naira(p.price)}</b></td>
               <td>{p.stock}</td>
+              <td>{p.variants?.length
+                ? <span className="adm-pill ok">{p.variants.map(g => g.name).filter(Boolean).join(', ') || `${p.variants.length} set`}</span>
+                : <span className="adm-pill muted">None</span>}</td>
               <td className="row" style={{ gap: 6 }}>
                 <span className={'adm-pill ' + (p.stock === 0 ? 'bad' : p.stock < 10 ? 'warn' : 'ok')}>{stockStatusOf(p.stock)}</span>
                 <span className={'adm-pill ' + (p.status === 'active' ? 'ok' : p.status === 'draft' ? 'warn' : 'muted')}>{p.status === 'active' ? 'Active' : p.status === 'archived' ? 'Archived' : 'Draft'}</span>
@@ -193,33 +318,9 @@ export function AdminProducts({ editId }) {
         </table>{loaded && list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager page={pPage} pages={pPages} onPage={pSet} /></div>
       </div>
       {editing && <ProductEditDrawer key={`${editing.id}:${(editing._raw?.sources || []).map(source => source.id).join(',')}`} draft={editing} onClose={closeEditing} onSave={async (d) => {
-        const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
-        const sources = d._raw?.sources || [];
-        const sourced = Boolean(sources.length);
-        const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft' };
-        if (!sourced) body.price = Number(d.price) || 0;
         try {
-          let productId = d.id;
-          if (d._new) {
-            const created = await adminProductsApi.create(body);
-            productId = created?.id ?? productId;
-            t(d.status === 'active' ? 'Product created and published' : 'Product created');
-          } else {
-            if (body.status === 'active' && sourced) {
-              const unapprovable = sources.find(source => !['approved', 'pending_approval'].includes(source.pricing_status));
-              if (unapprovable) {
-                t(pricingIssueMessage(unapprovable));
-                return;
-              }
-
-              for (const source of sources.filter(source => source.pricing_status === 'pending_approval')) {
-                await sourcingApi.approvePrice(source.id, source.current_price_quote?.id);
-              }
-            }
-            await adminProductsApi.update(d.id, body);
-            t(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
-          }
-          if (productId != null) setVariants(productId, d.variants || []);
+          const productId = await saveAdminProduct(d, t);
+          if (productId == null) return; // blocked (pricing issue) — leave the drawer open
           await loadProducts();
           closeEditing();
         } catch (e) {
@@ -334,9 +435,9 @@ function VariantsEditor({ variants, onChange }) {
   );
 }
 
-function ProductEditDrawer({ draft, onClose, onSave }) {
+export function ProductEditDrawer({ draft, onClose, onSave }) {
   const addToast = useAdminToast();
-  const [f, setF] = useState({ ...draft, variants: draft.variants || draft._raw?.variants || [] });
+  const [f, setF] = useState({ ...draft, variants: draft.variants || [], variantStock: draft.variantStock || {} });
   const [pricingBusy, setPricingBusy] = useState(false);
   const initialSource = draft._raw?.sources?.[0] || null;
   const [pricingInputs, setPricingInputs] = useState({
@@ -348,6 +449,8 @@ function ProductEditDrawer({ draft, onClose, onSave }) {
   });
   const [, force] = useState(0);
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+  const setComboField = (key, field, value) => setF(s => ({ ...s, variantStock: { ...s.variantStock, [key]: { ...(s.variantStock?.[key] || {}), [field]: value } } }));
+  const combos = cartesianCombos(f.variants);
   const source = f._raw?.sources?.[0] || null;
   const quote = source?.current_price_quote;
   const sourced = Boolean(source);
@@ -467,6 +570,22 @@ function ProductEditDrawer({ draft, onClose, onSave }) {
           </label>
           <label className="adm-field"><span>Description</span><textarea rows={3} value={f.desc || (f._raw && f._raw.desc) || ''} onChange={e => set('desc', e.target.value)} placeholder="Short product description" /></label>
           <VariantsEditor variants={f.variants} onChange={v => set('variants', v)} />
+          {combos.length > 0 && (
+            <div className="adm-field">
+              <span>Variant stock &amp; SKU</span>
+              {combos.map(c => {
+                const rec = f.variantStock?.[c.key] || {};
+                return (
+                  <div key={c.key} className="adm-field-row" style={{ alignItems: 'flex-end' }}>
+                    <div style={{ flex: 1, paddingBottom: 10 }}><small className="muted">{Object.entries(c.attributes).map(([k, v]) => `${k}: ${v}`).join(' · ')}</small></div>
+                    <label className="adm-field" style={{ flex: 1 }}><span>SKU</span><input value={rec.sku ?? ''} placeholder={defaultSku(f.name, c.attributes)} onChange={e => setComboField(c.key, 'sku', e.target.value)} /></label>
+                    <label className="adm-field" style={{ width: 100 }}><span>Stock</span><input type="number" min="0" value={rec.stock ?? ''} onChange={e => setComboField(c.key, 'stock', e.target.value)} /></label>
+                  </div>
+                );
+              })}
+              <p className="muted" style={{ fontSize: 11.5, marginTop: -4 }}>Each variation combination needs its own stock count. Leave SKU blank to use the auto-generated placeholder shown.</p>
+            </div>
+          )}
         </div>
         <div className="adm-drawer-f">
           <button className="adm-btn ghost" onClick={onClose}>Cancel</button>

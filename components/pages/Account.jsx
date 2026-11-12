@@ -7,11 +7,63 @@ import { SocialMark } from '@/components/ui/SocialMark';
 import { Breadcrumbs, EmptyState, ProductCard } from '@/components/ui/Shared';
 import { Modal, AddressForm, CardForm, CardBrandMark, Field } from '@/components/forms/Shared';
 import { naira, SOCIAL_GLYPHS, byId } from '@/lib/data';
-import { profileApi } from '@/lib/api/endpoints';
+import { profileApi, ordersApi, favoritesApi, sharedWishlistsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
-// No order-list/get endpoint exists on the backend yet — always empty until it ships.
-const ORDERS = [];
+// GET /orders and /orders/{id} have no documented response shape (generic
+// SuccessResponse) — every field below is read defensively under several
+// plausible names. Only the `status` enum is confirmed by the spec itself:
+// pending_payment, confirmed, processing, shipped, in_transit, delivered,
+// cancelled.
+const STATUS_LABEL = {
+  pending_payment: 'Pending payment', confirmed: 'Confirmed', processing: 'Processing',
+  shipped: 'Shipped', in_transit: 'In transit', delivered: 'Delivered', cancelled: 'Cancelled',
+};
+const STATUS_TINT = {
+  pending_payment: 'warn', confirmed: 'info', processing: 'warn',
+  shipped: 'info', in_transit: 'info', delivered: 'ok', cancelled: 'bad',
+};
+
+function normalizeOrder(o) {
+  const items = o.items ?? o.order_items ?? o.line_items;
+  const itemCount = o.items_count ?? o.item_count
+    ?? (Array.isArray(items) ? items.reduce((s, it) => s + Number(it.quantity ?? it.qty ?? 1), 0) : null)
+    ?? 0;
+  const status = String(o.status ?? 'pending_payment').toLowerCase();
+  return {
+    id: o.id ?? o.order_id ?? o.order_number,
+    status,
+    date: o.created_at ?? o.date ?? o.placed_at,
+    itemCount,
+    total: Number(o.total ?? o.total_amount ?? o.grand_total ?? o.amount ?? 0),
+    raw: o,
+  };
+}
+
+// Shared by Dashboard, Orders and TrackingPage — each fetches independently
+// since they need different filters, not shared state.
+function useOrders(params) {
+  const [orders, setOrders] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const key = JSON.stringify(params || {});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await ordersApi.list(params);
+        const list = Array.isArray(res) ? res : (res?.data ?? res?.items ?? res?.orders ?? []);
+        if (!cancelled) setOrders((Array.isArray(list) ? list : []).map(normalizeOrder));
+      } catch (e) {
+        if (!cancelled) setOrders([]);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return { orders, loaded };
+}
 
 function displayName(user) {
   if (!user) return '';
@@ -34,8 +86,6 @@ const ACCT_TABS = [
   ['payments', 'Payment methods', 'card'],
   ['profile', 'Profile settings', 'user'],
 ];
-
-const STATUS_TINT = { 'In transit': 'info', 'Delivered': 'ok', 'Cancelled': 'bad', 'Processing': 'warn' };
 
 function AccountShell({ active, children }) {
   const { go, user, isAuthenticated, authLoading, logout } = useStore();
@@ -84,19 +134,26 @@ function AccountShell({ active, children }) {
 }
 
 function StatusPill({ status }) {
-  return <span className={'status-pill ' + (STATUS_TINT[status] || 'info')}>{status}</span>;
+  return <span className={'status-pill ' + (STATUS_TINT[status] || 'info')}>{STATUS_LABEL[status] || status}</span>;
+}
+
+function fmtDate(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  return isNaN(dt) ? String(d) : dt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function Dashboard() {
   const { go, wish, referral, user } = useStore();
+  const { orders, loaded } = useOrders();
   const stats = [
-    ['package', 'Total orders', ORDERS.length, 'orders'],
-    ['truck', 'In transit', ORDERS.filter(o => o.status === 'In transit').length, 'orders'],
+    ['package', 'Total orders', orders.length, 'orders'],
+    ['truck', 'In transit', orders.filter(o => o.status === 'in_transit' || o.status === 'shipped').length, 'orders'],
     ['heart', 'Wishlist', wish.length, 'wishlist'],
     ['limcash', 'Lim Cash', naira(referral.credit), 'referrals'],
   ];
   const firstName = (displayName(user).split(' ')[0]) || 'there';
-  const recent = ORDERS.slice(0, 3);
+  const recent = orders.slice(0, 3);
   return (
     <>
       <div className="acct-welcome">
@@ -114,50 +171,93 @@ function Dashboard() {
 
       <div className="acct-panel">
         <div className="row between" style={{ marginBottom: 16 }}><h3>Recent orders</h3><button className="link-btn" onClick={() => go('orders')}>View all</button></div>
-        {recent.length === 0
-          ? <p className="muted" style={{ fontSize: 14 }}>No recent orders — order history isn't available yet.</p>
+        {!loaded ? <p className="muted" style={{ fontSize: 14 }}>Loading orders…</p> : recent.length === 0
+          ? <p className="muted" style={{ fontSize: 14 }}>No orders yet.</p>
           : <OrderList orders={recent} />}
       </div>
     </>
   );
 }
 
+const RETURN_REASONS = ['Item damaged or defective', 'Wrong item received', 'Not as described', 'No longer needed', 'Other'];
+
+function ReturnModal({ order, saving, onClose, onSave }) {
+  const [reason, setReason] = useState(RETURN_REASONS[0]);
+  const [note, setNote] = useState('');
+  return (
+    <Modal title={`Request a return · #${order.id}`} sub="We'll review this and follow up on next steps." onClose={onClose}>
+      <label className="adm-field" style={{ marginBottom: 14 }}>
+        <span>Reason</span>
+        <select value={reason} onChange={e => setReason(e.target.value)}>
+          {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </label>
+      <label className="adm-field">
+        <span>Details (optional)</span>
+        <textarea rows="4" value={note} onChange={e => setNote(e.target.value)} placeholder="Anything else that would help us process this" />
+      </label>
+      <div className="row" style={{ gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+        <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => onSave({ reason, note: note.trim() || undefined })} disabled={saving}>{saving ? 'Submitting…' : 'Submit request'}</button>
+      </div>
+    </Modal>
+  );
+}
+
 function OrderList({ orders }) {
-  const { go } = useStore();
+  const { go, toast } = useStore();
+  const [returning, setReturning] = useState(null); // order object or null
+  const [saving, setSaving] = useState(false);
+  const submitReturn = async (data) => {
+    setSaving(true);
+    try {
+      await ordersApi.requestReturn(returning.id, data);
+      toast('Return request submitted');
+      setReturning(null);
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div className="order-list">
       {orders.map(o => (
         <div className="order-row" key={o.id}>
           <div className="or-main">
             <div className="or-id"><b>{o.id}</b><StatusPill status={o.status} /></div>
-            <span className="muted" style={{ fontSize: 13 }}>{o.date} · {o.items} {o.items === 1 ? 'item' : 'items'}</span>
+            <span className="muted" style={{ fontSize: 13 }}>{fmtDate(o.date)} · {o.itemCount} {o.itemCount === 1 ? 'item' : 'items'}</span>
           </div>
           <div className="or-meta">
             <b>{naira(o.total)}</b>
-            <span className="muted" style={{ fontSize: 12.5 }}>{o.status === 'Delivered' ? 'Delivered ' + o.eta : o.status === 'Cancelled' ? 'Cancelled' : 'Arrives ' + o.eta}</span>
           </div>
           <div className="or-actions">
-            {o.status !== 'Cancelled' && <button className="btn btn-outline btn-sm" onClick={() => go('tracking', o.id)}><Icon name="truck" size={15} /> Track</button>}
+            {o.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => go('tracking', o.id)}><Icon name="truck" size={15} /> Track</button>}
+            {o.status === 'delivered' && <button className="btn btn-ghost btn-sm" onClick={() => setReturning(o)}><Icon name="refresh" size={15} /> Request return</button>}
             <button className="btn btn-ghost btn-sm" onClick={() => go('shop', 'all')}>Buy again</button>
           </div>
         </div>
       ))}
+      {returning && <ReturnModal order={returning} saving={saving} onClose={() => setReturning(null)} onSave={submitReturn} />}
     </div>
   );
 }
 
 function Orders() {
   const [filter, setFilter] = useState('all');
-  const tabs = [['all', 'All'], ['In transit', 'In transit'], ['Delivered', 'Delivered'], ['Cancelled', 'Cancelled']];
-  const list = filter === 'all' ? ORDERS : ORDERS.filter(o => o.status === filter);
+  const { orders, loaded } = useOrders();
+  const tabs = [['all', 'All'], ['active', 'Active'], ['delivered', 'Delivered'], ['cancelled', 'Cancelled']];
+  const list = filter === 'all' ? orders
+    : filter === 'active' ? orders.filter(o => !['delivered', 'cancelled'].includes(o.status))
+    : orders.filter(o => o.status === filter);
   return (
     <>
       <h1 style={{ fontSize: 26, marginBottom: 18 }}>My orders</h1>
       <div className="pill-tabs">
         {tabs.map(([v, l]) => <button key={v} className={'pill-tab' + (filter === v ? ' on' : '')} onClick={() => setFilter(v)}>{l}</button>)}
       </div>
-      {list.length === 0
-        ? <EmptyState icon="package" title="No orders here" body="Order history isn't available yet — check back once it's connected." />
+      {!loaded ? <p className="muted">Loading orders…</p> : list.length === 0
+        ? <EmptyState icon="package" title="No orders here" body="Nothing to show for this filter yet." />
         : <div className="acct-panel"><OrderList orders={list} /></div>}
     </>
   );
@@ -445,17 +545,82 @@ export function AccountPage({ tab }) {
 /* ---------------- WISHLIST ---------------- */
 export function WishlistPage() {
   const { wish, go, toast } = useStore();
+  const [sharing, setSharing] = useState(false);
   const items = wish.map(id => byId(id)).filter(Boolean);
+  const shareWishlist = async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const res = await favoritesApi.share();
+      const data = res?.data ?? res;
+      const token = data?.token ?? data?.share_token ?? data?.code;
+      const url = data?.url ?? data?.share_url ?? data?.link
+        ?? (token ? `${window.location.origin}/shared-wishlist/${token}` : null);
+      if (!url) { toast('Could not generate a share link'); return; }
+      try { await navigator.clipboard.writeText(url); toast('Wishlist link copied'); }
+      catch (e) { toast(url); }
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSharing(false);
+    }
+  };
   return (
     <AccountShell active="wishlist">
       <div className="row between" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
         <h1 style={{ fontSize: 26 }}>My wishlist <span className="muted" style={{ fontWeight: 600, fontSize: 16 }}>· {items.length} saved</span></h1>
-        {items.length > 0 && <button className="btn btn-ghost btn-sm" onClick={() => toast('Wishlist link copied')}><Icon name="share" size={15} /> Share wishlist</button>}
+        {items.length > 0 && <button className="btn btn-ghost btn-sm" onClick={shareWishlist} disabled={sharing}><Icon name="share" size={15} /> {sharing ? 'Sharing…' : 'Share wishlist'}</button>}
       </div>
       {items.length === 0
         ? <EmptyState icon="heart" title="Your wishlist is empty" body="Tap the heart on any product to save it here for later." action="Discover products" onAction={() => go('shop', 'all')} />
         : <div className="shop-grid">{items.map(p => <ProductCard key={p.id} product={p} />)}</div>}
     </AccountShell>
+  );
+}
+
+/* ---------------- SHARED WISHLIST (public) ---------------- */
+export function SharedWishlistPage({ token }) {
+  const { go } = useStore();
+  const [state, setState] = useState({ loaded: false, items: [], owner: null, error: false });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!token) { if (!cancelled) setState(s => ({ ...s, loaded: true, error: true })); return; }
+      try {
+        const res = await sharedWishlistsApi.get(token);
+        const data = res?.data ?? res;
+        const rawItems = data?.items ?? data?.favorites ?? data ?? [];
+        const ids = (Array.isArray(rawItems) ? rawItems : [])
+          .map(f => f.product_id ?? f.product?.id ?? f.id)
+          .filter(id => id != null);
+        const owner = data?.owner?.name ?? data?.user?.name
+          ?? ([data?.user?.first_name, data?.user?.last_name].filter(Boolean).join(' ') || null);
+        if (!cancelled) setState({ loaded: true, items: ids.map(byId).filter(Boolean), owner, error: false });
+      } catch (e) {
+        if (!cancelled) setState({ loaded: true, items: [], owner: null, error: true });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  if (!state.loaded) return <div className="page page-fade"><div className="wrap"><p className="muted" style={{ padding: '40px 0' }}>Loading wishlist…</p></div></div>;
+
+  if (state.error) {
+    return (
+      <div className="page page-fade"><div className="wrap">
+        <EmptyState icon="heart" title="This wishlist link isn't valid" body="It may have expired or been removed." action="Go to shop" onAction={() => go('shop', 'all')} />
+      </div></div>
+    );
+  }
+
+  return (
+    <div className="page page-fade"><div className="wrap">
+      <h1 style={{ fontSize: 26, marginBottom: 6 }}>{state.owner ? `${state.owner}'s wishlist` : 'Shared wishlist'}</h1>
+      <p className="muted" style={{ marginBottom: 18 }}>{state.items.length} item{state.items.length === 1 ? '' : 's'} saved</p>
+      {state.items.length === 0
+        ? <EmptyState icon="heart" title="This wishlist is empty" body="Nothing has been saved here yet." action="Go to shop" onAction={() => go('shop', 'all')} />
+        : <div className="shop-grid">{state.items.map(p => <ProductCard key={p.id} product={p} />)}</div>}
+    </div></div>
   );
 }
 
@@ -468,55 +633,82 @@ const TRACK_STEPS = [
   ['Delivered', 'Package delivered', 'shield'],
 ];
 
+const STEP_INDEX = { pending_payment: 0, confirmed: 0, processing: 1, shipped: 2, in_transit: 3, delivered: 4 };
+
 export function TrackingPage({ id }) {
   const { go } = useStore();
-  const order = ORDERS.find(o => o.id === id) || ORDERS[0];
+  const [order, setOrder] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!id) { if (!cancelled) setLoaded(true); return; }
+      try {
+        const res = await ordersApi.get(id);
+        const raw = res?.data ?? res;
+        if (!cancelled) setOrder(raw ? normalizeOrder(raw) : null);
+      } catch (e) {
+        if (!cancelled) setOrder(null);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
+
+  if (!loaded) return <AccountShell active="tracking"><p className="muted">Loading…</p></AccountShell>;
+
   if (!order) {
     return (
       <AccountShell active="tracking">
-        <EmptyState icon="truck" title="No order to track yet" body="Order history isn't available yet, so there's nothing here to track." action="View orders" onAction={() => go('orders')} />
+        <EmptyState icon="truck" title="No order to track" body="We couldn't find that order." action="View orders" onAction={() => go('orders')} />
       </AccountShell>
     );
   }
-  const current = order.status === 'Delivered' ? 4 : order.status === 'Cancelled' ? 1 : 3;
-  const timeline = [
-    { time: '24 May, 9:14 AM' }, { time: '24 May, 2:40 PM' }, { time: '25 May, 8:02 AM' }, { time: 'Today, 7:30 AM' }, { time: order.status === 'Delivered' ? order.eta : 'Est. ' + order.eta },
-  ];
+  const isCancelled = order.status === 'cancelled';
+  const current = STEP_INDEX[order.status] ?? 0;
+  // Response shape is undocumented — courier/tracking-number fields are read
+  // defensively and simply hidden (not fabricated) if the order has neither.
+  const courier = order.raw.courier ?? order.raw.carrier ?? order.raw.delivery_partner;
+  const trackingNumber = order.raw.tracking_number ?? order.raw.tracking_id ?? order.raw.waybill_number;
   return (
     <AccountShell active="tracking">
       <div className="row between" style={{ marginBottom: 6, flexWrap: 'wrap', gap: 10 }}>
         <h1 style={{ fontSize: 26 }}>Track order</h1>
         <button className="btn btn-ghost btn-sm" onClick={() => go('orders')}><Icon name="list" size={15} /> All orders</button>
       </div>
-      <p className="muted" style={{ marginBottom: 22 }}>Order <b style={{ color: 'var(--text)' }}>{order.id}</b> · placed {order.date}</p>
+      <p className="muted" style={{ marginBottom: 22 }}>Order <b style={{ color: 'var(--text)' }}>{order.id}</b> · placed {fmtDate(order.date)}</p>
 
       <div className="track-banner card">
         <div className="track-status">
-          <span className="track-ic"><Icon name="truck" size={26} /></span>
+          <span className="track-ic"><Icon name={isCancelled ? 'close' : 'truck'} size={26} /></span>
           <div>
             <StatusPill status={order.status} />
-            <h3 style={{ margin: '8px 0 2px' }}>{order.status === 'Delivered' ? 'Delivered' : 'Arriving ' + order.eta}</h3>
-            <p className="muted" style={{ fontSize: 13.5 }}>{order.items} {order.items === 1 ? 'item' : 'items'} · {naira(order.total)}</p>
+            <h3 style={{ margin: '8px 0 2px' }}>{isCancelled ? 'Order cancelled' : TRACK_STEPS[current][0]}</h3>
+            <p className="muted" style={{ fontSize: 13.5 }}>{order.itemCount} {order.itemCount === 1 ? 'item' : 'items'} · {naira(order.total)}</p>
           </div>
         </div>
-        <div className="track-courier">
-          <small className="muted">Courier</small><b>Limitra Express</b>
-          <small className="muted" style={{ marginTop: 8 }}>Tracking ID</small><b>LMX{order.id.replace(/\D/g, '')}NG</b>
-        </div>
+        {(courier || trackingNumber) && (
+          <div className="track-courier">
+            {courier && <><small className="muted">Courier</small><b>{courier}</b></>}
+            {trackingNumber && <><small className="muted" style={{ marginTop: 8 }}>Tracking ID</small><b>{trackingNumber}</b></>}
+          </div>
+        )}
       </div>
 
-      <div className="timeline">
-        {TRACK_STEPS.map(([title, sub, ic], i) => (
-          <div key={i} className={'tl-step' + (i <= current ? ' done' : '') + (i === current ? ' current' : '')}>
-            <div className="tl-marker"><span className="tl-dot">{i < current ? <Icon name="check" size={14} stroke={3} /> : <Icon name={ic} size={14} />}</span>{i < TRACK_STEPS.length - 1 && <span className="tl-line" />}</div>
-            <div className="tl-body">
-              <b>{title}</b>
-              <small className="muted">{sub}</small>
-              <small className="tl-time">{timeline[i].time}</small>
+      {!isCancelled && (
+        <div className="timeline">
+          {TRACK_STEPS.map(([title, sub, ic], i) => (
+            <div key={i} className={'tl-step' + (i <= current ? ' done' : '') + (i === current ? ' current' : '')}>
+              <div className="tl-marker"><span className="tl-dot">{i < current ? <Icon name="check" size={14} stroke={3} /> : <Icon name={ic} size={14} />}</span>{i < TRACK_STEPS.length - 1 && <span className="tl-line" />}</div>
+              <div className="tl-body">
+                <b>{title}</b>
+                <small className="muted">{sub}</small>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       <div className="track-help"><Icon name="headset" size={18} /><span>Having an issue with this order?</span><button className="link-btn" onClick={() => go('help', 'contact')}>Contact support</button></div>
     </AccountShell>

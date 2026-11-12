@@ -1,13 +1,13 @@
 'use client';
 /* eslint-disable @next/next/no-img-element */
 
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
-import { sourcingApi } from '@/lib/api/endpoints';
+import { sourcingApi, adminProductsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { AdmHead, AdmSelect } from './AdminShared';
 import { useAdminToast } from './AdminToastContext';
+import { ProductEditDrawer, productToDraft, mapAdminProduct, saveAdminProduct } from './AdminCatalog';
 
 const productId = (product) => String(product.external_product_id || product.supplier_id || product.id || '');
 const productSource = (product) => String(product.source || product.supplier || '').toLowerCase();
@@ -57,6 +57,17 @@ export function AdminSourcing() {
   const [jobs, setJobs] = useState([]);
   const [searching, setSearching] = useState(false);
   const [queueing, setQueueing] = useState(false);
+  const [reviewing, setReviewing] = useState(null); // product draft being reviewed in-place
+
+  const openReview = async (id) => {
+    if (id == null) return;
+    try {
+      const detail = await adminProductsApi.get(id);
+      setReviewing(productToDraft(mapAdminProduct(detail)));
+    } catch (error) {
+      toast(messageFrom(error));
+    }
+  };
 
   const loadJobs = useCallback(async () => {
     const payload = await sourcingApi.jobs({ per_page: 50 });
@@ -182,7 +193,7 @@ export function AdminSourcing() {
           <button className="src-card-pick" onClick={() => toggleProduct(product)} disabled={product.imported || queued} aria-label={checked ? 'Deselect product' : 'Select product'}>{checked && <Icon name="check" size={15} stroke={3} />}</button>
           <ProductImage className="src-card-image" product={product} />
           <div className="src-card-body"><span className="src-source-badge">{sourceLabel(productSource(product))}</span><h3>{productTitle(product)}</h3><p className="src-card-price">{money(product.price, product.currency || 'USD')}</p>
-            {product.imported ? <Link className="src-imported-link" href={`/admin/products/${product.product_id}`}>Already added · View product</Link> : queued ? <small>Queued for AI rewrite</small> : <small>ID: {productId(product)}</small>}
+            {product.imported ? <button type="button" className="src-imported-link" onClick={() => openReview(product.product_id)}>Already added · View product</button> : queued ? <small>Queued for AI rewrite</small> : <small>ID: {productId(product)}</small>}
           </div>
         </article>;
       })}</div> : <div className="src-empty"><Icon name="search" size={28} /><b>No supplier products found</b><span>Try a broader search phrase or another supplier.</span></div>}
@@ -192,14 +203,30 @@ export function AdminSourcing() {
 
     {jobs.length > 0 && <section className="src-review-section">
       <div className="src-section-head"><div><h2>Background queue</h2><p>You can leave this page. The server will keep processing these products.</p></div><button className="adm-btn ghost" onClick={() => loadJobs().catch(error => toast(messageFrom(error)))}><Icon name="refresh" size={15} /> Refresh</button></div>
-      <div className="src-review-list">{jobs.map(job => <SourcingJob key={job.id} job={job} onRetry={() => queueProducts([job])} />)}</div>
+      <div className="src-review-list">{jobs.map(job => <SourcingJob key={job.id} job={job} onRetry={() => queueProducts([job])} onReview={() => openReview(job.product_id)} />)}</div>
     </section>}
+
+    {reviewing && <ProductEditDrawer
+      key={`${reviewing.id}:${(reviewing._raw?.sources || []).map(source => source.id).join(',')}`}
+      draft={reviewing}
+      onClose={() => setReviewing(null)}
+      onSave={async (d) => {
+        try {
+          const pid = await saveAdminProduct(d, toast);
+          if (pid == null) return; // blocked (pricing issue) — leave the drawer open
+          setReviewing(null);
+          await loadJobs().catch(() => {});
+        } catch (error) {
+          toast(messageFrom(error));
+        }
+      }}
+    />}
   </div>;
 }
 
-function SourcingJob({ job, onRetry }) {
+function SourcingJob({ job, onRetry, onReview }) {
   const title = job.enhanced_content?.name || job.supplier_product?.title || `${sourceLabel(job.supplier)} product ${job.external_product_id}`;
-  if (job.status === 'completed') return <div className="panel src-review-done"><Icon name="check" size={20} stroke={3} /><div><b>{title}</b><span>{job.warning || 'AI rewrite completed and the product was added as a draft.'}</span></div><Link className="adm-btn ghost" href={`/admin/products/${job.product_id}`}>Review product</Link></div>;
+  if (job.status === 'completed') return <div className="panel src-review-done"><Icon name="check" size={20} stroke={3} /><div><b>{title}</b><span>{job.warning || 'AI rewrite completed and the product was added as a draft.'}</span></div><button className="adm-btn ghost" onClick={onReview}>Review product</button></div>;
   if (job.status === 'failed') return <div className="panel src-review-error"><Icon name="info" size={20} /><div><b>{title}</b><span>{job.error || 'This product could not be processed.'}</span></div><button className="adm-btn ghost" onClick={onRetry}>Retry</button></div>;
   return <div className="panel src-review-loading"><Icon name="refresh" size={20} /><div><b>{title}</b><span>{job.status === 'processing' ? 'AI is rewriting and saving this product…' : 'Waiting for a background worker…'}</span></div></div>;
 }
