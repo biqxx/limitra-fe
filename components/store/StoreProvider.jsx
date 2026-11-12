@@ -95,7 +95,10 @@ export function StoreProvider({ children }) {
     } catch (e) { setRemoteCart(null); }
     try {
       const favs = await favoritesApi.list();
-      setFavorites(Array.isArray(favs) ? favs : favs?.data || []);
+      // Confirmed live: GET /favorites' data is { items: [...], pagination }
+      // — not a bare array and not nested under `.data` again, which is why
+      // this silently fell back to [] every time despite favorites existing.
+      setFavorites(Array.isArray(favs) ? favs : (favs?.items ?? favs?.data ?? []));
     } catch (e) { setFavorites([]); }
   }, []);
 
