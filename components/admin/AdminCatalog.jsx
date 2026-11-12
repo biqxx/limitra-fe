@@ -216,13 +216,16 @@ export function AdminProducts({ editId }) {
       </div>
       <div className="panel" style={{ padding: 0 }}>
         <div className="adm-table-wrap"><table className="adm-table">
-          <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Variations</th><th>Status</th><th></th></tr></thead>
           <tbody>{pShown.map(p => (
             <tr key={p.id}>
               <td><div className="adm-prod"><span className="adm-prod-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></span><div><b>{p.name.split(',')[0]}</b><small>{p.brand ? p.brand + ' · ' : ''}{p.slug}</small></div></div></td>
               <td>{CATEGORIES.find(x => x.slug === p.category)?.name || p.category}</td>
               <td><b>{naira(p.price)}</b></td>
               <td>{p.stock}</td>
+              <td>{p.variants?.length
+                ? <span className="adm-pill ok">{p.variants.map(g => g.name).filter(Boolean).join(', ') || `${p.variants.length} set`}</span>
+                : <span className="adm-pill muted">None</span>}</td>
               <td className="row" style={{ gap: 6 }}>
                 <span className={'adm-pill ' + (p.stock === 0 ? 'bad' : p.stock < 10 ? 'warn' : 'ok')}>{stockStatusOf(p.stock)}</span>
                 <span className={'adm-pill ' + (p.status === 'active' ? 'ok' : p.status === 'draft' ? 'warn' : 'muted')}>{p.status === 'active' ? 'Active' : p.status === 'archived' ? 'Archived' : 'Draft'}</span>
