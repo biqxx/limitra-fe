@@ -210,12 +210,25 @@ export function CheckoutPage() {
 
   useEffect(() => { window.scrollTo({ top: 0 }); }, [step]);
 
+  // addresses loads asynchronously, after selAddr's initial (synchronous,
+  // one-time) useState default is already locked in — on a fresh page load
+  // that default sees an empty addresses list and permanently settles on
+  // null unless re-synced here once the real list arrives (or the
+  // previously-selected address is later removed).
+  useEffect(() => {
+    if (addresses.length === 0) return;
+    if (selAddr != null && addresses.some(a => a.id === selAddr)) return;
+    const fallback = addresses.find(a => a.is_default) || addresses[0];
+    if (fallback) setSelAddr(fallback.id);
+  }, [addresses, selAddr]);
+
   // Real delivery options/fees for this cart+address — see deliveryApi.options
   // (lib/api/endpoints.js). Refetched on address change since fee/availability
   // plausibly vary by destination; response field names are undocumented, so
-  // every field is read defensively under several plausible names.
+  // every field is read defensively under several plausible names. Waits for
+  // selAddr too — firing with cart_id alone (no address_id/state/city) 422s.
   useEffect(() => {
-    if (!cartId) return;
+    if (!cartId || !selAddr) return;
     let cancelled = false;
     (async () => {
       setDeliveryLoading(true);
@@ -448,7 +461,7 @@ export function CheckoutPage() {
 
               <h4 className="co-sub">Delivery method</h4>
               {errs.method && <span className="err-msg" style={{ marginBottom: 10, display: 'block' }}>{errs.method}</span>}
-              {deliveryLoading ? (
+              {deliveryLoading || (!selAddr && addresses.length > 0) ? (
                 <p className="muted">Loading delivery options…</p>
               ) : deliveryError ? (
                 <div className="co-note" style={{ color: 'var(--danger)' }}>
