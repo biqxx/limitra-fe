@@ -11,8 +11,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { adminDeliveryZonesApi, adminDeliveryMethodsApi, adminPickupLocationsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
+import { slugify } from '@/lib/data';
 import { useAdminToast } from './AdminToastContext';
 import { AdmHead } from './AdminShared';
+
+// POST /admin/delivery-methods confirmed (live 422) to require `code` and
+// `type` — neither is in the spec (empty request schema), so the `type`
+// options below are a guess; if the backend rejects one, its error will say
+// what's actually allowed.
+const METHOD_TYPES = ['standard', 'express', 'same_day', 'pickup'];
 
 const asList = (res) => {
   const list = Array.isArray(res) ? res : (res?.data ?? res?.items ?? res?.results ?? []);
@@ -34,6 +41,8 @@ function methodDraft(method) {
   return {
     id: method?.id ?? null,
     name: method?.name || '',
+    code: method?.code || '',
+    type: method?.type || 'standard',
     description: method?.description || method?.eta || '',
     fee: method?.fee ?? method?.price ?? 0,
     min_days: method?.min_days ?? '',
@@ -45,7 +54,8 @@ function pickupDraft(p) {
   return {
     id: p?.id ?? null,
     name: p?.name || '',
-    address: p?.address ?? p?.line1 ?? '',
+    code: p?.code || '',
+    address: p?.line1 ?? p?.address ?? '',
     city: p?.city || '',
     state: p?.state || '',
     country: p?.country || 'NG',
@@ -150,6 +160,8 @@ export function AdminDelivery() {
     setSaving(true);
     const body = {
       name: draftMethod.name.trim(),
+      code: draftMethod.code.trim() || slugify(draftMethod.name),
+      type: draftMethod.type,
       description: draftMethod.description.trim() || undefined,
       fee: Math.max(0, Number(draftMethod.fee) || 0),
       min_days: draftMethod.min_days === '' ? undefined : Number(draftMethod.min_days),
@@ -202,7 +214,8 @@ export function AdminDelivery() {
     setSaving(true);
     const body = {
       name: draftPickup.name.trim(),
-      address: draftPickup.address.trim(),
+      code: draftPickup.code.trim() || slugify(draftPickup.name),
+      line1: draftPickup.address.trim(),
       city: draftPickup.city.trim() || undefined,
       state: draftPickup.state.trim() || undefined,
       country: draftPickup.country || 'NG',
@@ -308,7 +321,7 @@ export function AdminDelivery() {
           ) : methods.map(method => (
             <div className="cat-parent-row" key={method.id}>
               <div className="cat-icon"><Icon name="truck" size={19} /></div>
-              <div className="cat-main"><b>{method.name}</b><small>{[method.description, (method.min_days != null && method.max_days != null) ? `${method.min_days}–${method.max_days} days` : null].filter(Boolean).join(' · ')}</small></div>
+              <div className="cat-main"><b>{method.name}</b><small>{[method.type, method.code, method.description, (method.min_days != null && method.max_days != null) ? `${method.min_days}–${method.max_days} days` : null].filter(Boolean).join(' · ')}</small></div>
               <span className="cat-products">{method.fee ? `₦ ${Number(method.fee).toLocaleString('en-NG')}` : 'Free'}</span>
               <span className={'adm-pill ' + (method.active !== false ? 'ok' : 'muted')}>{method.active !== false ? 'Active' : 'Inactive'}</span>
               <div className="adm-rowact">
@@ -327,7 +340,7 @@ export function AdminDelivery() {
           ) : pickups.map(p => (
             <div className="cat-parent-row" key={p.id}>
               <div className="cat-icon"><Icon name="store" size={19} /></div>
-              <div className="cat-main"><b>{p.name}</b><small>{[p.address, p.city, p.state].filter(Boolean).join(', ')}</small></div>
+              <div className="cat-main"><b>{p.name}</b><small>{[p.line1 ?? p.address, p.city, p.state].filter(Boolean).join(', ')}</small></div>
               <span className={'adm-pill ' + (p.active !== false ? 'ok' : 'muted')}>{p.active !== false ? 'Active' : 'Inactive'}</span>
               <div className="adm-rowact">
                 <button onClick={() => togglePickupActive(p)} title={p.active !== false ? 'Deactivate' : 'Activate'} aria-label={p.active !== false ? 'Deactivate' : 'Activate'}><Icon name={p.active !== false ? 'eye' : 'check'} size={15} /></button>
@@ -353,6 +366,14 @@ export function AdminDelivery() {
       {draftMethod && (
         <Drawer title={draftMethod.id ? 'Edit method' : 'Add method'} sub="Attach this to one or more zones to make it selectable at checkout." saving={saving} canSave={!!draftMethod.name.trim()} onClose={() => setDraftMethod(null)} onSave={saveMethod} saveLabel={draftMethod.id ? 'Save changes' : 'Add method'}>
           <label className="adm-field"><span>Method name</span><input value={draftMethod.name} onChange={e => setDraftMethod(c => ({ ...c, name: e.target.value }))} placeholder="e.g. Express delivery" autoFocus /></label>
+          <div className="adm-field-row">
+            <label className="adm-field"><span>Code</span><input value={draftMethod.code} onChange={e => setDraftMethod(c => ({ ...c, code: e.target.value }))} placeholder={slugify(draftMethod.name) || 'auto from name'} /></label>
+            <label className="adm-field"><span>Type</span>
+              <select value={draftMethod.type} onChange={e => setDraftMethod(c => ({ ...c, type: e.target.value }))}>
+                {METHOD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+          </div>
           <label className="adm-field"><span>Description</span><input value={draftMethod.description} onChange={e => setDraftMethod(c => ({ ...c, description: e.target.value }))} placeholder="e.g. 5–7 business days" /></label>
           <div className="adm-field-row">
             <label className="adm-field"><span>Fee (₦)</span><input type="number" min="0" value={draftMethod.fee} onChange={e => setDraftMethod(c => ({ ...c, fee: e.target.value }))} /></label>
@@ -368,6 +389,7 @@ export function AdminDelivery() {
       {draftPickup && (
         <Drawer title={draftPickup.id ? 'Edit pickup location' : 'Add pickup location'} saving={saving} canSave={!!(draftPickup.name.trim() && draftPickup.address.trim())} onClose={() => setDraftPickup(null)} onSave={savePickup} saveLabel={draftPickup.id ? 'Save changes' : 'Add location'}>
           <label className="adm-field"><span>Location name</span><input value={draftPickup.name} onChange={e => setDraftPickup(c => ({ ...c, name: e.target.value }))} placeholder="e.g. Limitra Ikeja Hub" autoFocus /></label>
+          <label className="adm-field"><span>Code</span><input value={draftPickup.code} onChange={e => setDraftPickup(c => ({ ...c, code: e.target.value }))} placeholder={slugify(draftPickup.name) || 'auto from name'} /></label>
           <label className="adm-field"><span>Address</span><input value={draftPickup.address} onChange={e => setDraftPickup(c => ({ ...c, address: e.target.value }))} placeholder="Street address" /></label>
           <div className="adm-field-row">
             <label className="adm-field"><span>City</span><input value={draftPickup.city} onChange={e => setDraftPickup(c => ({ ...c, city: e.target.value }))} /></label>
