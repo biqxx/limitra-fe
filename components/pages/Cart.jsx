@@ -470,11 +470,14 @@ export function CheckoutPage() {
         }
       }
 
-      // Order exists but we got neither a redirect nor usable transfer
-      // details back — surface this rather than claim a success we can't
-      // confirm (the order itself is safe; Idempotency-Key means retrying
-      // "Place order" won't double-create it).
-      setPlaceError('Order placed, but payment could not be started. Please try again, or check your orders page.');
+      // The order itself was created successfully (and the cart's already
+      // cleared above) even though we got neither a payment redirect nor
+      // usable transfer details back — show the real confirmation rather
+      // than leave the customer on a now-empty checkout page with only an
+      // error banner. Payment can still be completed later from the orders
+      // page; Idempotency-Key means retrying "Place order" won't double-create it.
+      setOrderId(newOrderId ?? idemKey);
+      toast('Order placed successfully!');
     } catch (err) {
       setPlaceError(messageFrom(err));
     } finally {
