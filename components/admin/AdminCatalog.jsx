@@ -510,10 +510,15 @@ function ProductEditDrawer({ draft, onClose, onSave }) {
 }
 
 /* ---------- ORDERS ---------- */
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Deliberately not toLocaleDateString — its output depends on the runtime's
+// ICU data, which can differ between the Node server (SSR) and the browser
+// (hydration), producing a React hydration mismatch (confirmed live, see
+// the same fix in components/pages/Account.jsx).
 function fmtOrderDate(d) {
   if (!d) return '';
   const dt = new Date(d);
-  return isNaN(dt) ? String(d) : dt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+  return isNaN(dt) ? String(d) : `${dt.getDate()} ${MONTHS_SHORT[dt.getMonth()]} ${dt.getFullYear()}`;
 }
 
 function InvoiceModal({ order, onClose }) {
