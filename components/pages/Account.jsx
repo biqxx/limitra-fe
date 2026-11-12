@@ -167,7 +167,11 @@ function Addresses() {
   const { addresses, addressesLoading, saveAddress, removeAddress, setPrimaryAddress } = useStore();
   const [editing, setEditing] = useState(null); // address obj or 'new' or null
   const close = () => setEditing(null);
-  const addressLine = (a) => [a.address_line_1, a.address_line_2].filter(Boolean).join(', ');
+  // GET /addresses has no documented response shape at all — read defensively
+  // under both the line1/line2 names the live create/update validation
+  // actually wants and the address_line_1/2 names POST/PUT's (apparently
+  // stale) docs show, in case a saved address comes back under either.
+  const addressLine = (a) => [a.line1 ?? a.address_line_1, a.line2 ?? a.address_line_2].filter(Boolean).join(', ');
   return (
     <>
       <div className="row between" style={{ marginBottom: 18 }}><h1 style={{ fontSize: 26 }}>Saved addresses</h1><button className="btn btn-primary btn-sm" onClick={() => setEditing('new')}><Icon name="plus" size={16} /> Add address</button></div>
@@ -183,6 +187,7 @@ function Addresses() {
                 <span className="addr-label"><Icon name="location" size={15} /> {a.type === 'billing' ? 'Billing' : 'Delivery'}</span>
                 {a.is_default && <span className="badge badge-soft">Default</span>}
               </div>
+              {a.recipient_name && <p style={{ marginBottom: 2 }}><b>{a.recipient_name}</b>{a.phone && <span className="muted"> · {a.phone}</span>}</p>}
               <p><b>{addressLine(a)}</b><br />{a.city}{a.state ? ', ' + a.state : ''}{a.postal_code ? ' ' + a.postal_code : ''}{a.landmark && <><br /><span className="muted">Near {a.landmark}</span></>}</p>
               <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => setEditing(a)}><Icon name="edit" size={14} /> Edit</button>
