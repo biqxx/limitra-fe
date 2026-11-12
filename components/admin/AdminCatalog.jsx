@@ -45,7 +45,7 @@ const mapAdminProduct = (p) => ({
   _raw: p,
 });
 
-const productToDraft = (p) => ({
+export const productToDraft = (p) => ({
   id: p.id,
   name: p.name,
   brand: p.brand,
@@ -76,6 +76,44 @@ const pricingIssueMessage = (source) => {
   }
   return 'Recalculate and approve the supplier price before activating this product.';
 };
+
+// Shared by AdminProducts' own editor and AdminSourcing's "Review product"
+// modal (reviewing a just-imported product without leaving the Sourcing
+// page) — builds the request body, runs the sourced-pricing approval flow
+// when publishing a sourced product, creates or updates the product, and
+// persists variants (see mapAdminProduct's comment on why both the real
+// field and the localStorage fallback are written). Returns the product id
+// on success, or null if blocked (pricing issue) — caller decides what to
+// do next (close a drawer, reload a list, etc.), this never does either.
+export async function saveAdminProduct(d, toast) {
+  const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
+  const sources = d._raw?.sources || [];
+  const sourced = Boolean(sources.length);
+  const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft', variants: d.variants || [] };
+  if (!sourced) body.price = Number(d.price) || 0;
+
+  let productId = d.id;
+  if (d._new) {
+    const created = await adminProductsApi.create(body);
+    productId = created?.id ?? productId;
+    toast(d.status === 'active' ? 'Product created and published' : 'Product created');
+  } else {
+    if (body.status === 'active' && sourced) {
+      const unapprovable = sources.find(source => !['approved', 'pending_approval'].includes(source.pricing_status));
+      if (unapprovable) {
+        toast(pricingIssueMessage(unapprovable));
+        return null;
+      }
+      for (const source of sources.filter(source => source.pricing_status === 'pending_approval')) {
+        await sourcingApi.approvePrice(source.id, source.current_price_quote?.id);
+      }
+    }
+    await adminProductsApi.update(d.id, body);
+    toast(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
+  }
+  if (productId != null) setVariants(productId, d.variants || []);
+  return productId;
+}
 
 // /admin/products/[id] renders this same list page with that product's edit
 // drawer pre-opened (see app/admin/products/[id]/page.js) rather than being a
@@ -345,7 +383,7 @@ function VariantsEditor({ variants, onChange }) {
   );
 }
 
-function ProductEditDrawer({ draft, onClose, onSave }) {
+export function ProductEditDrawer({ draft, onClose, onSave }) {
   const addToast = useAdminToast();
   const [f, setF] = useState({ ...draft, variants: draft.variants || draft._raw?.variants || [] });
   const [pricingBusy, setPricingBusy] = useState(false);
