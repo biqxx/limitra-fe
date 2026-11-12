@@ -471,7 +471,7 @@ export function StoreProvider({ children }) {
       });
       return;
     }
-    const existing = favorites.find(f => f.product_id === id);
+    const existing = favorites.find(f => (f.product_id ?? f.product?.id) === id);
     try {
       if (existing) {
         await favoritesApi.remove(existing.id);
@@ -517,13 +517,13 @@ export function StoreProvider({ children }) {
      /products (and therefore real cart items) actually exist. */
   const remoteCartItems = remoteCart?.items || remoteCart?.cart_items || [];
   const cart = isAuthenticated
-    ? remoteCartItems.map(it => ({ key: it.id, id: it.product_id, qty: it.quantity, variants: {} }))
+    ? remoteCartItems.map(it => ({ key: it.id, id: it.product_id ?? it.product?.id, qty: it.quantity, variants: {} }))
     : localCart;
   // Needed by checkoutApi.quote({cart_id}) — only meaningful for signed-in users
   // (the real backend has no guest cart, so there's nothing to quote against
   // until checkout itself requires sign-in).
   const cartId = remoteCart?.id ?? null;
-  const wish = isAuthenticated ? favorites.map(f => f.product_id) : localWish;
+  const wish = isAuthenticated ? favorites.map(f => f.product_id ?? f.product?.id) : localWish;
 
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const cartTotal = isAuthenticated
