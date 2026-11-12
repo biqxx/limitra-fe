@@ -192,8 +192,12 @@ export function AdminDelivery() {
   const attachMethod = async (zone) => {
     const methodId = attachPick[zone.id];
     if (!methodId) return;
+    // PUT .../zones/{zone}/methods/{method} requires fee on every call (confirmed
+    // live 422) — default to the method's own base fee, overridable afterward via
+    // the zone-method row's fee input.
+    const method = methods.find(m => String(m.id) === String(methodId));
     try {
-      await adminDeliveryZonesApi.setMethod(zone.id, methodId, { active: true });
+      await adminDeliveryZonesApi.setMethod(zone.id, methodId, { active: true, fee: Number(method?.fee) || 0 });
       toast('Method attached to zone');
       setAttachPick(cur => ({ ...cur, [zone.id]: '' }));
       await loadAll();
@@ -202,9 +206,19 @@ export function AdminDelivery() {
 
   const toggleZoneMethodActive = async (zone, zm) => {
     const methodId = zm.id ?? zm.method_id ?? zm.method?.id;
+    const fee = zm.fee ?? zm.method?.fee ?? methods.find(m => String(m.id) === String(methodId))?.fee ?? 0;
     try {
-      await adminDeliveryZonesApi.setMethod(zone.id, methodId, { active: !(zm.active !== false) });
+      await adminDeliveryZonesApi.setMethod(zone.id, methodId, { active: !(zm.active !== false), fee: Number(fee) || 0 });
       toast('Updated');
+      await loadAll();
+    } catch (error) { toast(messageFrom(error)); }
+  };
+
+  const setZoneMethodFee = async (zone, zm, fee) => {
+    const methodId = zm.id ?? zm.method_id ?? zm.method?.id;
+    try {
+      await adminDeliveryZonesApi.setMethod(zone.id, methodId, { active: zm.active !== false, fee: Number(fee) || 0 });
+      toast('Fee updated');
       await loadAll();
     } catch (error) { toast(messageFrom(error)); }
   };
@@ -291,9 +305,14 @@ export function AdminDelivery() {
                       const m = zm.method || methods.find(x => String(x.id) === String(zm.id ?? zm.method_id)) || {};
                       const active = zm.active !== false;
                       return (
-                        <div key={zm.id ?? zm.method_id} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                          <div><b style={{ fontSize: 13 }}>{m.name ?? zm.name ?? 'Method'}</b> <small className="muted">{(zm.fee ?? m.fee) != null ? `₦ ${Number(zm.fee ?? m.fee).toLocaleString('en-NG')}` : ''}</small></div>
-                          <button className={'adm-chip' + (active ? ' on' : '')} onClick={() => toggleZoneMethodActive(zone, zm)}>{active ? 'Active' : 'Inactive'}</button>
+                        <div key={zm.id ?? zm.method_id} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', gap: 10 }}>
+                          <div><b style={{ fontSize: 13 }}>{m.name ?? zm.name ?? 'Method'}</b></div>
+                          <div className="row" style={{ gap: 8 }}>
+                            <span className="muted" style={{ fontSize: 12.5 }}>₦</span>
+                            <input type="number" min="0" defaultValue={Number(zm.fee ?? m.fee) || 0} style={{ width: 90 }}
+                              onBlur={e => { const v = Number(e.target.value) || 0; if (v !== Number(zm.fee ?? m.fee ?? 0)) setZoneMethodFee(zone, zm, v); }} />
+                            <button className={'adm-chip' + (active ? ' on' : '')} onClick={() => toggleZoneMethodActive(zone, zm)}>{active ? 'Active' : 'Inactive'}</button>
+                          </div>
                         </div>
                       );
                     })}
