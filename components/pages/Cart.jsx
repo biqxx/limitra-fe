@@ -378,8 +378,9 @@ export function CheckoutPage() {
                       <input type="radio" name="addr" checked={selAddr === a.id} onChange={() => setSelAddr(a.id)} />
                       <span className="rc-radio" />
                       <div className="ap-body">
-                        <div className="row" style={{ gap: 8 }}><b>{a.type === 'billing' ? 'Billing' : 'Delivery'} address</b>{a.is_default && <span className="badge badge-soft" style={{ fontSize: 10 }}>Default</span>}</div>
-                        <p className="muted">{[a.address_line_1, a.address_line_2].filter(Boolean).join(', ')}, {a.city}{a.state ? ', ' + a.state : ''}</p>
+                        <div className="row" style={{ gap: 8 }}><b>{a.recipient_name || (a.type === 'billing' ? 'Billing address' : 'Delivery address')}</b>{a.is_default && <span className="badge badge-soft" style={{ fontSize: 10 }}>Default</span>}</div>
+                        {a.phone && <p className="muted" style={{ fontSize: 12.5 }}>{a.phone}</p>}
+                        <p className="muted">{[a.line1 ?? a.address_line_1, a.line2 ?? a.address_line_2].filter(Boolean).join(', ')}, {a.city}{a.state ? ', ' + a.state : ''}</p>
                         {a.landmark && <p className="muted" style={{ fontSize: 12.5 }}>Near {a.landmark}</p>}
                       </div>
                       <button type="button" className="ap-edit" onClick={(e) => { e.preventDefault(); setSelAddr(a.id); setAddrModal('edit-' + a.id); }} title="Edit"><Icon name="edit" size={15} /></button>
@@ -441,7 +442,7 @@ export function CheckoutPage() {
               <h3 className="co-h">Review your order</h3>
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="location" size={16} /> Delivery to</span><button className="link-btn" onClick={() => setStep(0)}>Edit</button></div>
-                {activeAddr && <p><b>{activeAddr.type === 'billing' ? 'Billing address' : 'Delivery address'}</b><br />{[activeAddr.address_line_1, activeAddr.address_line_2].filter(Boolean).join(', ')}, {activeAddr.city}{activeAddr.state ? ', ' + activeAddr.state : ''}<br />{email}</p>}
+                {activeAddr && <p><b>{activeAddr.recipient_name || (activeAddr.type === 'billing' ? 'Billing address' : 'Delivery address')}</b>{activeAddr.phone && <> · {activeAddr.phone}</>}<br />{[activeAddr.line1 ?? activeAddr.address_line_1, activeAddr.line2 ?? activeAddr.address_line_2].filter(Boolean).join(', ')}, {activeAddr.city}{activeAddr.state ? ', ' + activeAddr.state : ''}<br />{email}</p>}
                 <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>{methodLabel}</div>
               </div>
               <div className="review-block">

@@ -85,18 +85,15 @@ function CheckRow({ checked, onChange, children }) {
   );
 }
 
-// Field set matches the real Address resource (GET/POST/PUT /addresses — see
-// lib/api/endpoints.js's addressesApi) exactly: type/address_line_1/
-// address_line_2/city/landmark/state/postal_code/is_default. There's no
-// recipient-name or phone field on an address server-side (confirmed against
-// the live OpenAPI spec), so this form no longer collects them — a per-order
-// contact is handled separately at checkout (see CheckoutPage's own "Contact
-// email" field) rather than invented here as data the backend would silently
-// drop. `country` is fixed to Nigeria rather than exposed as a field, since
-// NG_STATES/phone formats etc. already assume Nigeria-only throughout the app.
 export function AddressForm({ initial, onSave, onCancel }) {
+  // Field names/requirements here are what the live API actually validates
+  // against, confirmed by a real 422 response — NOT what POST/PUT /addresses
+  // document (address_line_1, no recipient_name/phone): that documented
+  // schema turned out to be stale and the backend rejects it outright. This
+  // matches what PATCH /addresses/{id} documents instead. country must be a
+  // 2-letter ISO code ("NG"), also undocumented but confirmed live.
   const [f, setF] = useState(() => initial || {
-    type: 'delivery', address_line_1: '', address_line_2: '', city: '',
+    type: 'delivery', recipient_name: '', phone: '', line1: '', line2: '', city: '',
     landmark: '', state: 'Lagos', postal_code: '', is_default: false,
   });
   const [errs, setErrs] = useState({});
@@ -105,7 +102,9 @@ export function AddressForm({ initial, onSave, onCancel }) {
   const submit = async e => {
     e.preventDefault();
     const er = {};
-    if (!f.address_line_1.trim()) er.address_line_1 = 'Street address is required';
+    if (!f.recipient_name.trim()) er.recipient_name = 'Recipient name is required';
+    if (!f.phone.trim()) er.phone = 'Phone number is required';
+    if (!f.line1.trim()) er.line1 = 'Street address is required';
     if (!f.city.trim()) er.city = 'City is required';
     if (!f.state.trim()) er.state = 'State is required';
     if (!f.postal_code.trim()) er.postal_code = 'Postal code is required';
@@ -113,7 +112,7 @@ export function AddressForm({ initial, onSave, onCancel }) {
     if (Object.keys(er).length) return;
     setSaving(true);
     try {
-      await onSave({ ...f, country: 'Nigeria' });
+      await onSave({ ...f, country: 'NG' });
     } catch (err) {
       setErrs(fieldErrorsFrom(err));
     } finally {
@@ -125,8 +124,10 @@ export function AddressForm({ initial, onSave, onCancel }) {
       <div className="form-grid">
         <FSelect label="Address type" value={f.type === 'billing' ? 'Billing' : 'Delivery'} onChange={v => set('type', v === 'Billing' ? 'billing' : 'delivery')} options={['Delivery', 'Billing']} />
         <FField label="Postal code" value={f.postal_code} onChange={v => set('postal_code', v)} err={errs.postal_code} placeholder="100001" />
-        <FField label="Address line 1" span="full" value={f.address_line_1} onChange={v => set('address_line_1', v)} err={errs.address_line_1} placeholder="14 Admiralty Way, Lekki Phase 1" />
-        <FField label="Address line 2 (optional)" span="full" value={f.address_line_2 || ''} onChange={v => set('address_line_2', v)} placeholder="Apartment, suite, etc." />
+        <FField label="Recipient name" value={f.recipient_name} onChange={v => set('recipient_name', v)} err={errs.recipient_name} placeholder="Lucy Limitra" />
+        <FField label="Phone number" type="tel" value={f.phone} onChange={v => set('phone', v)} err={errs.phone} placeholder="0800 000 0000" />
+        <FField label="Address line 1" span="full" value={f.line1} onChange={v => set('line1', v)} err={errs.line1} placeholder="14 Admiralty Way, Lekki Phase 1" />
+        <FField label="Address line 2 (optional)" span="full" value={f.line2 || ''} onChange={v => set('line2', v)} placeholder="Apartment, suite, etc." />
         <FField label="City" value={f.city} onChange={v => set('city', v)} err={errs.city} placeholder="Lagos" />
         <FSelect label="State" value={f.state} onChange={v => set('state', v)} options={NG_STATES} />
         <FField label="Landmark (optional)" span="full" value={f.landmark || ''} onChange={v => set('landmark', v)} placeholder="Near ..." />
