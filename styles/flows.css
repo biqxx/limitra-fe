@@ -252,11 +252,12 @@
    ================================================================= */
 .acct-layout { display: grid; grid-template-columns: 264px 1fr; gap: 30px; align-items: start; padding-bottom: 20px; }
 .acct-side { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px; position: sticky; top: calc(var(--header-h) + 16px); }
-.acct-user { display: flex; align-items: center; gap: 13px; padding: 8px 8px 18px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.acct-user { display: flex; align-items: center; gap: 13px; padding: 8px 8px 18px; border-bottom: 1px solid var(--border); margin-bottom: 12px; min-width: 0; }
 .acct-avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--navy-700)); color: #fff; display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 18px; flex: none; }
 [data-theme="dark"] .acct-avatar { background: linear-gradient(135deg, var(--primary), #3A48A8); }
-.acct-user b { font-family: var(--font-display); font-weight: 700; font-size: 15px; display: block; }
-.acct-user small { font-size: 12px; }
+.acct-user > div { min-width: 0; }
+.acct-user b { font-family: var(--font-display); font-weight: 700; font-size: 15px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-user small { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-nav { display: flex; flex-direction: column; gap: 3px; }
 .acct-nav-toggle { display: none; }
 .acct-link { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-md); font-family: var(--font-display); font-weight: 600; font-size: 14.5px; color: var(--text-muted); transition: background .15s, color .15s; text-align: left; }

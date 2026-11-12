@@ -99,7 +99,12 @@
 
 /* ---- nav ---- */
 .nav-bar { background: var(--surface); border-bottom: 1px solid var(--border); height: 52px; position: relative; }
-.nav-bar .wrap.row { gap: 2px !important; flex-wrap: nowrap; overflow: visible; }
+/* When the category links + utility links don't all fit, scroll horizontally
+   instead of silently overflowing past the edge (overflow:visible) or hiding
+   items (the old @media nav-collapsible rule, removed below) — every link
+   stays reachable at any width down to where the mobile nav takes over. */
+.nav-bar .wrap.row { gap: 2px !important; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
+.nav-bar .wrap.row::-webkit-scrollbar { display: none; }
 .nav-cat { position: relative; display: inline-flex; align-items: stretch; }
 .nav-cat-chev { opacity: .6; transition: transform .2s var(--ease); }
 .nav-cat:hover .nav-cat-chev { transform: rotate(180deg); opacity: 1; }
@@ -137,11 +142,6 @@
 .nav-link.deals svg { transform: translateY(-2px); }
 .nav-link.soft { color: var(--text-faint); font-weight: 600; font-size: 13px; padding: 8px 9px; }
 .nav-badge-new { background: var(--accent); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 10px; letter-spacing: .03em; padding: 2px 6px; border-radius: var(--r-pill); line-height: 1.4; }
-
-/* collapse nav-bar category links at tablet-range widths (bar still shows >1024px) */
-@media (max-width: 1180px) {
-  .nav-bar .nav-collapsible { display: none !important; }
-}
 
 /* ---- mega ---- */
 .mega { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: var(--shadow-lg); z-index: 40; display: grid; grid-template-columns: 1fr 320px; gap: 28px; padding: 26px max(28px, calc((100vw - var(--maxw))/2 + 28px)); animation: megaIn .22s var(--ease); }
@@ -198,7 +198,17 @@
 .foot-news .input { flex: 1; }
 .foot-main { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 30px 40px; padding: 48px 28px; align-items: start; }
 .foot-brand { flex: 1 1 300px; min-width: 260px; max-width: 400px; }
+/* `display: contents` on desktop takes the wrapper itself out of layout, so its
+   .foot-col children lay out exactly as if they were direct flex children of
+   .foot-main (unchanged from before this wrapper existed) — it only becomes a
+   real grid on mobile, see the 767px block below. */
+.foot-cols-grid { display: contents; }
 .foot-col { flex: 0 0 auto; min-width: 0; }
+/* `.foot-social.foot-social-mobile` (not just `.foot-social-mobile`) for higher
+   specificity than plain `.foot-social { display: flex }` above — otherwise this
+   hide rule and that one tie on specificity and the later one in source order
+   (`.foot-social`) wins, leaking a second social-icon row onto desktop. */
+.foot-social.foot-social-mobile, .foot-col-contact-mobile { display: none; }
 .foot-col h5 { font-family: var(--font-display); font-weight: 700; font-size: 15px; margin-bottom: 16px; }
 .foot-col a { display: block; color: var(--text-muted); font-size: 14px; padding: 6px 0; cursor: pointer; transition: color .15s; }
 .foot-col a:hover { color: var(--primary); }
@@ -272,19 +282,21 @@
   .sm-esc { border: none; padding: 4px; color: var(--text-muted); display: grid; place-items: center; }
   .sm-esc-text { display: none; }
   .sm-esc-icon { display: grid; place-items: center; }
-  .foot-main { flex-direction: column; gap: 8px; text-align: center; align-items: center; }
-  .foot-brand { flex: 1 1 auto; max-width: none; margin-bottom: 8px; }
-  .foot-brand .row { justify-content: center; }
-  .foot-brand p { margin-left: auto; margin-right: auto; }
-  .trust-row { justify-content: center; }
-  .foot-social { justify-content: center; }
-  .pay-row { justify-content: center; }
+  .foot-main { flex-direction: column; gap: 28px; text-align: center; align-items: center; }
+  /* brand block (logo/description/trust badges/social) and the payment-icon
+     "Stay connected" column are both desktop-only — the mobile footer shows a
+     plain 2x2 link grid, then a centered social row, then a plain contact
+     block with no payment icons (see .foot-social-mobile/.foot-col-contact-mobile). */
+  .foot-brand, .foot-col-contact { display: none; }
   .foot-news { min-width: 0; }
+  .foot-cols-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: column; grid-template-rows: repeat(2, auto); gap: 28px 20px; width: 100%; text-align: left; }
   .foot-col { flex: 1 1 auto; width: 100%; }
-  .foot-col .row { justify-content: center; }
   .foot-bottom { flex-direction: column; justify-content: center; text-align: center; gap: 12px; }
   .foot-col h5 { margin-bottom: 10px; }
   .foot-col a { padding: 7px 0; }
+  .foot-social.foot-social-mobile { display: flex; justify-content: center; }
+  .foot-col-contact-mobile { display: block; text-align: center; }
+  .foot-col-contact-mobile h5 { font-family: var(--font-display); font-weight: 700; font-size: 15px; margin-bottom: 12px; }
   .foot-cta { flex-direction: column; align-items: stretch; gap: 14px; padding: 26px 14px; text-align: center; }
   .foot-cta h3 { font-size: 16px; }
   .foot-cta p { font-size: 12px; }

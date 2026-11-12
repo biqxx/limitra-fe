@@ -102,7 +102,10 @@ export function StoreProvider({ children }) {
     } catch (e) { setRemoteCart(null); }
     try {
       const favs = await favoritesApi.list();
-      setFavorites(Array.isArray(favs) ? favs : favs?.data || []);
+      // Confirmed live: GET /favorites' data is { items: [...], pagination }
+      // — not a bare array and not nested under `.data` again, which is why
+      // this silently fell back to [] every time despite favorites existing.
+      setFavorites(Array.isArray(favs) ? favs : (favs?.items ?? favs?.data ?? []));
     } catch (e) { setFavorites([]); }
   }, []);
 
@@ -529,11 +532,9 @@ export function StoreProvider({ children }) {
       });
       return;
     }
-    const existing = favorites.find(f => favProductId(f) === id);
-    if (existing) {
-      setFavorites(fs => fs.filter(f => f.id !== existing.id));
-      toast('Removed from wishlist');
-      try {
+    const existing = favorites.find(f => (f.product_id ?? f.product?.id) === id);
+    try {
+      if (existing) {
         await favoritesApi.remove(existing.id);
       } catch (e) {
         setFavorites(fs => [...fs, existing]); // revert
@@ -583,13 +584,13 @@ export function StoreProvider({ children }) {
      /products (and therefore real cart items) actually exist. */
   const remoteCartItems = remoteCart?.[cartItemsKeyOf(remoteCart)] || [];
   const cart = isAuthenticated
-    ? remoteCartItems.map(it => ({ key: it.id, id: it.product_id, qty: it.quantity, variants: {} }))
+    ? remoteCartItems.map(it => ({ key: it.id, id: it.product_id ?? it.product?.id, qty: it.quantity, variants: {} }))
     : localCart;
   // Needed by checkoutApi.quote({cart_id}) — only meaningful for signed-in users
   // (the real backend has no guest cart, so there's nothing to quote against
   // until checkout itself requires sign-in).
   const cartId = remoteCart?.id ?? null;
-  const wish = isAuthenticated ? favorites.map(favProductId) : localWish;
+  const wish = isAuthenticated ? favorites.map(f => f.product_id ?? f.product?.id) : localWish;
 
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const cartTotal = isAuthenticated

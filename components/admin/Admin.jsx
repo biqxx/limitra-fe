@@ -7,7 +7,10 @@
    - AdminOverview.jsx    Dashboard, Analytics
    - AdminCatalog.jsx     Products, Inventory, Orders, Coupons & Promos
    - AdminPeople.jsx      Customers, Affiliates, Referrals
-   - AdminEngagement.jsx  Spin & Win, Videos, Elo AI
+   - AdminDelivery.jsx    (implied: Delivery & Shipping)
+   - AdminReturns.jsx     (implied: Returns & Refunds)
+   - AdminElo.jsx         (implied: Elo AI)
+   - AdminEngagement.jsx  Spin & Win, Videos
    - AdminSystem.jsx      Content (CMS), Roles & Access, Reports
    - AdminActivity.jsx    Activity log (no sidebar entry, still routable)
    Note: Kpi/BarChart/Donut/STATUS_CLS live in @/components/charts/Charts — import from there
@@ -16,9 +19,12 @@
 export { AdminOverview, AdminAnalytics } from './AdminOverview';
 export { AdminProducts, AdminOrders, AdminCoupons, AdminInventory } from './AdminCatalog';
 export { AdminCategories } from './AdminCategories';
+export { AdminDelivery } from './AdminDelivery';
+export { AdminReturns } from './AdminReturns';
+export { AdminElo } from './AdminElo';
 export { AdminPricing } from './AdminPricing';
 export { AdminCustomers, AdminAffiliates, AdminReferrals } from './AdminPeople';
-export { AdminSpin, AdminVideos, AdminElo } from './AdminEngagement';
+export { AdminSpin, AdminVideos } from './AdminEngagement';
 export { AdminCMS, AdminRoles, AdminReports } from './AdminSystem';
 export { AdminActivity } from './AdminActivity';
 

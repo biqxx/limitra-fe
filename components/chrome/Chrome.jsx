@@ -1,6 +1,7 @@
 'use client';
 /* LIMITRA chrome, header, mega menu, mini-cart, footer, mobile nav — ported from legacy/chrome.jsx */
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { Logo } from '@/components/icons/Icon';
@@ -57,6 +58,9 @@ export const CAT_ICON = { phones: 'phone', computing: 'grid', electronics: 'spar
 
 function NavCategory({ n, active, go, onEnterClose, className }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const triggerRef = useRef(null);
+  const closeTimer = useRef(null);
   const sections = getSubcatSections()[n.slug];
   const subs = getSubcats()[n.slug] || [];
   const hasMenu = sections || subs.length > 0;
@@ -65,13 +69,40 @@ function NavCategory({ n, active, go, onEnterClose, className }) {
   filter((p) => p.was && p.was > p.price).
   sort((a, b) => (b.was - b.price) / b.was - (a.was - a.price) / a.was)[0];
   const dealPct = deal ? Math.round((1 - deal.price / deal.was) * 100) : 0;
+
+  // The nav bar's row scrolls horizontally (overflow-x: auto), which forces
+  // overflow-y to clip too — this dropdown used to be position:absolute
+  // inside that row and was invisible as a result. Rendered via a portal
+  // into document.body instead, positioned from the trigger's own measured
+  // position, so the scroll container's clipping no longer applies to it.
+  const cancelClose = () => { if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; } };
+  const openMenu = () => {
+    cancelClose();
+    if (triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom, left: r.left });
+    }
+    setOpen(true);
+    onEnterClose();
+  };
+  // Small delay before closing so moving the mouse from the trigger down
+  // into the portaled dropdown (no longer a DOM descendant of the trigger)
+  // doesn't register as "left" and flicker-close it.
+  const scheduleClose = () => { cancelClose(); closeTimer.current = setTimeout(() => setOpen(false), 120); };
+  useEffect(() => () => cancelClose(), []);
+
   return (
-    <div className={'nav-cat' + (className ? ' ' + className : '')} onMouseEnter={() => {setOpen(true);onEnterClose();}} onMouseLeave={() => setOpen(false)}>
+    <div ref={triggerRef} className={'nav-cat' + (className ? ' ' + className : '')} onMouseEnter={openMenu} onMouseLeave={scheduleClose}>
       <a className={'nav-link' + (active ? ' active' : '')} onClick={() => {setOpen(false);go('shop', n.slug);}}>
         {n.name}{hasMenu && <Icon name="chevdown" size={13} className="nav-cat-chev" />}
       </a>
-      {hasMenu && open &&
-      <div className={'nav-sub' + (deal ? ' has-deal' : '') + (sections ? ' sectioned' : '')}>
+      {hasMenu && open && pos && createPortal(
+        <div
+          className={'nav-sub' + (deal ? ' has-deal' : '') + (sections ? ' sectioned' : '')}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, marginTop: 0 }}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+        >
           {sections ?
         <div className="nav-sub-list nav-sub-cols">
               {sections.map((sec) =>
@@ -102,8 +133,9 @@ function NavCategory({ n, active, go, onEnterClose, className }) {
               <span className="nsd-cta">Shop deal <Icon name="arrowr" size={13} /></span>
             </button>
         }
-        </div>
-      }
+        </div>,
+        document.body
+      )}
     </div>);
 
 }
@@ -518,13 +550,15 @@ Fast nationwide delivery.</p>
             )}
           </div>
         </div>
-        {cols.map(([t, links]) =>
-        <div key={t} className="foot-col">
-            <h5>{t}</h5>
-            {links.map(([lb, fn]) => <a key={lb} onClick={fn}>{lb}</a>)}
-          </div>
-        )}
-        <div className="foot-col">
+        <div className="foot-cols-grid">
+          {cols.map(([t, links]) =>
+          <div key={t} className="foot-col">
+              <h5>{t}</h5>
+              {links.map(([lb, fn]) => <a key={lb} onClick={fn}>{lb}</a>)}
+            </div>
+          )}
+        </div>
+        <div className="foot-col foot-col-contact">
           <h5>Stay connected</h5>
           <span className="row" style={{ gap: 8, color: 'var(--text-muted)' }}><Icon name="mail" size={16} /> support@limitra.com.ng</span>
           <span className="row" style={{ gap: 8, color: 'var(--text-muted)', margin: '10px 0' }}><Icon name="phone" size={16} /> +234 700 LIMITRA</span>
@@ -534,6 +568,23 @@ Fast nationwide delivery.</p>
             <span className="pay txt">Mastercard</span>
             <span className="pay txt">Bank Transfer</span>
           </div>
+        </div>
+        {/* mobile-only — the mockup shows social icons + a plain contact block
+            (no payment icons) below the link grid instead of inside the brand
+            block, which is hidden entirely on mobile. Duplicated rather than
+            reordered via flex/grid `order`, since the social icons are nested
+            inside .foot-brand on desktop and can't be pulled out of a hidden
+            parent with CSS alone. */}
+        <div className="foot-social foot-social-mobile">
+          {SOCIALS.map(([label, href, path]) => <a key={label} href={href} target="_blank" rel="noopener noreferrer" aria-label={label} title={label} className={'soc soc-' + label.toLowerCase()}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={path} /></svg>
+            </a>
+          )}
+        </div>
+        <div className="foot-col-contact-mobile">
+          <h5>Stay connected</h5>
+          <span className="row" style={{ gap: 8, color: 'var(--text-muted)' }}><Icon name="mail" size={16} /> support@limitra.com.ng</span>
+          <span className="row" style={{ gap: 8, color: 'var(--text-muted)', marginTop: 10 }}><Icon name="phone" size={16} /> +234 700 LIMITRA</span>
         </div>
       </div>
       <div className="foot-bottom wrap">

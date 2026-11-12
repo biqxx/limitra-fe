@@ -4,7 +4,32 @@ import { useState, useRef, useEffect } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { useStore } from '@/components/store/StoreProvider';
-import { PRODUCTS, CATEGORIES, naira, byId } from '@/lib/data';
+import { PRODUCTS, naira, byId } from '@/lib/data';
+import { aiConversationsApi } from '@/lib/api/endpoints';
+
+const GREETING = "Hi, I'm Elo 👋 your Limitra shopping assistant. Ask me anything, or tap the + to upload a photo and I'll find similar products in our store.";
+
+// Module-level (not inside the component) so the React Compiler's purity
+// check doesn't flag Date.now()/Math.random() as an impure call reachable
+// from component render — same reasoning as the identical idemKey pattern
+// in components/pages/Cart.jsx, just not tucked inside a useState initializer.
+function genClientMessageId() {
+  return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
+}
+
+// Response shape is undocumented — role/text/images/product-id fields are
+// all read defensively under several plausible names.
+function normalizeAiMessage(m) {
+  const role = m.role ?? (m.is_assistant || m.sender === 'assistant' || m.author_type === 'assistant' || m.from === 'ai' ? 'assistant' : 'user');
+  const productIds = m.product_ids ?? (Array.isArray(m.products) ? m.products.map(p => (typeof p === 'object' ? p.id : p)) : []);
+  return {
+    role,
+    text: m.text ?? m.message ?? m.content ?? '',
+    images: Array.isArray(m.images) ? m.images : (Array.isArray(m.attachments) ? m.attachments : []),
+    clientId: m.client_message_id,
+    products: (productIds || []).filter(id => byId(id)),
+  };
+}
 
 const ELO_MAX_IMAGES = 5;
 const ELO_MAX_BYTES = 10 * 1024 * 1024; // 10MB
@@ -34,14 +59,18 @@ function compressImage(file) {
 }
 
 export function EloAI() {
-  const { go, addToCart } = useStore();
+  const { go, addToCart, isAuthenticated } = useStore();
   const [open, setOpen] = useState(false);
-  const [msgs, setMsgs] = useState([{ role: 'assistant', text: "Hi, I'm Elo 👋 your Limitra shopping assistant. Ask me anything, or tap the 📎 to upload a photo and I'll find similar products in our store." }]);
+  const [msgs, setMsgs] = useState([{ role: 'assistant', text: GREETING }]);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState([]); // staged images (data URLs) before send
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [err, setErr] = useState('');
+  // Real backend conversation — null until the first message is sent (and
+  // only ever set for signed-in users; /ai/conversations requires auth,
+  // confirmed in the spec, so guests keep the local canned-reply fallback).
+  const [conversationId, setConversationId] = useState(null);
   const bodyRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -75,6 +104,49 @@ export function EloAI() {
     if (imgs.length) { e.preventDefault(); addFiles(imgs); }
   };
 
+  // Signed-in users get the real backend; guests fall back to canned local
+  // picks since /ai/conversations requires auth (confirmed in the spec).
+  const sendReal = async (q, imgs) => {
+    let convId = conversationId;
+    if (!convId) {
+      const res = await aiConversationsApi.create({ channel: 'web' });
+      const data = res?.data ?? res;
+      convId = data?.id ?? data?.conversation_id;
+      setConversationId(convId);
+    }
+    const clientMessageId = genClientMessageId();
+    const priorCount = msgs.length;
+    await aiConversationsApi.sendMessage(convId, {
+      text: q || undefined,
+      client_message_id: clientMessageId,
+      images: imgs.length ? imgs.map(i => i.src) : undefined,
+    });
+    // Response shape for the assistant's reply is undocumented — re-fetch
+    // the full thread (same "re-fetch after mutation" pattern used for the
+    // cart elsewhere in this app) and poll briefly if it hasn't landed yet.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const res = await aiConversationsApi.messages(convId);
+      const list = Array.isArray(res) ? res : (res?.data?.items ?? res?.items ?? res?.data ?? []);
+      const normalized = (Array.isArray(list) ? list : []).map(normalizeAiMessage);
+      const freshAssistant = normalized.slice(priorCount).filter(m => m.role === 'assistant');
+      if (freshAssistant.length) {
+        setMsgs(m => [...m, ...freshAssistant]);
+        return;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    setMsgs(m => [...m, { role: 'assistant', text: "Still working on that — feel free to keep browsing, I'll have an answer shortly." }]);
+  };
+
+  const sendGuestFallback = async (q, imgs) => {
+    await new Promise(r => setTimeout(r, 700));
+    const picks = (imgs.length ? PRODUCTS.filter(p => p.bestseller) : PRODUCTS.filter(p => p.off > 0)).slice(0, 3);
+    const reply = imgs.length
+      ? "I found products similar to your photo. Here are the closest matches in our store:"
+      : "I'd love to help! Here are a few popular picks you might like:";
+    setMsgs(m => [...m, { role: 'assistant', text: reply, products: picks.map(p => p.id) }]);
+  };
+
   const send = async (text) => {
     const q = (text != null ? text : input).trim();
     const imgs = pending;
@@ -83,38 +155,30 @@ export function EloAI() {
     setMsgs(m => [...m, { role: 'user', text: q, images: imgs.map(i => i.src) }]);
     setBusy(true);
     try {
-      if (window.claude && window.claude.complete) {
-        const catalog = PRODUCTS.slice(0, 60).map(p => `${p.name}, ${p.brand}, ${(CATEGORIES.find(c => c.slug === p.category) || {}).name || p.category}, ${naira(p.price)}${p.rating ? `, ${p.rating}★` : ''}`).join('\n');
-        const history = msgs.slice(-6).map(m => (m.role === 'user' ? 'Customer' : 'Elo') + ': ' + (m.text || (m.images ? '[shared an image]' : ''))).join('\n');
-        const imgNote = imgs.length
-          ? `\nThe customer just uploaded ${imgs.length} product image(s). Act as a visual product-search assistant: infer the product type/category, then recommend 2–4 visually-similar items FROM THE CATALOG ONLY, each as "• Name – ₦price". End by offering to show more similar products. Do not describe the raw image in detail; focus on matching store products.`
-          : '';
-        const prompt = `You are Elo, the warm, knowledgeable shopping assistant for Limitra, a premium Nigerian marketplace. Prices are in Naira (₦). Keep replies short and friendly (2–4 sentences). When recommending, name specific catalog products with prices. For orders/delivery, point to Track Order. Never invent products outside the catalog.${imgNote}
-
-CATALOG:
-${catalog}
-
-CONVERSATION SO FAR:
-${history}
-Customer: ${q || '(image only)'}
-Elo:`;
-        const res = await window.claude.complete(prompt);
-        const out = (typeof res === 'string' ? res : String(res || '')).trim();
-        const matched = PRODUCTS.filter(p => out.includes(p.name.split(',')[0])).slice(0, 3);
-        setMsgs(m => [...m, { role: 'assistant', text: out || "I'm here to help, tell me a little more about what you're looking for.", products: matched.map(p => p.id) }]);
-      } else {
-        await new Promise(r => setTimeout(r, 700));
-        const picks = (imgs.length ? PRODUCTS.filter(p => p.bestseller) : PRODUCTS.filter(p => p.off > 0)).slice(0, 3);
-        const reply = imgs.length
-          ? "I found products similar to your photo. Here are the closest matches in our store:"
-          : "I'd love to help! Here are a few popular picks you might like:";
-        setMsgs(m => [...m, { role: 'assistant', text: reply, products: picks.map(p => p.id) }]);
-      }
+      if (isAuthenticated) await sendReal(q, imgs);
+      else await sendGuestFallback(q, imgs);
     } catch (e) {
       setMsgs(m => [...m, { role: 'assistant', text: "Sorry, I had trouble responding just then. Please try again in a moment." }]);
     } finally {
       setBusy(false);
     }
+  };
+
+  const handoff = async () => {
+    if (!conversationId) return;
+    try {
+      await aiConversationsApi.handoff(conversationId, 'Customer requested human support');
+      setMsgs(m => [...m, { role: 'assistant', text: "You've been connected to our support team — they'll follow up with you shortly." }]);
+    } catch (e) {
+      setMsgs(m => [...m, { role: 'assistant', text: "Couldn't reach support just now — please try again in a moment." }]);
+    }
+  };
+
+  const clearChat = async () => {
+    if (conversationId) { try { await aiConversationsApi.remove(conversationId); } catch (e) {} }
+    setConversationId(null);
+    setMsgs([{ role: 'assistant', text: GREETING }]);
+    setPending([]); setErr('');
   };
 
   return (
@@ -131,11 +195,12 @@ Elo:`;
           onPaste={onPaste}
           onDrop={onDrop}>
           <div className="lucy-head">
-            <button className="lucy-head-btn" onClick={() => { setMsgs([{ role: 'assistant', text: "Hi, I'm Elo 👋 your Limitra shopping assistant. Ask me anything, or tap the + to upload a photo and I'll find similar products in our store." }]); setPending([]); setErr(''); }} aria-label="Clear chat" title="Clear chat"><Icon name="trash" size={19} /></button>
+            <button className="lucy-head-btn" onClick={clearChat} aria-label="Clear chat" title="Clear chat"><Icon name="trash" size={19} /></button>
             <div className="lucy-head-center">
               <span className="lucy-avatar"><span className="lucy-av-text">Elo</span></span>
               <b>Shop with Elo</b>
             </div>
+            {conversationId && <button className="lucy-head-btn" onClick={handoff} aria-label="Talk to a human" title="Talk to a human"><Icon name="headset" size={18} /></button>}
             <button className="lucy-head-btn" onClick={() => setOpen(false)} aria-label="Close"><Icon name="close" size={20} /></button>
           </div>
 

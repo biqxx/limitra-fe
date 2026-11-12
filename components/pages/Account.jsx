@@ -7,11 +7,63 @@ import { SocialMark } from '@/components/ui/SocialMark';
 import { Breadcrumbs, EmptyState, ProductCard } from '@/components/ui/Shared';
 import { Modal, AddressForm, CardForm, CardBrandMark, Field } from '@/components/forms/Shared';
 import { naira, SOCIAL_GLYPHS, byId } from '@/lib/data';
-import { profileApi } from '@/lib/api/endpoints';
+import { profileApi, ordersApi, favoritesApi, sharedWishlistsApi, supportTicketsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
-// No order-list/get endpoint exists on the backend yet — always empty until it ships.
-const ORDERS = [];
+// GET /orders and /orders/{id} have no documented response shape (generic
+// SuccessResponse) — every field below is read defensively under several
+// plausible names. Only the `status` enum is confirmed by the spec itself:
+// pending_payment, confirmed, processing, shipped, in_transit, delivered,
+// cancelled.
+const STATUS_LABEL = {
+  pending_payment: 'Pending payment', confirmed: 'Confirmed', processing: 'Processing',
+  shipped: 'Shipped', in_transit: 'In transit', delivered: 'Delivered', cancelled: 'Cancelled',
+};
+const STATUS_TINT = {
+  pending_payment: 'warn', confirmed: 'info', processing: 'warn',
+  shipped: 'info', in_transit: 'info', delivered: 'ok', cancelled: 'bad',
+};
+
+function normalizeOrder(o) {
+  const items = o.items ?? o.order_items ?? o.line_items;
+  const itemCount = o.items_count ?? o.item_count
+    ?? (Array.isArray(items) ? items.reduce((s, it) => s + Number(it.quantity ?? it.qty ?? 1), 0) : null)
+    ?? 0;
+  const status = String(o.status ?? 'pending_payment').toLowerCase();
+  return {
+    id: o.id ?? o.order_id ?? o.order_number,
+    status,
+    date: o.created_at ?? o.date ?? o.placed_at,
+    itemCount,
+    total: Number(o.total ?? o.total_amount ?? o.grand_total ?? o.amount ?? 0),
+    raw: o,
+  };
+}
+
+// Shared by Dashboard, Orders and TrackingPage — each fetches independently
+// since they need different filters, not shared state.
+function useOrders(params) {
+  const [orders, setOrders] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const key = JSON.stringify(params || {});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await ordersApi.list(params);
+        const list = Array.isArray(res) ? res : (res?.data ?? res?.items ?? res?.orders ?? []);
+        if (!cancelled) setOrders((Array.isArray(list) ? list : []).map(normalizeOrder));
+      } catch (e) {
+        if (!cancelled) setOrders([]);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return { orders, loaded };
+}
 
 function displayName(user) {
   if (!user) return '';
@@ -27,6 +79,7 @@ const ACCT_TABS = [
   ['dashboard', 'Dashboard', 'grid'],
   ['orders', 'My orders', 'package'],
   ['tracking', 'Track order', 'truck'],
+  ['support', 'Support tickets', 'headset'],
   ['wishlist', 'Wishlist', 'heart'],
   ['referrals', 'Refer & earn', 'spark'],
   ['rewards', 'My rewards', 'gift'],
@@ -34,8 +87,6 @@ const ACCT_TABS = [
   ['payments', 'Payment methods', 'card'],
   ['profile', 'Profile settings', 'user'],
 ];
-
-const STATUS_TINT = { 'In transit': 'info', 'Delivered': 'ok', 'Cancelled': 'bad', 'Processing': 'warn' };
 
 function AccountShell({ active, children }) {
   const { go, user, isAuthenticated, authLoading, logout } = useStore();
@@ -84,19 +135,26 @@ function AccountShell({ active, children }) {
 }
 
 function StatusPill({ status }) {
-  return <span className={'status-pill ' + (STATUS_TINT[status] || 'info')}>{status}</span>;
+  return <span className={'status-pill ' + (STATUS_TINT[status] || 'info')}>{STATUS_LABEL[status] || status}</span>;
+}
+
+function fmtDate(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  return isNaN(dt) ? String(d) : dt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function Dashboard() {
   const { go, wish, referral, user } = useStore();
+  const { orders, loaded } = useOrders();
   const stats = [
-    ['package', 'Total orders', ORDERS.length, 'orders'],
-    ['truck', 'In transit', ORDERS.filter(o => o.status === 'In transit').length, 'orders'],
+    ['package', 'Total orders', orders.length, 'orders'],
+    ['truck', 'In transit', orders.filter(o => o.status === 'in_transit' || o.status === 'shipped').length, 'orders'],
     ['heart', 'Wishlist', wish.length, 'wishlist'],
     ['limcash', 'Lim Cash', naira(referral.credit), 'referrals'],
   ];
   const firstName = (displayName(user).split(' ')[0]) || 'there';
-  const recent = ORDERS.slice(0, 3);
+  const recent = orders.slice(0, 3);
   return (
     <>
       <div className="acct-welcome">
@@ -114,51 +172,278 @@ function Dashboard() {
 
       <div className="acct-panel">
         <div className="row between" style={{ marginBottom: 16 }}><h3>Recent orders</h3><button className="link-btn" onClick={() => go('orders')}>View all</button></div>
-        {recent.length === 0
-          ? <p className="muted" style={{ fontSize: 14 }}>No recent orders — order history isn't available yet.</p>
+        {!loaded ? <p className="muted" style={{ fontSize: 14 }}>Loading orders…</p> : recent.length === 0
+          ? <p className="muted" style={{ fontSize: 14 }}>No orders yet.</p>
           : <OrderList orders={recent} />}
       </div>
     </>
   );
 }
 
+const RETURN_REASONS = ['Item damaged or defective', 'Wrong item received', 'Not as described', 'No longer needed', 'Other'];
+
+function ReturnModal({ order, saving, onClose, onSave }) {
+  const [reason, setReason] = useState(RETURN_REASONS[0]);
+  const [note, setNote] = useState('');
+  return (
+    <Modal title={`Request a return · #${order.id}`} sub="We'll review this and follow up on next steps." onClose={onClose}>
+      <label className="adm-field" style={{ marginBottom: 14 }}>
+        <span>Reason</span>
+        <select value={reason} onChange={e => setReason(e.target.value)}>
+          {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </label>
+      <label className="adm-field">
+        <span>Details (optional)</span>
+        <textarea rows="4" value={note} onChange={e => setNote(e.target.value)} placeholder="Anything else that would help us process this" />
+      </label>
+      <div className="row" style={{ gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+        <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => onSave({ reason, note: note.trim() || undefined })} disabled={saving}>{saving ? 'Submitting…' : 'Submit request'}</button>
+      </div>
+    </Modal>
+  );
+}
+
 function OrderList({ orders }) {
-  const { go } = useStore();
+  const { go, toast } = useStore();
+  const [returning, setReturning] = useState(null); // order object or null
+  const [saving, setSaving] = useState(false);
+  const submitReturn = async (data) => {
+    setSaving(true);
+    try {
+      await ordersApi.requestReturn(returning.id, data);
+      toast('Return request submitted');
+      setReturning(null);
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div className="order-list">
       {orders.map(o => (
         <div className="order-row" key={o.id}>
           <div className="or-main">
             <div className="or-id"><b>{o.id}</b><StatusPill status={o.status} /></div>
-            <span className="muted" style={{ fontSize: 13 }}>{o.date} · {o.items} {o.items === 1 ? 'item' : 'items'}</span>
+            <span className="muted" style={{ fontSize: 13 }}>{fmtDate(o.date)} · {o.itemCount} {o.itemCount === 1 ? 'item' : 'items'}</span>
           </div>
           <div className="or-meta">
             <b>{naira(o.total)}</b>
-            <span className="muted" style={{ fontSize: 12.5 }}>{o.status === 'Delivered' ? 'Delivered ' + o.eta : o.status === 'Cancelled' ? 'Cancelled' : 'Arrives ' + o.eta}</span>
           </div>
           <div className="or-actions">
-            {o.status !== 'Cancelled' && <button className="btn btn-outline btn-sm" onClick={() => go('tracking', o.id)}><Icon name="truck" size={15} /> Track</button>}
+            {o.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => go('tracking', o.id)}><Icon name="truck" size={15} /> Track</button>}
+            {o.status === 'delivered' && <button className="btn btn-ghost btn-sm" onClick={() => setReturning(o)}><Icon name="refresh" size={15} /> Request return</button>}
             <button className="btn btn-ghost btn-sm" onClick={() => go('shop', 'all')}>Buy again</button>
           </div>
         </div>
       ))}
+      {returning && <ReturnModal order={returning} saving={saving} onClose={() => setReturning(null)} onSave={submitReturn} />}
     </div>
   );
 }
 
 function Orders() {
   const [filter, setFilter] = useState('all');
-  const tabs = [['all', 'All'], ['In transit', 'In transit'], ['Delivered', 'Delivered'], ['Cancelled', 'Cancelled']];
-  const list = filter === 'all' ? ORDERS : ORDERS.filter(o => o.status === filter);
+  const { orders, loaded } = useOrders();
+  const tabs = [['all', 'All'], ['active', 'Active'], ['delivered', 'Delivered'], ['cancelled', 'Cancelled']];
+  const list = filter === 'all' ? orders
+    : filter === 'active' ? orders.filter(o => !['delivered', 'cancelled'].includes(o.status))
+    : orders.filter(o => o.status === filter);
   return (
     <>
       <h1 style={{ fontSize: 26, marginBottom: 18 }}>My orders</h1>
       <div className="pill-tabs">
         {tabs.map(([v, l]) => <button key={v} className={'pill-tab' + (filter === v ? ' on' : '')} onClick={() => setFilter(v)}>{l}</button>)}
       </div>
-      {list.length === 0
-        ? <EmptyState icon="package" title="No orders here" body="Order history isn't available yet — check back once it's connected." />
+      {!loaded ? <p className="muted">Loading orders…</p> : list.length === 0
+        ? <EmptyState icon="package" title="No orders here" body="Nothing to show for this filter yet." />
         : <div className="acct-panel"><OrderList orders={list} /></div>}
+    </>
+  );
+}
+
+/* ---------------- SUPPORT TICKETS ---------------- */
+function normalizeTicket(t) {
+  return {
+    id: t.id,
+    subject: t.subject ?? t.title ?? 'Support ticket',
+    status: String(t.status ?? 'open').toLowerCase(),
+    priority: t.priority,
+    date: t.updated_at ?? t.created_at,
+  };
+}
+
+function CreateTicketModal({ onClose, onCreate, saving }) {
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  return (
+    <Modal title="New support ticket" onClose={onClose}>
+      <label className="adm-field" style={{ marginBottom: 14 }}><span>Subject</span><input value={subject} onChange={e => setSubject(e.target.value)} placeholder="What do you need help with?" autoFocus /></label>
+      <label className="adm-field"><span>Message</span><textarea rows="5" value={message} onChange={e => setMessage(e.target.value)} placeholder="Describe the issue" /></label>
+      <div className="row" style={{ gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+        <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => onCreate({ subject: subject.trim(), message: message.trim() })} disabled={saving || !subject.trim() || !message.trim()}>{saving ? 'Creating…' : 'Create ticket'}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function TicketThread({ ticketId, onBack, onClosed }) {
+  const { toast } = useStore();
+  const [ticket, setTicket] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [reply, setReply] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const reload = async () => {
+    try {
+      const res = await supportTicketsApi.get(ticketId);
+      setTicket(res?.data ?? res);
+    } catch (e) { setTicket(null); }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await supportTicketsApi.get(ticketId);
+        if (!cancelled) setTicket(res?.data ?? res);
+      } catch (e) {
+        if (!cancelled) setTicket(null);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [ticketId]);
+
+  const sendReply = async () => {
+    if (!reply.trim() || sending) return;
+    setSending(true);
+    try {
+      await supportTicketsApi.message(ticketId, { message: reply.trim() });
+      setReply('');
+      await reload();
+    } catch (e) { toast(messageFrom(e)); } finally { setSending(false); }
+  };
+
+  const closeTicket = async () => {
+    try {
+      await supportTicketsApi.close(ticketId);
+      toast('Ticket closed');
+      await reload();
+      onClosed && onClosed();
+    } catch (e) { toast(messageFrom(e)); }
+  };
+
+  if (!loaded) return <p className="muted">Loading…</p>;
+  if (!ticket) return <EmptyState icon="headset" title="Ticket not found" body="This ticket may have been removed." action="Back to tickets" onAction={onBack} />;
+
+  const t = normalizeTicket(ticket);
+  // Response shape is undocumented — messages array key and each message's
+  // own fields/sender-flag are all read defensively.
+  const messages = ticket.messages ?? ticket.replies ?? [];
+
+  return (
+    <>
+      <div className="row between" style={{ marginBottom: 6, flexWrap: 'wrap', gap: 10 }}>
+        <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="chevleft" size={15} /> All tickets</button>
+        {t.status !== 'closed' && <button className="btn btn-outline btn-sm" onClick={closeTicket}>Close ticket</button>}
+      </div>
+      <h1 style={{ fontSize: 22, marginBottom: 4 }}>{t.subject}</h1>
+      <p className="muted" style={{ marginBottom: 18 }}>Ticket #{t.id} · <StatusPill status={t.status} /></p>
+      <div className="acct-panel" style={{ marginBottom: 18 }}>
+        {(Array.isArray(messages) ? messages : []).length === 0 ? <p className="muted">No messages yet.</p> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {messages.map((m, i) => {
+              const fromStaff = m.is_staff ?? m.from_admin ?? (m.author?.role === 'staff') ?? (m.sender === 'staff');
+              return (
+                <div key={m.id ?? i} style={{ alignSelf: fromStaff ? 'flex-start' : 'flex-end', maxWidth: '80%', background: fromStaff ? 'var(--surface-2)' : 'var(--primary-soft)', borderRadius: 'var(--r-md)', padding: '10px 14px' }}>
+                  <p style={{ margin: 0, fontSize: 13.5 }}>{m.message ?? m.body ?? m.text}</p>
+                  <small className="muted" style={{ fontSize: 11 }}>{fmtDate(m.created_at)}</small>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {t.status !== 'closed' && (
+        <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+          <textarea rows="2" style={{ flex: 1 }} value={reply} onChange={e => setReply(e.target.value)} placeholder="Type a reply…" />
+          <button className="btn btn-primary" onClick={sendReply} disabled={sending || !reply.trim()}>{sending ? 'Sending…' : 'Send'}</button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function SupportTickets() {
+  const { toast } = useStore();
+  const [tickets, setTickets] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [openTicket, setOpenTicket] = useState(null);
+
+  const load = async () => {
+    try {
+      const res = await supportTicketsApi.list();
+      const list = Array.isArray(res) ? res : (res?.data?.items ?? res?.items ?? res?.data ?? []);
+      setTickets((Array.isArray(list) ? list : []).map(normalizeTicket));
+    } catch (e) {
+      setTickets([]);
+    } finally {
+      setLoaded(true);
+    }
+  };
+  // Initial network hydration is intentionally triggered when the page mounts.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, []);
+
+  const createTicket = async (data) => {
+    setSaving(true);
+    try {
+      const res = await supportTicketsApi.create(data);
+      const created = res?.data ?? res;
+      toast('Ticket created');
+      setCreating(false);
+      await load();
+      if (created?.id) setOpenTicket(created.id);
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (openTicket) return <TicketThread ticketId={openTicket} onBack={() => { setOpenTicket(null); load(); }} onClosed={load} />;
+
+  return (
+    <>
+      <div className="row between" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+        <h1 style={{ fontSize: 26 }}>Support tickets</h1>
+        <button className="btn btn-primary btn-sm" onClick={() => setCreating(true)}><Icon name="plus" size={15} /> New ticket</button>
+      </div>
+      {!loaded ? <p className="muted">Loading tickets…</p> : tickets.length === 0 ? (
+        <EmptyState icon="headset" title="No support tickets yet" body="Need help with something? Open a ticket and we'll get back to you." action="New ticket" onAction={() => setCreating(true)} />
+      ) : (
+        <div className="order-list">
+          {tickets.map(t => (
+            <div className="order-row" key={t.id} style={{ cursor: 'pointer' }} onClick={() => setOpenTicket(t.id)}>
+              <div className="or-main">
+                <div className="or-id"><b>#{t.id}</b><StatusPill status={t.status} /></div>
+                <span className="muted" style={{ fontSize: 13 }}>{t.subject}</span>
+              </div>
+              <div className="or-meta">
+                <span className="muted" style={{ fontSize: 12.5 }}>{fmtDate(t.date)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {creating && <CreateTicketModal onClose={() => setCreating(false)} onCreate={createTicket} saving={saving} />}
     </>
   );
 }
@@ -167,7 +452,11 @@ function Addresses() {
   const { addresses, addressesLoading, saveAddress, removeAddress, setPrimaryAddress } = useStore();
   const [editing, setEditing] = useState(null); // address obj or 'new' or null
   const close = () => setEditing(null);
-  const addressLine = (a) => [a.address_line_1, a.address_line_2].filter(Boolean).join(', ');
+  // GET /addresses has no documented response shape at all — read defensively
+  // under both the line1/line2 names the live create/update validation
+  // actually wants and the address_line_1/2 names POST/PUT's (apparently
+  // stale) docs show, in case a saved address comes back under either.
+  const addressLine = (a) => [a.line1 ?? a.address_line_1, a.line2 ?? a.address_line_2].filter(Boolean).join(', ');
   return (
     <>
       <div className="row between" style={{ marginBottom: 18 }}><h1 style={{ fontSize: 26 }}>Saved addresses</h1><button className="btn btn-primary btn-sm" onClick={() => setEditing('new')}><Icon name="plus" size={16} /> Add address</button></div>
@@ -183,6 +472,7 @@ function Addresses() {
                 <span className="addr-label"><Icon name="location" size={15} /> {a.type === 'billing' ? 'Billing' : 'Delivery'}</span>
                 {a.is_default && <span className="badge badge-soft">Default</span>}
               </div>
+              {a.recipient_name && <p style={{ marginBottom: 2 }}><b>{a.recipient_name}</b>{a.phone && <span className="muted"> · {a.phone}</span>}</p>}
               <p><b>{addressLine(a)}</b><br />{a.city}{a.state ? ', ' + a.state : ''}{a.postal_code ? ' ' + a.postal_code : ''}{a.landmark && <><br /><span className="muted">Near {a.landmark}</span></>}</p>
               <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => setEditing(a)}><Icon name="edit" size={14} /> Edit</button>
@@ -433,24 +723,89 @@ function MyRewards() {
 
 export function AccountPage({ tab }) {
   const t = tab || 'dashboard';
-  const map = { dashboard: <Dashboard />, orders: <Orders />, addresses: <Addresses />, payments: <Payments />, profile: <Profile />, referrals: <Referrals />, rewards: <MyRewards /> };
+  const map = { dashboard: <Dashboard />, orders: <Orders />, support: <SupportTickets />, addresses: <Addresses />, payments: <Payments />, profile: <Profile />, referrals: <Referrals />, rewards: <MyRewards /> };
   return <AccountShell active={t}>{map[t] || <Dashboard />}</AccountShell>;
 }
 
 /* ---------------- WISHLIST ---------------- */
 export function WishlistPage() {
   const { wish, go, toast } = useStore();
+  const [sharing, setSharing] = useState(false);
   const items = wish.map(id => byId(id)).filter(Boolean);
+  const shareWishlist = async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const res = await favoritesApi.share();
+      const data = res?.data ?? res;
+      const token = data?.token ?? data?.share_token ?? data?.code;
+      const url = data?.url ?? data?.share_url ?? data?.link
+        ?? (token ? `${window.location.origin}/shared-wishlist/${token}` : null);
+      if (!url) { toast('Could not generate a share link'); return; }
+      try { await navigator.clipboard.writeText(url); toast('Wishlist link copied'); }
+      catch (e) { toast(url); }
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSharing(false);
+    }
+  };
   return (
     <AccountShell active="wishlist">
       <div className="row between" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
         <h1 style={{ fontSize: 26 }}>My wishlist <span className="muted" style={{ fontWeight: 600, fontSize: 16 }}>· {items.length} saved</span></h1>
-        {items.length > 0 && <button className="btn btn-ghost btn-sm" onClick={() => toast('Wishlist link copied')}><Icon name="share" size={15} /> Share wishlist</button>}
+        {items.length > 0 && <button className="btn btn-ghost btn-sm" onClick={shareWishlist} disabled={sharing}><Icon name="share" size={15} /> {sharing ? 'Sharing…' : 'Share wishlist'}</button>}
       </div>
       {items.length === 0
         ? <EmptyState icon="heart" title="Your wishlist is empty" body="Tap the heart on any product to save it here for later." action="Discover products" onAction={() => go('shop', 'all')} />
         : <div className="shop-grid">{items.map(p => <ProductCard key={p.id} product={p} />)}</div>}
     </AccountShell>
+  );
+}
+
+/* ---------------- SHARED WISHLIST (public) ---------------- */
+export function SharedWishlistPage({ token }) {
+  const { go } = useStore();
+  const [state, setState] = useState({ loaded: false, items: [], owner: null, error: false });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!token) { if (!cancelled) setState(s => ({ ...s, loaded: true, error: true })); return; }
+      try {
+        const res = await sharedWishlistsApi.get(token);
+        const data = res?.data ?? res;
+        const rawItems = data?.items ?? data?.favorites ?? data ?? [];
+        const ids = (Array.isArray(rawItems) ? rawItems : [])
+          .map(f => f.product_id ?? f.product?.id ?? f.id)
+          .filter(id => id != null);
+        const owner = data?.owner?.name ?? data?.user?.name
+          ?? ([data?.user?.first_name, data?.user?.last_name].filter(Boolean).join(' ') || null);
+        if (!cancelled) setState({ loaded: true, items: ids.map(byId).filter(Boolean), owner, error: false });
+      } catch (e) {
+        if (!cancelled) setState({ loaded: true, items: [], owner: null, error: true });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  if (!state.loaded) return <div className="page page-fade"><div className="wrap"><p className="muted" style={{ padding: '40px 0' }}>Loading wishlist…</p></div></div>;
+
+  if (state.error) {
+    return (
+      <div className="page page-fade"><div className="wrap">
+        <EmptyState icon="heart" title="This wishlist link isn't valid" body="It may have expired or been removed." action="Go to shop" onAction={() => go('shop', 'all')} />
+      </div></div>
+    );
+  }
+
+  return (
+    <div className="page page-fade"><div className="wrap">
+      <h1 style={{ fontSize: 26, marginBottom: 6 }}>{state.owner ? `${state.owner}'s wishlist` : 'Shared wishlist'}</h1>
+      <p className="muted" style={{ marginBottom: 18 }}>{state.items.length} item{state.items.length === 1 ? '' : 's'} saved</p>
+      {state.items.length === 0
+        ? <EmptyState icon="heart" title="This wishlist is empty" body="Nothing has been saved here yet." action="Go to shop" onAction={() => go('shop', 'all')} />
+        : <div className="shop-grid">{state.items.map(p => <ProductCard key={p.id} product={p} />)}</div>}
+    </div></div>
   );
 }
 
@@ -463,55 +818,82 @@ const TRACK_STEPS = [
   ['Delivered', 'Package delivered', 'shield'],
 ];
 
+const STEP_INDEX = { pending_payment: 0, confirmed: 0, processing: 1, shipped: 2, in_transit: 3, delivered: 4 };
+
 export function TrackingPage({ id }) {
   const { go } = useStore();
-  const order = ORDERS.find(o => o.id === id) || ORDERS[0];
+  const [order, setOrder] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!id) { if (!cancelled) setLoaded(true); return; }
+      try {
+        const res = await ordersApi.get(id);
+        const raw = res?.data ?? res;
+        if (!cancelled) setOrder(raw ? normalizeOrder(raw) : null);
+      } catch (e) {
+        if (!cancelled) setOrder(null);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
+
+  if (!loaded) return <AccountShell active="tracking"><p className="muted">Loading…</p></AccountShell>;
+
   if (!order) {
     return (
       <AccountShell active="tracking">
-        <EmptyState icon="truck" title="No order to track yet" body="Order history isn't available yet, so there's nothing here to track." action="View orders" onAction={() => go('orders')} />
+        <EmptyState icon="truck" title="No order to track" body="We couldn't find that order." action="View orders" onAction={() => go('orders')} />
       </AccountShell>
     );
   }
-  const current = order.status === 'Delivered' ? 4 : order.status === 'Cancelled' ? 1 : 3;
-  const timeline = [
-    { time: '24 May, 9:14 AM' }, { time: '24 May, 2:40 PM' }, { time: '25 May, 8:02 AM' }, { time: 'Today, 7:30 AM' }, { time: order.status === 'Delivered' ? order.eta : 'Est. ' + order.eta },
-  ];
+  const isCancelled = order.status === 'cancelled';
+  const current = STEP_INDEX[order.status] ?? 0;
+  // Response shape is undocumented — courier/tracking-number fields are read
+  // defensively and simply hidden (not fabricated) if the order has neither.
+  const courier = order.raw.courier ?? order.raw.carrier ?? order.raw.delivery_partner;
+  const trackingNumber = order.raw.tracking_number ?? order.raw.tracking_id ?? order.raw.waybill_number;
   return (
     <AccountShell active="tracking">
       <div className="row between" style={{ marginBottom: 6, flexWrap: 'wrap', gap: 10 }}>
         <h1 style={{ fontSize: 26 }}>Track order</h1>
         <button className="btn btn-ghost btn-sm" onClick={() => go('orders')}><Icon name="list" size={15} /> All orders</button>
       </div>
-      <p className="muted" style={{ marginBottom: 22 }}>Order <b style={{ color: 'var(--text)' }}>{order.id}</b> · placed {order.date}</p>
+      <p className="muted" style={{ marginBottom: 22 }}>Order <b style={{ color: 'var(--text)' }}>{order.id}</b> · placed {fmtDate(order.date)}</p>
 
       <div className="track-banner card">
         <div className="track-status">
-          <span className="track-ic"><Icon name="truck" size={26} /></span>
+          <span className="track-ic"><Icon name={isCancelled ? 'close' : 'truck'} size={26} /></span>
           <div>
             <StatusPill status={order.status} />
-            <h3 style={{ margin: '8px 0 2px' }}>{order.status === 'Delivered' ? 'Delivered' : 'Arriving ' + order.eta}</h3>
-            <p className="muted" style={{ fontSize: 13.5 }}>{order.items} {order.items === 1 ? 'item' : 'items'} · {naira(order.total)}</p>
+            <h3 style={{ margin: '8px 0 2px' }}>{isCancelled ? 'Order cancelled' : TRACK_STEPS[current][0]}</h3>
+            <p className="muted" style={{ fontSize: 13.5 }}>{order.itemCount} {order.itemCount === 1 ? 'item' : 'items'} · {naira(order.total)}</p>
           </div>
         </div>
-        <div className="track-courier">
-          <small className="muted">Courier</small><b>Limitra Express</b>
-          <small className="muted" style={{ marginTop: 8 }}>Tracking ID</small><b>LMX{order.id.replace(/\D/g, '')}NG</b>
-        </div>
+        {(courier || trackingNumber) && (
+          <div className="track-courier">
+            {courier && <><small className="muted">Courier</small><b>{courier}</b></>}
+            {trackingNumber && <><small className="muted" style={{ marginTop: 8 }}>Tracking ID</small><b>{trackingNumber}</b></>}
+          </div>
+        )}
       </div>
 
-      <div className="timeline">
-        {TRACK_STEPS.map(([title, sub, ic], i) => (
-          <div key={i} className={'tl-step' + (i <= current ? ' done' : '') + (i === current ? ' current' : '')}>
-            <div className="tl-marker"><span className="tl-dot">{i < current ? <Icon name="check" size={14} stroke={3} /> : <Icon name={ic} size={14} />}</span>{i < TRACK_STEPS.length - 1 && <span className="tl-line" />}</div>
-            <div className="tl-body">
-              <b>{title}</b>
-              <small className="muted">{sub}</small>
-              <small className="tl-time">{timeline[i].time}</small>
+      {!isCancelled && (
+        <div className="timeline">
+          {TRACK_STEPS.map(([title, sub, ic], i) => (
+            <div key={i} className={'tl-step' + (i <= current ? ' done' : '') + (i === current ? ' current' : '')}>
+              <div className="tl-marker"><span className="tl-dot">{i < current ? <Icon name="check" size={14} stroke={3} /> : <Icon name={ic} size={14} />}</span>{i < TRACK_STEPS.length - 1 && <span className="tl-line" />}</div>
+              <div className="tl-body">
+                <b>{title}</b>
+                <small className="muted">{sub}</small>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       <div className="track-help"><Icon name="headset" size={18} /><span>Having an issue with this order?</span><button className="link-btn" onClick={() => go('help', 'contact')}>Contact support</button></div>
     </AccountShell>
@@ -520,9 +902,28 @@ export function TrackingPage({ id }) {
 
 /* ---------------- HELP CENTER ---------------- */
 export function HelpPage({ section }) {
-  const { go } = useStore();
+  const { go, toast, isAuthenticated } = useStore();
   const [open, setOpen] = useState(0);
   const [q, setQ] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [savingTicket, setSavingTicket] = useState(false);
+  const startChat = () => {
+    if (!isAuthenticated) { toast('Sign in to start a support chat'); go('auth', 'signin'); return; }
+    setCreating(true);
+  };
+  const createTicket = async (data) => {
+    setSavingTicket(true);
+    try {
+      await supportTicketsApi.create(data);
+      toast('Ticket created — we’ll be in touch');
+      setCreating(false);
+      go('account', 'support');
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSavingTicket(false);
+    }
+  };
   useEffect(() => {
     if (section === 'contact') {
       const t = setTimeout(() => { const el = document.getElementById('help-contact'); if (el) { const y = el.getBoundingClientRect().top + window.scrollY - 90; window.scrollTo({ top: y, behavior: 'smooth' }); } }, 120);
@@ -586,15 +987,16 @@ export function HelpPage({ section }) {
         </div>
 
         <div className="help-contact" id="help-contact">
-          {[['headset', '24/7 support', 'Chat with our team any time', 'Start chat'], ['mail', 'Email us', 'support@limitra.com.ng · replies in 2 hrs', 'Send email'], ['phone', 'Call us', '+234 700 LIMITRA · 8am–8pm', 'Call now']].map(([ic, t, sub, cta]) => (
+          {[['headset', '24/7 support', 'Chat with our team any time', 'Start chat', startChat], ['mail', 'Email us', 'support@limitra.com.ng · replies in 2 hrs', 'Send email', () => { window.location.href = 'mailto:support@limitra.com.ng'; }], ['phone', 'Call us', '+234 700 LIMITRA · 8am–8pm', 'Call now', () => { window.location.href = 'tel:+234700546487'; }]].map(([ic, t, sub, cta, onClick]) => (
             <div key={t} className="contact-card card">
               <span className="contact-ic"><Icon name={ic} size={22} /></span>
               <b>{t}</b><small className="muted">{sub}</small>
-              <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }}>{cta}</button>
+              <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }} onClick={onClick}>{cta}</button>
             </div>
           ))}
         </div>
       </div>
+      {creating && <CreateTicketModal onClose={() => setCreating(false)} onCreate={createTicket} saving={savingTicket} />}
     </div>
   );
 }

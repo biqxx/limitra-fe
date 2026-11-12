@@ -20,6 +20,23 @@ const CS_STEPS = [
 
 const FEATURED_STORES = MICROSTORES.slice(0, 4);
 
+// Spotlight cards on the advantage section — real partner photos and product
+// shots, but still routes to the matching MICROSTORES demo store (see file
+// header: no celebrity-store backend yet) since "Jay"/"Beauty" aren't real
+// storefronts to link to.
+const CELEBRITY_SPOTLIGHT = [
+  {
+    displayName: 'Jay', role: 'Content creator & Entertainer', photo: '/assets/img/celebrity-jay.jpg',
+    products: ['/assets/img/celebrity-spotlight-product-1.jpg', '/assets/img/celebrity-spotlight-product-2.jpg', '/assets/img/celebrity-spotlight-product-3.jpg'],
+    store: MICROSTORES.find(s => s.slug === 'megagaming'),
+  },
+  {
+    displayName: 'Beauty', role: 'Content creator & Entertainer', photo: '/assets/img/celebrity-beauty.jpg',
+    products: ['/assets/img/celebrity-spotlight-product-1.jpg', '/assets/img/celebrity-spotlight-product-2.jpg', '/assets/img/celebrity-spotlight-product-3.jpg'],
+    store: MICROSTORES.find(s => s.slug === 'glowbeauty'),
+  },
+];
+
 const FAQS = [
   ['How is my commission rate decided?', 'Your rate is based on your qualifying sales within a rolling 90-day period: Celebrity Partner, Premium Celebrity Partner or Celebrity Icon Partner, with the category commission applying on top. Everyone starts at the Celebrity Partner rate.'],
   ['What is the rolling 90-day window?', 'Rather than resetting quarterly, your performance is recalculated continuously using your most recent 90 days. Your tier can move up when you hit the next threshold, or down if recent activity falls below it.'],
@@ -55,19 +72,8 @@ export function CelebrityStoresPage() {
               <span><Icon name="check" size={15} stroke={3} /> From sale #1</span>
             </div>
           </div>
-          <div className="aff-hero-card">
-            <div className="ahc-top">
-              <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>Featured partner store</span>
-              <span className="status-pill ok">Verified</span>
-            </div>
-            <div className="ahc-amount" style={{ fontSize: 26 }}>Jay&rsquo;s Picks</div>
-            <div className="ahc-bars">
-              {[55, 70, 48, 82, 64, 90, 100].map((h, i) => <span key={i} style={{ height: h + '%' }} className={i === 6 ? 'on' : ''} />)}
-            </div>
-            <div className="ahc-rows">
-              <div className="ahc-row"><span className="ahc-ic"><Icon name="bag" size={15} /></span><div><b>Premium Celebrity Partner</b><small className="muted">Current tier</small></div><b className="ahc-val ok">Rank up</b></div>
-              <div className="ahc-row"><span className="ahc-ic"><Icon name="user" size={15} /></span><div><b>284,000 followers</b><small className="muted">Verified audience</small></div><b className="ahc-val">Icon soon</b></div>
-            </div>
+          <div className="aff-hero-visual">
+            <img src="/assets/img/celebrity-hero.png" alt="Celebrity partners shopping their own curated Limitra stores" />
           </div>
         </div>
       </section>
@@ -77,19 +83,49 @@ export function CelebrityStoresPage() {
       {/* advantage */}
       <section className="sec" style={{ paddingTop: 8 }}>
         <div className="wrap">
-          <div className="aff-sec-head" style={{ maxWidth: 680 }}>
-            <span className="eyebrow">The Celebrity Store advantage</span>
-            <h2>More than commissions. It&rsquo;s your brand.</h2>
-            <p className="muted" style={{ marginTop: 10, textWrap: 'pretty' }}>With Limitra Celebrity Stores, you get the tools, support and flexibility to turn your audience into a thriving online business. Not just a link.</p>
+          <div className="cs-advantage-box">
+            <div className="aff-sec-head" style={{ maxWidth: 680 }}>
+              <span className="eyebrow">The Celebrity Store advantage</span>
+              <h2>More than commissions. It&rsquo;s your brand.</h2>
+              <p className="muted" style={{ marginTop: 10, textWrap: 'pretty' }}>With Limitra Celebrity Stores, you get the tools, support and flexibility to turn your audience into a thriving online business. Not just a link.</p>
+            </div>
+            <div className="aff-perks five">
+              {STORE_ADVANTAGE.map(([, t, b]) => (
+                <div key={t} className="aff-perk card">
+                  <span className="aff-perk-ic"><Icon name="wallet" size={20} /></span>
+                  <b>{t}</b>
+                  <p className="muted">{b}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="aff-perks" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-            {STORE_ADVANTAGE.map(([ic, t, b]) => (
-              <div key={t} className="aff-perk card">
-                <span className="aff-perk-ic"><Icon name={ic} size={20} /></span>
-                <b>{t}</b>
-                <p className="muted">{b}</p>
+        </div>
+      </section>
+
+      {/* celebrity spotlight */}
+      <section className="sec" style={{ paddingTop: 8 }}>
+        <div className="wrap">
+          <div className="sec-head"><h2>Featured Celebrity Stores</h2></div>
+          <div className="cs-spotlight">
+            {CELEBRITY_SPOTLIGHT.map(c => (
+              <div key={c.displayName} className="cs-spotlight-card" onClick={() => go('microstore', c.store.slug)}>
+                <div className="cs-spotlight-photo">
+                  <img src={c.photo} alt={c.displayName} />
+                  <div className="cs-spotlight-caption"><b>{c.displayName}</b><small>{c.role}</small></div>
+                </div>
+                <div className="cs-spotlight-body">
+                  <a className="link-btn" onClick={(e) => { e.stopPropagation(); go('microstore', c.store.slug); }}>Shop {c.displayName}&rsquo;s Picks <Icon name="arrowr" size={13} /></a>
+                </div>
+                <div className="cs-spotlight-thumbs">
+                  {c.products.map(src => <div key={src} className="ms-store-thumb"><img src={src} alt="" /></div>)}
+                </div>
               </div>
             ))}
+            <div className="cs-spotlight-card cs-spotlight-soon">
+              <span className="cs-spotlight-soon-ic"><img src="/assets/img/celebrity-soon-icon.png" alt="" /></span>
+              <b>More Coming Soon</b>
+              <small>Stay Tuned</small>
+            </div>
           </div>
         </div>
       </section>

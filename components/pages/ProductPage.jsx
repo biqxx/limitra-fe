@@ -219,7 +219,7 @@ export function ProductPage({ id }) {
             {product.was > price && <><span className="was">{naira(product.was)}</span><span className="badge badge-sale">Save {naira(product.was - price)}</span></>}
           </div>
 
-          {variants.map(g => (
+          {variants.length ? variants.map(g => (
             <div className="variant" key={g.name}>
               {g.type === 'color' ? (
                 <>
@@ -245,7 +245,14 @@ export function ProductPage({ id }) {
                 </>
               )}
             </div>
-          ))}
+          )) : (
+            <div className="variant">
+              <div className="v-label">Variations</div>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <button className="chip" disabled style={{ opacity: .55, cursor: 'not-allowed' }}>Standard</button>
+              </div>
+            </div>
+          )}
 
           <div className="buy-row">
             <QtyStepper value={qty} onChange={q => setQty(Math.max(1, q))} />
