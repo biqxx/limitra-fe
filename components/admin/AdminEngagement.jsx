@@ -187,27 +187,6 @@ function VideoAssignModal({ draft, onClose, onSave }) {
   );
 }
 
-/* ---------- ELO AI ---------- */
-export function AdminElo() {
-  // No conversation-logging backend yet — stays empty rather than fake question stats.
-  const qs = [];
-  return (
-    <>
-      <AdmHead title="Elo AI" sub="Assistant performance & knowledge base"><button className="adm-btn ghost"><Icon name="download" size={15} /> Upload knowledge doc</button></AdmHead>
-      <div className="kpi-grid">
-        <Kpi ic="headset" tint="#0438B6" label="Conversations" val="0" delta="" up />
-        <Kpi ic="check" tint="#1F8A5B" label="Resolution rate" val="0%" delta="" up />
-        <Kpi ic="heart" tint="#D6247C" label="Satisfaction" val="—" delta="" up />
-        <Kpi ic="bag" tint="#F67208" label="AI-driven sales" val={naira(0)} delta="" up />
-      </div>
-      <div className="adm-row c2">
-        <div className="panel"><div className="panel-h"><h3>Most asked questions</h3></div>
-          <div className="adm-list">{qs.length === 0
-            ? <div style={{ padding: '18px 4px', textAlign: 'center', color: 'var(--text-faint)' }}>No conversations yet.</div>
-            : qs.map((qq, i) => <div className="adm-li" key={i}><span className="adm-li-av">{i + 1}</span><div className="adm-li-main"><b style={{ fontSize: 13.5 }}>{qq[0]}</b></div><b style={{ fontFamily: 'var(--font-display)' }}>{qq[1]}</b></div>)}</div>
-        </div>
-        <div className="panel"><div className="panel-h"><h3>Conversation volume</h3></div><BarChart data={[0, 0, 0, 0, 0, 0, 0]} labels={['M', 'T', 'W', 'T', 'F', 'S', 'S']} alt /></div>
-      </div>
-    </>
-  );
-}
+// AdminElo moved to its own file (components/admin/AdminElo.jsx) — it needs
+// real API wiring (conversations/knowledge base/settings) substantial enough
+// to no longer fit this shared-mock-sections file.
