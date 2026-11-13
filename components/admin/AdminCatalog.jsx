@@ -502,7 +502,7 @@ export function ProductEditDrawer({ draft, onClose, onSave }) {
               const file = e.target.files && e.target.files[0]; if (!file) return;
               const r = new FileReader(); r.onload = () => set('_img', r.result); r.readAsDataURL(file);
             }} />
-            {f._img && <span className="adm-img-replace"><Icon name="edit" size={13} /> Change photo</span>}
+            {(f._img || (!f._new && f._raw)) && <span className="adm-img-replace"><Icon name="edit" size={13} /> Change photo</span>}
           </label>
           <label className="adm-field"><span>Product name</span><input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Product name" /></label>
           <label className="adm-field"><span>Brand</span><input value={f.brand} onChange={e => set('brand', e.target.value)} placeholder="Brand" /></label>
