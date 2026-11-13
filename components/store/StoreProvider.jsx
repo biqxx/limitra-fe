@@ -42,6 +42,7 @@ export function StoreProvider({ children }) {
      (remoteCart/favorites below) takes over as the source of truth instead;
      the backend has no guest/anonymous cart support (its routes require auth). */
   const [localCart, setLocalCart] = useState([]);
+  const localCartRef = useRef(localCart); localCartRef.current = localCart;
   const [localWish, setLocalWish] = useState([]);
   const [remoteCart, setRemoteCart] = useState(null); // raw cartApi cart object, signed-in users only
   const [favorites, setFavorites] = useState([]); // [{id, product_id, ...}], signed-in users only
@@ -96,6 +97,18 @@ export function StoreProvider({ children }) {
   }, []);
   const loadCartAndFavorites = useCallback(async () => {
     try {
+      const pendingLocal = localCartRef.current || [];
+      if (pendingLocal.length > 0) {
+        for (const item of pendingLocal) {
+          try {
+            const payload = { product_id: item.id, quantity: item.qty || 1 };
+            if (item.variantId != null) payload.variant_id = item.variantId;
+            if (item.selectedOptions && Object.keys(item.selectedOptions).length > 0) payload.selected_options = item.selectedOptions;
+            await cartApi.addToActive(payload);
+          } catch (e) { /* skip unavailable guest item */ }
+        }
+        setLocalCart([]);
+      }
       let c;
       try { c = await cartApi.getActive(); } catch (e) { c = await cartApi.getOrCreateActive(); }
       setRemoteCart(c);
@@ -231,8 +244,10 @@ export function StoreProvider({ children }) {
         // Each entry in p.images is {id, url, alt, position}, not a plain URL
         // string — storing the object itself (as this used to) renders
         // <img src="[object Object]">, a broken image with naturalWidth 0.
-        const firstImg = Array.isArray(p.images) ? p.images[0] : null;
-        const imageUrl = typeof firstImg === 'string' ? firstImg : firstImg?.url || firstImg?.path;
+        const imageUrls = Array.isArray(p.images)
+          ? p.images.map(img => (typeof img === 'string' ? img : img?.url || img?.path)).filter(Boolean)
+          : [];
+        const imageUrl = imageUrls[0];
         const stock = Number(p.stock) || 0;
         if (imageUrl) REAL_IMG[p.id] = imageUrl;
         // "New" is computed, not a flag the API sends — anything created in
@@ -276,6 +291,7 @@ export function StoreProvider({ children }) {
           specs: Array.isArray(p.specifications)
             ? p.specifications.filter(s => s?.name).map(s => [s.name, s.value ?? ''])
             : [],
+          images: imageUrls,
           variants: Array.isArray(p.variants) ? p.variants : [],
           badges: [...(stock === 0 ? ['out-of-stock'] : []), ...(isNew ? ['new'] : []), ...(p.is_featured ? ['hot'] : [])],
           bestseller: !!p.is_bestseller,
@@ -424,13 +440,15 @@ export function StoreProvider({ children }) {
   const addToCart = useCallback(async (product, opts = {}, qty = 1) => {
     const variants = opts.variants || {};
     const unitPrice = opts.unitPrice ?? product.price;
+    const variantId = opts.variantId ?? null;
+    const selectedOptions = opts.selectedOptions || {};
     if (!isAuthenticated) {
       const variantKey = Object.keys(variants).sort().map(k => `${k}:${variants[k].label}`).join('|');
       const key = [product.id, variantKey].join('|');
       setLocalCart(c => {
         const ex = c.find(i => i.key === key);
         if (ex) return c.map(i => i.key === key ? { ...i, qty: i.qty + qty } : i);
-        return [...c, { key, id: product.id, qty, variants, unitPrice }];
+        return [...c, { key, id: product.id, qty, variants, unitPrice, variantId, selectedOptions }];
       });
       toast(`Added to cart · ${product.name.split(',')[0]}`);
       return;
@@ -446,7 +464,12 @@ export function StoreProvider({ children }) {
     });
     toast(`Added to cart · ${product.name.split(',')[0]}`);
     try {
-      await cartApi.addToActive({ product_id: product.id, quantity: qty });
+      const payload = { product_id: product.id, quantity: qty };
+      if (variantId != null) payload.variant_id = variantId;
+      if (Object.keys(selectedOptions).length > 0) payload.selected_options = selectedOptions;
+      await cartApi.addToActive(payload);
+      await refreshRemoteCart();
+      toast(`Added to cart · ${product.name.split(',')[0]}`);
     } catch (e) {
       toast(messageFrom(e), 'error');
     } finally {
@@ -584,7 +607,34 @@ export function StoreProvider({ children }) {
      /products (and therefore real cart items) actually exist. */
   const remoteCartItems = remoteCart?.[cartItemsKeyOf(remoteCart)] || [];
   const cart = isAuthenticated
-    ? remoteCartItems.map(it => ({ key: it.id, id: it.product_id ?? it.product?.id, qty: it.quantity, variants: {} }))
+    ? remoteCartItems.map(it => {
+        const pid = it.product_id ?? it.product?.id;
+        const p = it.product;
+        const firstImg = Array.isArray(p?.images) ? p.images[0] : null;
+        const imageUrl = typeof firstImg === 'string' ? firstImg : firstImg?.url || firstImg?.path;
+        if (pid && imageUrl && !REAL_IMG[pid]) REAL_IMG[pid] = imageUrl;
+        const opts = it.selected_options && typeof it.selected_options === 'object' ? it.selected_options : {};
+        const variants = Object.fromEntries(
+          Object.entries(opts).map(([k, v]) => [k, typeof v === 'object' && v !== null ? v : { label: String(v) }])
+        );
+        return {
+          key: it.id,
+          id: pid,
+          qty: it.quantity,
+          variants,
+          unitPrice: Number(it.unit_price ?? it.price ?? p?.price ?? 0),
+          product: p ? {
+            id: p.id,
+            slug: p.slug || `product-${p.id}`,
+            name: p.name,
+            brand: p.brand || '',
+            price: Number(p.price) || 0,
+            was: Number(p.compare_at_price) || 0,
+            stock: Number(p.stock) || 0,
+            tint: CAT_TINTS[0],
+          } : null,
+        };
+      })
     : localCart;
   // Needed by checkoutApi.quote({cart_id}) — only meaningful for signed-in users
   // (the real backend has no guest cart, so there's nothing to quote against
@@ -594,7 +644,7 @@ export function StoreProvider({ children }) {
 
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const cartTotal = isAuthenticated
-    ? remoteCartItems.reduce((s, it) => s + Number(it.price ?? it.unit_price ?? it.product?.price ?? 0) * (it.quantity || 0), 0)
+    ? remoteCartItems.reduce((s, it) => s + Number(it.unit_price ?? it.price ?? it.product?.price ?? 0) * (it.quantity || 0), 0)
     : localCart.reduce((s, i) => s + unitPriceOf(i, byId(i.id)) * i.qty, 0);
 
   const value = {

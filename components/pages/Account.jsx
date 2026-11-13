@@ -854,8 +854,8 @@ export function TrackingPage({ id }) {
   const current = STEP_INDEX[order.status] ?? 0;
   // Response shape is undocumented — courier/tracking-number fields are read
   // defensively and simply hidden (not fabricated) if the order has neither.
-  const courier = order.raw.courier ?? order.raw.carrier ?? order.raw.delivery_partner;
-  const trackingNumber = order.raw.tracking_number ?? order.raw.tracking_id ?? order.raw.waybill_number;
+  const courier = order.raw.tracking?.courier ?? order.raw.courier ?? order.raw.carrier ?? order.raw.delivery_partner;
+  const trackingNumber = order.raw.tracking?.tracking_number ?? order.raw.tracking_number ?? order.raw.tracking_id ?? order.raw.waybill_number;
   return (
     <AccountShell active="tracking">
       <div className="row between" style={{ marginBottom: 6, flexWrap: 'wrap', gap: 10 }}>

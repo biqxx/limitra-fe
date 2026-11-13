@@ -27,7 +27,7 @@ const PICKUP_METHOD_VALUE = '__pickup__';
 
 export function OrderSummary({ items, promo, ship, children, cta, onCta, ctaIcon, useCredit, onToggleCredit }) {
   const { walletBalance } = useStore();
-  const sub = items.reduce((s, it) => s + unitPriceOf(it, byId(it.id)) * it.qty, 0);
+  const sub = items.reduce((s, it) => s + unitPriceOf(it, byId(it.id) || it.product) * it.qty, 0);
   const disc = promo ? Math.round(sub * promo.pct) : 0;
   const shipping = ship == null ? 0 : ship;
   // Lim Cash only ever offsets the merchandise total, never delivery — shipping
@@ -126,7 +126,7 @@ export function CartPage() {
       <div className="cart-layout">
         <div className="cart-items">
           {cart.map(it => {
-            const p = byId(it.id);
+            const p = byId(it.id) || it.product;
             if (!p) return null;
             return (
               <div className="cart-item" key={it.key}>
@@ -222,7 +222,8 @@ export function CheckoutPage() {
 
   const activeAddr = addresses.find(a => a.id === selAddr);
   const selectedOption = deliveryOptions.find(o => o.value === method);
-  const isPickupMode = method === PICKUP_METHOD_VALUE;
+  const hasRealPickup = deliveryOptions.some(o => o.isPickup);
+  const isPickupMode = method === PICKUP_METHOD_VALUE || !!selectedOption?.isPickup;
 
   useEffect(() => { window.scrollTo({ top: 0 }); }, [step]);
 
@@ -343,8 +344,9 @@ export function CheckoutPage() {
       try {
         const status = await paymentsApi.statusByReference(ref);
         const raw = String(status?.status ?? status?.data?.status ?? '').toLowerCase();
-        const ok = ['success', 'successful', 'completed', 'paid'].includes(raw);
+        const ok = ['success', 'successful', 'succeeded', 'completed', 'paid'].includes(raw);
         if (ok) {
+          await clearCart();
           setOrderId(retOrderId || status?.order_id || ref);
         } else {
           setPlaceError(raw ? `Payment ${raw} — you can try again from your cart.` : 'We couldn’t confirm this payment. Check your orders page or try again.');
@@ -414,7 +416,7 @@ export function CheckoutPage() {
         // PICKUP_METHOD_VALUE is a local sentinel (no zone-matched pickup
         // method is guaranteed to exist) — 'pickup' is sent instead, matching
         // the `type` value confirmed required on admin delivery methods.
-        delivery_method: isPickupMode ? 'pickup' : method,
+        delivery_method: method === PICKUP_METHOD_VALUE ? 'pickup' : method,
         // Not in the documented quote schema, but sent defensively when a
         // pickup-type method is selected — see the pickup-locations effect.
         pickup_location_id: isPickupMode ? selectedPickup || undefined : undefined,
@@ -550,9 +552,9 @@ export function CheckoutPage() {
                       {o.disabled ? <span className="rc-soon">Unavailable</span> : <span className="rc-price">{o.fee === 0 ? 'Free' : naira(o.fee)}</span>}
                     </label>
                   ))}
-                  {pickupLocations.length > 0 && (
-                    <label className={'radio-card' + (isPickupMode ? ' on' : '')}>
-                      <input type="radio" name="ship" checked={isPickupMode} onChange={() => setMethod(PICKUP_METHOD_VALUE)} />
+                  {!hasRealPickup && pickupLocations.length > 0 && (
+                    <label className={'radio-card' + (method === PICKUP_METHOD_VALUE ? ' on' : '')}>
+                      <input type="radio" name="ship" checked={method === PICKUP_METHOD_VALUE} onChange={() => setMethod(PICKUP_METHOD_VALUE)} />
                       <span className="rc-radio" />
                       <div className="rc-body"><b>Pickup station</b><small>Collect from any available location</small></div>
                       <span className="rc-price">Free</span>
@@ -629,7 +631,7 @@ export function CheckoutPage() {
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="bag" size={16} /> {cart.reduce((s, i) => s + i.qty, 0)} items</span><button className="link-btn" onClick={() => go('cart')}>Edit cart</button></div>
                 <div className="review-items">
-                  {cart.map(it => { const p = byId(it.id); if (!p) return null; return (
+                  {cart.map(it => { const p = byId(it.id) || it.product; if (!p) return null; return (
                     <div className="rev-item" key={it.key}>
                       <div className="rev-item-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></div>
                       <span className="rev-item-name">{p.name}<small className="muted"> × {it.qty}</small></span>
