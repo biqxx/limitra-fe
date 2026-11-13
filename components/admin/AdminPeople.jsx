@@ -1,16 +1,15 @@
 'use client';
-/* People nav group (Customers, Affiliates, Referrals) — ported verbatim from
-   legacy/admin-sections.jsx. `window.admToast` calls replaced with `useAdminToast()`;
-   AdminAffiliates has `data-hlkey` rows so it reads the highlight query param too. */
+/* People nav group (Customers, Referrals — Affiliates moved to
+   AdminAffiliates.jsx) — ported verbatim from legacy/admin-sections.jsx.
+   `window.admToast` calls replaced with `useAdminToast()`. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { naira } from '@/lib/data';
 import { businessSettingsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { Kpi, BarChart } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead, Pager, usePager, AdmSelect, useHighlight } from './AdminShared';
+import { AdmHead, Pager, usePager, AdmSelect } from './AdminShared';
 
 /* ---------- CUSTOMERS ---------- */
 // No customers backend yet — stays genuinely empty rather than fake accounts.
@@ -132,148 +131,11 @@ export function AdminCustomers() {
   );
 }
 
-/* ---------- AFFILIATES ---------- */
-// No affiliates backend yet — stays genuinely empty rather than fake partners.
-const ADMIN_AFFILIATES = [];
-function AffiliateDrawer({ aff, status, paid, onStatusChange, onPay, onClose }) {
-  const addToast = useAdminToast();
-  // No payout history backend yet — stays empty rather than fake records.
-  const payouts = [];
-  const act = (next, msg) => { onStatusChange && onStatusChange(next); addToast(msg); };
-  return (
-    <>
-      <div className="adm-drawer-scrim" onClick={onClose} />
-      <aside className="adm-drawer" role="dialog" aria-label="Affiliate detail">
-        <div className="adm-drawer-h"><h3>Affiliate profile</h3><button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button></div>
-        <div className="adm-drawer-body">
-          <div className="adm-cust-head">
-            <span className="adm-li-av lg">{aff[0].split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
-            <div>
-              <b style={{ fontSize: 18 }}>{aff[0]}</b>
-              <div className="muted" style={{ fontSize: 13 }}>{aff[1]}</div>
-              <span className={'adm-pill ' + (status === 'Approved' ? 'ok' : status === 'Pending' ? 'warn' : 'bad')} style={{ marginTop: 6, display: 'inline-block' }}>{status}</span>
-              {paid && <span className="adm-pill paid" style={{ marginTop: 6, marginLeft: 6, display: 'inline-block' }}><Icon name="check" size={11} stroke={3} /> Paid</span>}
-            </div>
-          </div>
-          <div className="adm-cust-stats">
-            <div><span className="muted">Sales</span><b>{aff[2]}</b></div>
-            <div><span className="muted">Total earned</span><b>{naira(aff[3])}</b></div>
-            <div><span className="muted">Commission</span><b>10%</b></div>
-          </div>
-          <h4 className="adm-sec-label">Payout history</h4>
-          <div className="adm-cust-orders">
-            {payouts.length === 0
-              ? <small className="muted">No payouts yet.</small>
-              : payouts.map((p, i) => (
-              <div className="adm-cust-order" key={i}>
-                <div><b>{naira(p[1])}</b><small className="muted">{p[0]}</small></div>
-                <span className="adm-pill ok">{p[2]}</span>
-                <button className="adm-btn ghost sm" onClick={() => addToast('Statement downloaded')}><Icon name="download" size={14} /></button>
-              </div>
-            ))}
-          </div>
-          <div className="adm-drawer-foot">
-            {status === 'Pending' && <>
-              <button className="adm-btn danger" onClick={() => { act('Suspended', aff[0] + ' rejected'); onClose(); }}><Icon name="close" size={15} /> Reject</button>
-              <button className="adm-btn primary" onClick={() => act('Approved', aff[0] + ' approved')}><Icon name="check" size={15} /> Approve</button>
-            </>}
-            {status === 'Approved' && <>
-              <button className="adm-btn danger" onClick={() => act('Suspended', aff[0] + ' suspended')}><Icon name="close" size={15} /> Suspend</button>
-              {paid
-                ? <button className="adm-btn ghost" disabled><Icon name="check" size={15} /> Paid out</button>
-                : <button className="adm-btn primary" onClick={() => { onPay && onPay(); addToast('Payout of ' + naira(aff[3]) + ' sent to ' + aff[0]); }}><Icon name="dollar" size={15} /> Process payout</button>}
-            </>}
-            {status === 'Suspended' && <button className="adm-btn primary" onClick={() => act('Approved', aff[0] + ' reinstated')}><Icon name="refresh" size={15} /> Reinstate</button>}
-          </div>
-        </div>
-      </aside>
-    </>
-  );
-}
-
-function InviteAffiliateDrawer({ onClose }) {
-  const addToast = useAdminToast();
-  const [f, setF] = useState({ name: '', email: '', channel: '', rate: '10' });
-  const set = (k, v) => setF(s => ({ ...s, [k]: v }));
-  const send = () => {
-    if (!f.name.trim() || !/^\S+@\S+\.\S+$/.test(f.email)) { addToast('Enter a name and valid email'); return; }
-    addToast('Invite sent to ' + f.email);
-    onClose();
-  };
-  return (
-    <>
-      <div className="adm-drawer-scrim" onClick={onClose} />
-      <div className="adm-modal" role="dialog" aria-label="Invite affiliate">
-        <div className="adm-drawer-h"><h3>Invite affiliate</h3><button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button></div>
-        <div className="adm-drawer-body">
-          <label className="adm-field"><span>Full name</span><input value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Chidinma Okeke" /></label>
-          <label className="adm-field"><span>Email</span><input value={f.email} onChange={e => set('email', e.target.value)} placeholder="affiliate@email.com" /></label>
-          <label className="adm-field"><span>Primary channel</span><input value={f.channel} onChange={e => set('channel', e.target.value)} placeholder="e.g. Instagram · 84k" /></label>
-          <label className="adm-field"><span>Commission rate (%)</span><input type="number" value={f.rate} onChange={e => set('rate', e.target.value)} /></label>
-          <div className="adm-drawer-foot">
-            <button className="adm-btn ghost" onClick={onClose}>Cancel</button>
-            <button className="adm-btn primary" onClick={send}><Icon name="mail" size={15} /> Send invite</button>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-export function AdminAffiliates() {
-  const addToast = useAdminToast();
-  const highlight = useSearchParams().get('highlight');
-  useHighlight(highlight);
-  const [view, setView] = useState(null);
-  const [invite, setInvite] = useState(false);
-  const [statusMap, setStatusMap] = useState({});
-  const [paidMap, setPaidMap] = useState({});
-  const [q, setQ] = useState('');
-  const [tab, setTab] = useState('All');
-  const stOf = (a) => statusMap[a[0]] || a[4];
-  const setSt = (a, s) => setStatusMap(m => ({ ...m, [a[0]]: s }));
-  const markPaid = (a) => setPaidMap(m => ({ ...m, [a[0]]: true }));
-  const tabs = ['All', 'Approved', 'Pending', 'Suspended'];
-  const list = ADMIN_AFFILIATES.filter(a => (tab === 'All' || stOf(a) === tab) && (!q || a[0].toLowerCase().includes(q.toLowerCase()) || a[1].toLowerCase().includes(q.toLowerCase())));
-  const [pg, setPg] = useState(1);
-  const perPage = 10;
-  const pages = Math.max(1, Math.ceil(list.length / perPage));
-  const cur = Math.min(pg, pages);
-  const shown = list.slice((cur - 1) * perPage, cur * perPage);
-  useEffect(() => { setPg(1); }, [q, tab]);
-  return (
-    <>
-      <AdmHead title="Affiliates" sub="Manage partners, commissions and payouts"><button className="adm-btn primary" onClick={() => setInvite(true)}><Icon name="plus" size={15} /> Invite affiliate</button></AdmHead>
-      <div className="kpi-grid">
-        <Kpi ic="share" tint="#0438B6" label="Active affiliates" val={ADMIN_AFFILIATES.length} delta="" up />
-        <Kpi ic="dollar" tint="#1F8A5B" label="Affiliate revenue" val={naira(0)} delta="" up />
-        <Kpi ic="eye" tint="#F67208" label="Avg conversion" val="0%" delta="" up />
-        <Kpi ic="truck" tint="#7A5AE0" label="Pending payouts" val={naira(0)} delta="" up />
-      </div>
-      <div className="adm-filters">
-        <div className="adm-mini-search"><Icon name="search" size={16} className="muted" /><input placeholder="Search affiliates or channel…" value={q} onChange={e => setQ(e.target.value)} /></div>
-        {tabs.map(t => <button key={t} className={'adm-chip' + (tab === t ? ' on' : '')} onClick={() => setTab(t)}>{t}</button>)}
-      </div>
-      <div className="panel" style={{ padding: 0 }}>
-        <div className="panel-h" style={{ padding: '18px 20px 0' }}><h3>All affiliates <span className="muted" style={{ fontWeight: 400 }}>· {list.length}</span></h3></div>
-        <div className="adm-table-wrap"><table className="adm-table">
-          <thead><tr><th>Affiliate</th><th>Channel</th><th>Sales</th><th>Earnings</th><th>Status</th><th></th></tr></thead>
-          <tbody>{shown.map((a, i) => { const st = stOf(a); return (
-            <tr key={i} data-hlkey={a[0]}>
-              <td><div className="adm-prod"><span className="adm-li-av">{a[0].split(' ').map(w => w[0]).join('').slice(0, 2)}</span><div><b>{a[0]}</b></div></div></td>
-              <td className="muted">{a[1]}</td><td>{a[2]}</td><td><b>{naira(a[3])}</b></td>
-              <td><span className={'adm-pill ' + (st === 'Approved' ? 'ok' : st === 'Pending' ? 'warn' : 'bad')}>{st}</span>{paidMap[a[0]] && <span className="adm-pill paid" style={{ marginLeft: 6 }}><Icon name="check" size={11} stroke={3} /> Paid</span>}</td>
-              <td><div className="adm-rowact">{st === 'Pending' ? <><button title="Approve" onClick={() => { setSt(a, 'Approved'); addToast(a[0] + ' approved'); }}><Icon name="check" size={15} /></button><button className="del" title="Reject" onClick={() => { setSt(a, 'Suspended'); addToast(a[0] + ' rejected'); }}><Icon name="close" size={15} /></button></> : <><button title="View" onClick={() => setView(a)}><Icon name="eye" size={15} /></button><button title="Pay out" className={paidMap[a[0]] ? 'paid' : ''} onClick={() => { markPaid(a); addToast('Payout of ' + naira(a[3]) + ' sent to ' + a[0]); }}><Icon name="dollar" size={15} /></button></>}</div></td>
-            </tr>
-          ); })}</tbody>
-        </table>{list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No affiliates match your search.</div>}
-        <Pager page={cur} pages={pages} onPage={setPg} /></div>
-      </div>
-      {view && <AffiliateDrawer aff={view} status={stOf(view)} paid={!!paidMap[view[0]]} onStatusChange={(s) => setSt(view, s)} onPay={() => markPaid(view)} onClose={() => setView(null)} />}
-      {invite && <InviteAffiliateDrawer onClose={() => setInvite(false)} />}
-    </>
-  );
-}
+/* ---------- AFFILIATES ----------
+   Moved to its own file now that it's wired to the real backend (matches
+   AdminDelivery.jsx/AdminReturns.jsx/AdminSupport.jsx/AdminElo.jsx being
+   pulled out of their shared files for the same reason) — see
+   components/admin/AdminAffiliates.jsx. */
 
 /* ---------- REFERRALS ---------- */
 export function AdminReferrals() {
