@@ -73,6 +73,9 @@ let ADMIN_EXTRA_CATS = [];
 export const mapAdminProduct = (p) => {
   const flatVariants = Array.isArray(p.variants) ? p.variants.filter(v => v && typeof v === 'object') : [];
   const localGroups = getVariants(p.id);
+  const firstImg = Array.isArray(p.images) ? p.images[0] : null;
+  const imageUrl = typeof firstImg === 'string' ? firstImg : firstImg?.url || firstImg?.path;
+  if (p.id && imageUrl && !REAL_IMG[p.id]) REAL_IMG[p.id] = imageUrl;
   return {
     id: p.id,
     slug: p.slug,
@@ -143,7 +146,7 @@ export async function saveAdminProduct(d, toast) {
       stock: Math.max(0, Number(rec.stock) || 0),
     };
   });
-  const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft', variants: variantsPayload };
+  const body = { category_id: catObj?.id ?? d._raw?.category?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft', variants: variantsPayload };
   if (!sourced) body.price = Number(d.price) || 0;
 
   let productId = d.id;

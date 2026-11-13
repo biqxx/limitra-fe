@@ -12,8 +12,10 @@ import { productsApi } from '@/lib/api/endpoints';
 import { comboKey, groupsFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
 
 function mapProductDetails(product) {
-  const firstImage = Array.isArray(product.images) ? product.images[0] : null;
-  const imageUrl = typeof firstImage === 'string' ? firstImage : firstImage?.url || firstImage?.path;
+  const imageUrls = Array.isArray(product.images)
+    ? product.images.map(img => (typeof img === 'string' ? img : img?.url || img?.path)).filter(Boolean)
+    : [];
+  const imageUrl = imageUrls[0];
   // The real backend returns `variants` as a flat array of per-SKU records
   // ({sku, attributes, stock}, confirmed live via a 422 on product creation)
   // — NOT the {name,type,options} "attribute group" shape this page renders
@@ -31,10 +33,13 @@ function mapProductDetails(product) {
 
   return {
     id: product.id,
+    slug: product.slug || String(product.id),
     name: product.name,
     brand: product.brand || '',
+    category: product.category?.slug || 'all',
     price: Number(product.price) || 0,
     was: Number(product.compare_at_price) || 0,
+    off: Number(product.discount_percentage) || 0,
     stock: Number(product.stock) || 0,
     desc: product.description || '',
     description: product.description || '',
@@ -42,6 +47,7 @@ function mapProductDetails(product) {
     rating: Number(product.average_rating ?? product.rating) || 0,
     reviews: Number(product.review_count ?? product.reviews_count ?? product.reviews) || 0,
     bestseller: Boolean(product.is_bestseller),
+    images: imageUrls,
     specs,
     variants,
     variantStock,
@@ -55,11 +61,14 @@ function Gallery({ product, variantKey }) {
   const [lightbox, setLightbox] = useState(false);
   const isMobile = () => window.matchMedia('(max-width: 767px)').matches;
   const real = REAL_IMG[product.id];
-  const gImgs = null;
+  const gImgs = Array.isArray(product.images) && product.images.length > 0
+    ? product.images
+    : (real ? [real] : null);
   const angles = ['front', 'back', 'side', 'detail'];
+  const thumbItems = gImgs || angles;
   const vid = (VIDEOS || []).find(v => (v.products || []).includes(product.id));
-  const VIDEO_TAB = angles.length; // index for the video view
-  useEffect(() => { if (active >= angles.length) setActive(0); }, [variantKey]);
+  const VIDEO_TAB = thumbItems.length; // index for the video view
+  useEffect(() => { if (active >= thumbItems.length) setActive(0); }, [variantKey, thumbItems.length, active]);
   const move = e => {
     if (isMobile()) return;
     const r = e.currentTarget.getBoundingClientRect();
@@ -74,9 +83,9 @@ function Gallery({ product, variantKey }) {
   return (
     <div className="gallery">
       <div className="g-thumbs">
-        {angles.map((a, i) => (
+        {thumbItems.map((item, i) => (
           <button key={i} className={'g-thumb' + (active === i ? ' on' : '')} onClick={() => setActive(i)}>
-            {gImgs ? <img src={gImgs[i]} alt="" /> : (real && i === 0 ? <img src={real} alt="" /> : <Placeholder product={product} label={a} />)}
+            {gImgs ? <img src={item} alt="" /> : <Placeholder product={product} label={item} />}
           </button>
         ))}
         {vid && (
@@ -94,10 +103,8 @@ function Gallery({ product, variantKey }) {
           {product.badges?.includes('new') && <span className="badge badge-new">New</span>}
         </div>
         {gImgs
-          ? <img src={gImgs[active]} alt={product.name} className="g-img g-img-contain" />
-          : (real && active === 0
-            ? <img src={real} alt={product.name} className="g-img" />
-            : <div className="g-img"><Placeholder product={product} label={angles[active]} /></div>)}
+          ? <img src={gImgs[active] || gImgs[0]} alt={product.name} className="g-img g-img-contain" />
+          : <div className="g-img"><Placeholder product={product} label={angles[active] || angles[0]} /></div>}
         <span className="g-zoom-hint"><Icon name="zoom" size={15} /> Tap to view</span>
       </div>
       )}
@@ -106,15 +113,13 @@ function Gallery({ product, variantKey }) {
           <button className="g-lightbox-x" onClick={() => setLightbox(false)} aria-label="Close"><Icon name="close" size={22} /></button>
           <div className="g-lightbox-img" onClick={e => e.stopPropagation()}>
             {gImgs
-              ? <img src={gImgs[active]} alt={product.name} />
-              : (real && active === 0
-                ? <img src={real} alt={product.name} />
-                : <Placeholder product={product} label={angles[active]} />)}
+              ? <img src={gImgs[active] || gImgs[0]} alt={product.name} />
+              : <Placeholder product={product} label={angles[active] || angles[0]} />}
           </div>
           <div className="g-lightbox-thumbs" onClick={e => e.stopPropagation()}>
-            {angles.map((a, i) => (
+            {thumbItems.map((item, i) => (
               <button key={i} className={'g-thumb' + (active === i ? ' on' : '')} onClick={() => setActive(i)}>
-                {gImgs ? <img src={gImgs[i]} alt="" /> : (real && i === 0 ? <img src={real} alt="" /> : <Placeholder product={product} label={a} />)}
+                {gImgs ? <img src={item} alt="" /> : <Placeholder product={product} label={item} />}
               </button>
             ))}
           </div>
@@ -137,16 +142,16 @@ function ReviewBreakdown({ product }) {
 }
 
 export function ProductPage({ id }) {
-  const { go, addToCart, toggleWish, wish, cart } = useStore();
+  const { go, addToCart, toggleWish, wish, catalogLoading } = useStore();
   const catalogProduct = bySlug(id) || byId(id);
   const [productDetails, setProductDetails] = useState(null);
-  const productId = catalogProduct?.id;
-  const product = useMemo(
-    () => catalogProduct && productDetails?.id === productId
-      ? { ...catalogProduct, ...productDetails }
-      : catalogProduct,
-    [catalogProduct, productDetails, productId]
-  );
+  const [detailLoading, setDetailLoading] = useState(true);
+  const product = useMemo(() => {
+    if (catalogProduct && productDetails && (productDetails.id === catalogProduct.id || productDetails.slug === catalogProduct.slug)) {
+      return { ...catalogProduct, ...productDetails };
+    }
+    return productDetails || catalogProduct || null;
+  }, [catalogProduct, productDetails]);
   // Variation groups are defined per-product by whoever uploaded it (admin ->
   // AdminCatalog's ProductEditDrawer) — a group only renders when the product
   // actually has one, so a plain accessory with no colour/size shows none.
@@ -156,17 +161,19 @@ export function ProductPage({ id }) {
   const [qty, setQty] = useState(1);
   const [tab, setTab] = useState('desc');
   useEffect(() => {
-    if (!productId) return;
+    if (!id) { setDetailLoading(false); return; }
 
     let cancelled = false;
-    productsApi.get(productId)
+    setDetailLoading(true);
+    productsApi.get(id)
       .then(details => {
         if (!cancelled && details) setProductDetails(mapProductDetails(details));
       })
-      .catch(() => { /* the safe catalog shape remains usable if detail loading fails */ });
+      .catch(() => { /* the safe catalog shape remains usable if detail loading fails */ })
+      .finally(() => { if (!cancelled) setDetailLoading(false); });
 
     return () => { cancelled = true; };
-  }, [productId]);
+  }, [id]);
   const related = product ? byCat(product.category).filter(p => p.id !== product.id).slice(0, 5) : [];
   const faved = !!product && wish.includes(product.id);
   useEffect(() => {
@@ -176,13 +183,22 @@ export function ProductPage({ id }) {
     setSelected(defaults);
     setQty(1);
     setTab('desc');
-  }, [id, product]);
+  }, [id, product?.id]);
+
+  if (!product && (catalogLoading || detailLoading)) {
+    return (
+      <div className="page page-fade"><div className="wrap">
+        <Breadcrumbs items={[{ label: 'Home', to: ['home'] }, { label: 'Product' }]} />
+        <p className="muted" style={{ padding: '40px 0' }}>Loading product…</p>
+      </div></div>
+    );
+  }
 
   if (!product) {
     return (
       <div className="page page-fade"><div className="wrap">
         <Breadcrumbs items={[{ label: 'Home', to: ['home'] }, { label: 'Product' }]} />
-        <EmptyState icon="package" title="Product catalog isn't available yet" body="We're still connecting the product catalog to Limitra. Check back soon." action="Back to shop" onAction={() => go('shop', 'all')} />
+        <EmptyState icon="package" title="Product not found" body="This product may have been removed or is not yet published." action="Back to shop" onAction={() => go('shop', 'all')} />
       </div></div>
     );
   }
@@ -204,6 +220,7 @@ export function ProductPage({ id }) {
     : null;
   const comboStock = comboStockRec ? Number(comboStockRec.stock) || 0 : null;
   const comboOutOfStock = comboStock != null && comboStock <= 0;
+  const outOfStock = comboOutOfStock || (!variants.length && product.stock <= 0);
   const buy = (checkout) => {
     const selectedVariants = {};
     variants.forEach(g => {
@@ -211,7 +228,12 @@ export function ProductPage({ id }) {
       if (sel == null) return;
       selectedVariants[g.name] = g.type === 'color' ? { label: sel.name, hex: sel.hex } : { label: sel.label };
     });
-    addToCart(product, { variants: selectedVariants, unitPrice: price }, qty);
+    addToCart(product, {
+      variants: selectedVariants,
+      unitPrice: price,
+      variantId: comboStockRec?.id ?? null,
+      selectedOptions: selectedAttributes,
+    }, qty);
     if (checkout) go('checkout');
   };
 
@@ -277,8 +299,8 @@ export function ProductPage({ id }) {
 
           <div className="buy-row">
             <QtyStepper value={qty} onChange={q => setQty(Math.max(1, q))} />
-            <button className="btn btn-primary btn-lg" style={{ flex: 1 }} disabled={comboOutOfStock} onClick={() => buy(false)}><Icon name="cart" size={18} /> Add to cart</button>
-            <button className="btn btn-accent btn-lg" style={{ flex: 1 }} disabled={comboOutOfStock} onClick={() => buy(true)}>Buy now</button>
+            <button className="btn btn-primary btn-lg" style={{ flex: 1 }} disabled={outOfStock} onClick={() => buy(false)}><Icon name="cart" size={18} /> Add to cart</button>
+            <button className="btn btn-accent btn-lg" style={{ flex: 1 }} disabled={outOfStock} onClick={() => buy(true)}>Buy now</button>
             <ShareButton product={product} className="btn btn-outline btn-lg share-btn icon-only" compact />
           </div>
           {comboOutOfStock
@@ -351,8 +373,8 @@ export function ProductPage({ id }) {
 
       <div className="pdp-stickybar">
         <ShareButton product={product} className="psb-share" compact />
-        <button className="btn btn-primary psb-cart" onClick={() => buy(false)}><Icon name="cart" size={18} /> Add to cart</button>
-        <button className="btn btn-accent psb-buy" onClick={() => buy(true)}>Buy now</button>
+        <button className="btn btn-primary psb-cart" disabled={outOfStock} onClick={() => buy(false)}><Icon name="cart" size={18} /> Add to cart</button>
+        <button className="btn btn-accent psb-buy" disabled={outOfStock} onClick={() => buy(true)}>Buy now</button>
       </div>
     </div>
   );
