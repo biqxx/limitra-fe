@@ -6,6 +6,7 @@ import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { AFFILIATE_RATES, COMMISSION_CATEGORIES, ORDERS_COUNT_YES, ORDERS_COUNT_NO } from '@/lib/creatorPrograms';
 import { CreatorProgramSwitcher, CommissionTable, WhichOrdersCount, ApplySection } from '@/components/pages/CreatorPrograms';
+import { affiliateApi } from '@/lib/api/endpoints';
 
 export function AffiliatePage() {
   const scrollToApply = () => {
@@ -130,6 +131,17 @@ export function AffiliatePage() {
           rateNote: 'Free to join · up to 5% commission on a rolling 90-day basis.',
           codePrefix: 'LUCY',
           termsLabel: 'Affiliate',
+          // Exact field names POST /affiliate/applications expects aren't
+          // documented (empty request schema) — mapped from the form's own
+          // fields; revisit against the first real submission's response.
+          onSubmit: (f) => affiliateApi.apply({
+            full_name: f.name,
+            email: f.email,
+            channel: f.channel,
+            handle: f.handle,
+            audience_size: f.audience,
+            about: f.about || undefined,
+          }),
         }}
       />
 

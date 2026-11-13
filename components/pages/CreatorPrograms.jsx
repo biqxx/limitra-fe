@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { Icon, Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { CREATOR_PROGRAMS } from '@/lib/creatorPrograms';
+import { messageFrom } from '@/lib/api/errors';
 
 const CP_PHOTO = '/assets/img/a09d96b52fb7936342b34355ffca656885ce52ff.png';
 
@@ -137,14 +138,16 @@ function CreatorField({ label, value, onChange, err, placeholder, type = 'text',
   );
 }
 
-export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions on a rolling 90-day basis.', codePrefix = 'LIM', termsLabel = 'Affiliate', successBody }) {
+export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions on a rolling 90-day basis.', codePrefix = 'LIM', termsLabel = 'Affiliate', successBody, onSubmit, pendingBody }) {
   const { toast } = useStore();
   const [f, setF] = useState({ name: '', email: '', channel: 'instagram', handle: '', audience: '10k-50k', about: '' });
   const [errs, setErrs] = useState({});
   const [done, setDone] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [code] = useState(codePrefix + Math.floor(100 + Math.random() * 900));
 
-  const submit = e => {
+  const submit = async e => {
     e.preventDefault();
     const er = {};
     if (!f.name.trim()) er.name = 'Enter your full name';
@@ -152,9 +155,36 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
     if (!f.handle.trim()) er.handle = 'Add your channel / page link';
     setErrs(er);
     if (Object.keys(er).length) return;
+    // onSubmit (real API call, currently only passed for the Affiliate program —
+    // MicroStores/Celebrity Stores keep the old instant-fake-success behavior
+    // until they have their own real endpoint) posts the application for admin
+    // review, so there is no referral link/login to show yet — only a real
+    // approval (adminAffiliatesApi.approveApplication) grants one.
+    if (onSubmit) {
+      setBusy(true);
+      try {
+        await onSubmit(f);
+        setPending(true);
+      } catch (error) {
+        setErrs({ form: messageFrom(error) });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setDone(true);
     toast('Application submitted!');
   };
+
+  if (pending) {
+    return (
+      <div className="aff-success card">
+        <div className="success-check" style={{ width: 72, height: 72, marginBottom: 20 }}><Icon name="clock" size={36} stroke={3} /></div>
+        <h3 style={{ fontSize: 24 }}>Application received, {f.name.split(' ')[0]}!</h3>
+        <p className="muted" style={{ marginTop: 8 }}>{pendingBody || 'Our partner team reviews every application — we’ll email you at ' + f.email + ' once yours is approved.'}</p>
+      </div>
+    );
+  }
 
   if (done) {
     const link = 'limitra.com.ng/r/' + code;
@@ -206,7 +236,8 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
           <textarea className="input" rows={3} style={{ resize: 'vertical', fontFamily: 'inherit' }} value={f.about} placeholder="Who follows you and what do they love to shop for?" onChange={e => setF(s => ({ ...s, about: e.target.value }))} />
         </div>
       </div>
-      <button className="btn btn-primary btn-block btn-lg" type="submit" style={{ marginTop: 18 }}>Submit application <Icon name="arrowr" size={18} /></button>
+      {errs.form && <p className="err-msg" style={{ marginTop: 10 }}>{errs.form}</p>}
+      <button className="btn btn-primary btn-block btn-lg" type="submit" disabled={busy} style={{ marginTop: 18 }}>{busy ? 'Submitting…' : 'Submit application'} <Icon name="arrowr" size={18} /></button>
       <p className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 12 }}>By applying you agree to the {termsLabel} <a className="link-btn" style={{ display: 'inline' }}>Terms</a>.</p>
     </form>
   );
