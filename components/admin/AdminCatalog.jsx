@@ -845,45 +845,17 @@ export function AdminCoupons() {
         </table><Pager page={cpPage} pages={cpPages} onPage={cpSet} /></div>
       </div>
       {edit && <CouponModal draft={edit} onClose={() => setEdit(null)} onSave={save} />}
-      <AffPromoAdmin />
     </>
   );
 }
 
-function AffPromoAdmin() {
-  const addToast = useAdminToast();
-  const [max, setMax] = useState(1);
-  const [codes, setCodes] = useState([]);
-  useEffect(() => {
-    try { setMax(parseInt(localStorage.getItem('lim_aff_promo_max') || '1', 10)); } catch (e) {}
-    try { setCodes(JSON.parse(localStorage.getItem('lim_aff_promos') || '[]')); } catch (e) {}
-  }, []);
-  const saveMax = (v) => { const n = Math.max(0, Math.min(10, v)); setMax(n); localStorage.setItem('lim_aff_promo_max', String(n)); addToast('Affiliates can now create ' + n + ' code' + (n !== 1 ? 's' : '')); };
-  const removeCode = (code) => { const next = codes.filter(c => c.code !== code); setCodes(next); localStorage.setItem('lim_aff_promos', JSON.stringify(next)); addToast('Affiliate code removed'); };
-  return (
-    <div style={{ marginTop: 24 }}>
-      <div className="adm-row c2" style={{ alignItems: 'start' }}>
-        <div className="panel">
-          <div className="panel-h"><h3>Affiliate promo codes</h3></div>
-          <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.6, marginBottom: 16 }}>Control how many promo codes each affiliate may create from their dashboard. Codes apply at checkout and are attributed to the affiliate.</p>
-          <div className="adm-li"><div className="adm-li-main"><b>Codes allowed per affiliate</b><small>Super-admin controlled · 0 disables</small></div>
-            <div className="aff-max-stepper"><button onClick={() => saveMax(max - 1)} disabled={max <= 0}><Icon name="minus" size={15} /></button><span>{max}</span><button onClick={() => saveMax(max + 1)} disabled={max >= 10}><Icon name="plus" size={15} /></button></div>
-          </div>
-        </div>
-        <div className="panel" style={{ padding: 0 }}>
-          <div className="panel-h" style={{ padding: '18px 20px 0' }}><h3>Active affiliate codes <span className="muted" style={{ fontWeight: 400 }}>· {codes.length}</span></h3></div>
-          <div className="adm-table-wrap"><table className="adm-table">
-            <thead><tr><th>Code</th><th>Affiliate</th><th>Discount</th><th>Uses</th><th></th></tr></thead>
-            <tbody>{codes.map((c, i) => (
-              <tr key={i}><td><b style={{ fontFamily: 'var(--font-display)', letterSpacing: '.03em' }}>{c.code}</b></td><td className="muted">{c.affName}</td><td>{Math.round(c.pct * 100)}%</td><td>{c.uses || 0}</td>
-                <td><div className="adm-rowact"><button className="del" title="Revoke" onClick={() => removeCode(c.code)}><Icon name="trash" size={15} /></button></div></td></tr>
-            ))}</tbody>
-          </table>{codes.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-faint)' }}>No affiliate codes created yet.</div>}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// AffPromoAdmin (the "codes allowed per affiliate" control) used to live here,
+// reading/writing localStorage keys the customer-facing affiliate dashboard
+// no longer touches now that it creates real promo codes via adminAffiliatesApi
+// instead — that control now lives in AdminAffiliates.jsx's Rules tab, wired
+// to the real GET/PATCH /admin/affiliate-rules. There's no endpoint to list
+// every affiliate's codes platform-wide, so the old "Active affiliate codes"
+// table (which would now always read empty anyway) wasn't carried over.
 
 function CouponModal({ draft, onClose, onSave }) {
   const [f, setF] = useState(draft);

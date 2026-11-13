@@ -10,6 +10,8 @@
    - AdminDelivery.jsx    (implied: Delivery & Shipping)
    - AdminReturns.jsx     (implied: Returns & Refunds)
    - AdminElo.jsx         (implied: Elo AI)
+   - AdminSupport.jsx     (implied: Support Tickets)
+   - AdminAffiliates.jsx  (implied: Affiliates)
    - AdminEngagement.jsx  Spin & Win, Videos
    - AdminSystem.jsx      Content (CMS), Roles & Access, Reports
    - AdminActivity.jsx    Activity log (no sidebar entry, still routable)
@@ -22,8 +24,10 @@ export { AdminCategories } from './AdminCategories';
 export { AdminDelivery } from './AdminDelivery';
 export { AdminReturns } from './AdminReturns';
 export { AdminElo } from './AdminElo';
+export { AdminSupport } from './AdminSupport';
 export { AdminPricing } from './AdminPricing';
-export { AdminCustomers, AdminAffiliates, AdminReferrals } from './AdminPeople';
+export { AdminCustomers, AdminReferrals } from './AdminPeople';
+export { AdminAffiliates } from './AdminAffiliates';
 export { AdminSpin, AdminVideos } from './AdminEngagement';
 export { AdminCMS, AdminRoles, AdminReports } from './AdminSystem';
 export { AdminActivity } from './AdminActivity';
