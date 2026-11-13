@@ -325,7 +325,14 @@ export function StoreProvider({ children }) {
   /* routing */
   useEffect(() => { window.scrollTo({ top: 0 }); }, [pathname]);
   const go = useCallback((name, ...params) => {
-    router.push(routeFor(name, params));
+    const target = routeFor(name, params);
+    if (typeof window !== 'undefined') {
+      const current = `${window.location.pathname}${window.location.search}`;
+      if (target !== current) {
+        window.dispatchEvent(new Event('lim:nav-start'));
+      }
+    }
+    router.push(target);
   }, [router]);
 
   /* persistence — gated on `hydrated` (see the hydrate effect above) so a

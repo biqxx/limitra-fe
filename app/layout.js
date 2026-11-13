@@ -1,5 +1,7 @@
+import { Suspense } from 'react';
 import { Quicksand } from 'next/font/google';
 import '@/styles/styles.css';
+import TopProgressBar from '@/components/ui/TopProgressBar';
 
 const quicksand = Quicksand({
   subsets: ['latin'],
@@ -15,7 +17,12 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={quicksand.variable}>
-      <body>{children}</body>
+      <body>
+        <Suspense fallback={null}>
+          <TopProgressBar />
+        </Suspense>
+        {children}
+      </body>
     </html>
   );
 }

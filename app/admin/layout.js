@@ -89,7 +89,12 @@ function AdminShell({ children }) {
   // No pending-affiliate-applications backend yet — real zero rather than a fake badge count.
   const counts = { orders: ADMIN_ORDERS.filter(o => o.status === 'Pending').length, affiliates: 0 };
 
-  const goTo = (key) => { router.push(pathForKey(key)); setMobOpen(false); };
+  const goTo = (key) => {
+    const target = pathForKey(key);
+    if (target !== pathname && typeof window !== 'undefined') window.dispatchEvent(new Event('lim:nav-start'));
+    router.push(target);
+    setMobOpen(false);
+  };
   const notifClick = (i, nf) => {
     setNotifs(ns => ns.map((x, j) => j === i ? { ...x, read: true } : x));
     if (nf.go) {
@@ -120,7 +125,9 @@ function AdminShell({ children }) {
                 <div className="adm-nav-grp">{grp}</div>
                 {items.map(([key, label, ic]) => {
                   const base = pathForKey(key);
-                  const on = pathname === base || pathname.startsWith(base + '/');
+                  const on = key === 'dashboard'
+                    ? pathname === base
+                    : pathname === base || pathname.startsWith(base + '/');
                   return (
                     <button key={key} className={'adm-link' + (on ? ' on' : '')} onClick={() => goTo(key)} title={label}>
                       <Icon name={ic} size={18} /><span>{label}</span>

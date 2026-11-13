@@ -83,11 +83,11 @@
 
 /* gallery */
 .gallery { display: grid; grid-template-columns: 78px 1fr; gap: 16px; position: sticky; top: calc(var(--header-h) + 16px); }
-.g-thumbs { display: flex; flex-direction: column; gap: 12px; }
-.g-thumb { width: 78px; height: 78px; border-radius: var(--r-md); overflow: hidden; border: 2px solid var(--border); background: var(--surface-2); transition: border-color .15s; }
+.g-thumbs { position: absolute; top: 0; bottom: 0; left: 0; width: 78px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.g-thumb { width: 78px; height: 78px; flex: 0 0 auto; border-radius: var(--r-md); overflow: hidden; border: 2px solid var(--border); background: var(--surface-2); transition: border-color .15s; }
 .g-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .g-thumb.on { border-color: var(--primary); }
-.g-main { position: relative; aspect-ratio: 1/1; border-radius: var(--r-xl); overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); cursor: zoom-in; }
+.g-main { grid-column: 2; position: relative; aspect-ratio: 1/1; border-radius: var(--r-xl); overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); cursor: zoom-in; }
 .g-img { width: 100%; height: 100%; object-fit: cover; transition: transform .25s var(--ease); }
 .g-main-contain { background: #fff; }
 .g-img-contain { object-fit: contain; padding: 6%; background: #fff; }
@@ -271,7 +271,7 @@
   .mobile-filter { display: inline-flex; }
   .shop-grid { grid-template-columns: repeat(3, 1fr); }
   .pdp { grid-template-columns: 1fr; gap: 30px; }
-  .gallery { position: static; }
+  .gallery { position: relative; top: 0; }
 }
 @media (max-width: 767px) {
   .shop-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
@@ -300,6 +300,7 @@
   .lc-buy .btn { margin-top: 0 !important; width: 100%; justify-content: center; }
   .lc-buy .btn-ghost { display: inline-flex; }
   .gallery { grid-template-columns: 60px 1fr; gap: 10px; }
+  .g-thumbs { width: 60px; gap: 8px; }
   .g-thumb { width: 60px; height: 60px; }
   .pdp-price .now { font-size: 28px; }
   .pdp-info { display: flex; flex-direction: column; }
