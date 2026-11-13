@@ -125,7 +125,26 @@ export function CartPage() {
         <div className="cart-items">
           {cart.map(it => {
             const p = byId(it.id) || it.product;
-            if (!p) return null;
+            if (!p) {
+              return (
+                <div className="cart-item" key={it.key}>
+                  <div className="ci-thumb"><Thumb product={null} /></div>
+                  <div className="ci-info">
+                    <span className="pc-brand">Unavailable</span>
+                    <h4>This product has been removed</h4>
+                    <div className="ci-meta">
+                      <span className="row" style={{ gap: 5, color: 'var(--red)' }}><Icon name="info" size={13} /> No longer available</span>
+                    </div>
+                    <div className="ci-bottom">
+                      <button className="ci-remove" onClick={() => { removeItem(it.key); toast('Removed from cart'); }}><Icon name="trash" size={16} /> Remove</button>
+                    </div>
+                  </div>
+                  <div className="ci-price">
+                    <b>{it.unitPrice ? naira(it.unitPrice * it.qty) : '—'}</b>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div className="cart-item" key={it.key}>
                 <div className="ci-thumb" onClick={() => go('product', p.id)}><Thumb product={p} src={REAL_IMG[p.id]} /></div>
@@ -629,11 +648,11 @@ export function CheckoutPage() {
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="bag" size={16} /> {cart.reduce((s, i) => s + i.qty, 0)} items</span><button className="link-btn" onClick={() => go('cart')}>Edit cart</button></div>
                 <div className="review-items">
-                  {cart.map(it => { const p = byId(it.id) || it.product; if (!p) return null; return (
+                  {cart.map(it => { const p = byId(it.id) || it.product; return (
                     <div className="rev-item" key={it.key}>
-                      <div className="rev-item-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></div>
-                      <span className="rev-item-name">{p.name}<small className="muted"> × {it.qty}</small></span>
-                      <b>{naira(unitPriceOf(it, p) * it.qty)}</b>
+                      <div className="rev-item-thumb"><Thumb product={p} src={p ? REAL_IMG[p.id] : null} /></div>
+                      <span className="rev-item-name">{p ? p.name : 'Unavailable product'}<small className="muted"> × {it.qty}</small></span>
+                      <b>{p ? naira(unitPriceOf(it, p) * it.qty) : (it.unitPrice ? naira(it.unitPrice * it.qty) : '—')}</b>
                     </div>
                   ); })}
                 </div>

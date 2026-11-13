@@ -305,7 +305,7 @@ function MegaMenu({ onClose }) {
 }
 
 function MiniCart({ open, onClose }) {
-  const { cart, setQty, cartTotal, cartCount, go } = useStore();
+  const { cart, setQty, removeItem, cartTotal, cartCount, go, toast } = useStore();
   return (
     <>
       <div className={'scrim' + (open ? ' on' : '')} onClick={onClose} />
@@ -320,15 +320,18 @@ function MiniCart({ open, onClose }) {
         <>
             <div className="drawer-body">
               {cart.map((it) => {
-              const p = byId(it.id);
+              const p = byId(it.id) || it.product;
               return (
                 <div className="mini-item" key={it.key}>
                     <div className="mini-thumb"><Thumb product={p} src={p ? REAL_IMG[p.id] : null} /></div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="mini-name">{p ? p.name : 'Item unavailable'}</div>
+                      <div className="row between" style={{ gap: 8, alignItems: 'flex-start' }}>
+                        <div className="mini-name">{p ? p.name : 'Item unavailable'}</div>
+                        <button type="button" className="icon-btn" style={{ width: 26, height: 26, flex: 'none' }} aria-label="Remove item" onClick={() => { removeItem(it.key); toast('Removed from cart'); }}><Icon name="trash" size={14} /></button>
+                      </div>
                       <div className="muted" style={{ fontSize: 12, fontFamily: 'var(--font-display)' }}>{Object.values(it.variants || {}).map(v => v.label).filter(Boolean).join(' · ')}</div>
                       <div className="row between" style={{ marginTop: 8 }}>
-                        <QtyStepper size="sm" value={it.qty} onChange={(q) => setQty(it.key, q)} />
+                        {p ? <QtyStepper size="sm" value={it.qty} onChange={(q) => setQty(it.key, q)} /> : <span className="muted" style={{ fontSize: 12 }}>Removed from catalog</span>}
                         <strong style={{ fontFamily: 'var(--font-display)', fontSize: 15 }}>{p ? naira(unitPriceOf(it, p) * it.qty) : '—'}</strong>
                       </div>
                     </div>

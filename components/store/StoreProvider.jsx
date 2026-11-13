@@ -459,23 +459,23 @@ export function StoreProvider({ children }) {
       return;
     }
     try {
-      if (qty <= 0) await cartApi.removeItem(remoteCart?.id, key);
+      if (qty <= 0) await cartItemsApi.remove(key);
       else await cartItemsApi.updateQty(key, qty);
       await refreshRemoteCart();
     } catch (e) {
       toast(messageFrom(e), 'error');
     }
-  }, [isAuthenticated, remoteCart, refreshRemoteCart, toast]);
+  }, [isAuthenticated, refreshRemoteCart, toast]);
 
   const removeItem = useCallback(async (key) => {
     if (!isAuthenticated) { setLocalCart(c => c.filter(i => i.key !== key)); return; }
     try {
-      await cartApi.removeItem(remoteCart?.id, key);
+      await cartItemsApi.remove(key);
       await refreshRemoteCart();
     } catch (e) {
       toast(messageFrom(e), 'error');
     }
-  }, [isAuthenticated, remoteCart, refreshRemoteCart, toast]);
+  }, [isAuthenticated, refreshRemoteCart, toast]);
 
   const clearCart = useCallback(async () => {
     if (!isAuthenticated) { setLocalCart([]); return; }
