@@ -7,7 +7,7 @@ import { SocialMark } from '@/components/ui/SocialMark';
 import { Breadcrumbs, EmptyState, ProductCard } from '@/components/ui/Shared';
 import { Modal, AddressForm, CardForm, CardBrandMark, Field } from '@/components/forms/Shared';
 import { naira, SOCIAL_GLYPHS, byId } from '@/lib/data';
-import { profileApi, ordersApi, favoritesApi, sharedWishlistsApi } from '@/lib/api/endpoints';
+import { profileApi, ordersApi, favoritesApi, sharedWishlistsApi, supportTicketsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
 // GET /orders and /orders/{id} have no documented response shape (generic
@@ -79,6 +79,7 @@ const ACCT_TABS = [
   ['dashboard', 'Dashboard', 'grid'],
   ['orders', 'My orders', 'package'],
   ['tracking', 'Track order', 'truck'],
+  ['support', 'Support tickets', 'headset'],
   ['wishlist', 'Wishlist', 'heart'],
   ['referrals', 'Refer & earn', 'spark'],
   ['rewards', 'My rewards', 'gift'],
@@ -259,6 +260,190 @@ function Orders() {
       {!loaded ? <p className="muted">Loading orders…</p> : list.length === 0
         ? <EmptyState icon="package" title="No orders here" body="Nothing to show for this filter yet." />
         : <div className="acct-panel"><OrderList orders={list} /></div>}
+    </>
+  );
+}
+
+/* ---------------- SUPPORT TICKETS ---------------- */
+function normalizeTicket(t) {
+  return {
+    id: t.id,
+    subject: t.subject ?? t.title ?? 'Support ticket',
+    status: String(t.status ?? 'open').toLowerCase(),
+    priority: t.priority,
+    date: t.updated_at ?? t.created_at,
+  };
+}
+
+function CreateTicketModal({ onClose, onCreate, saving }) {
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  return (
+    <Modal title="New support ticket" onClose={onClose}>
+      <label className="adm-field" style={{ marginBottom: 14 }}><span>Subject</span><input value={subject} onChange={e => setSubject(e.target.value)} placeholder="What do you need help with?" autoFocus /></label>
+      <label className="adm-field"><span>Message</span><textarea rows="5" value={message} onChange={e => setMessage(e.target.value)} placeholder="Describe the issue" /></label>
+      <div className="row" style={{ gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+        <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => onCreate({ subject: subject.trim(), message: message.trim() })} disabled={saving || !subject.trim() || !message.trim()}>{saving ? 'Creating…' : 'Create ticket'}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function TicketThread({ ticketId, onBack, onClosed }) {
+  const { toast } = useStore();
+  const [ticket, setTicket] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [reply, setReply] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const reload = async () => {
+    try {
+      const res = await supportTicketsApi.get(ticketId);
+      setTicket(res?.data ?? res);
+    } catch (e) { setTicket(null); }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await supportTicketsApi.get(ticketId);
+        if (!cancelled) setTicket(res?.data ?? res);
+      } catch (e) {
+        if (!cancelled) setTicket(null);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [ticketId]);
+
+  const sendReply = async () => {
+    if (!reply.trim() || sending) return;
+    setSending(true);
+    try {
+      await supportTicketsApi.message(ticketId, { message: reply.trim() });
+      setReply('');
+      await reload();
+    } catch (e) { toast(messageFrom(e)); } finally { setSending(false); }
+  };
+
+  const closeTicket = async () => {
+    try {
+      await supportTicketsApi.close(ticketId);
+      toast('Ticket closed');
+      await reload();
+      onClosed && onClosed();
+    } catch (e) { toast(messageFrom(e)); }
+  };
+
+  if (!loaded) return <p className="muted">Loading…</p>;
+  if (!ticket) return <EmptyState icon="headset" title="Ticket not found" body="This ticket may have been removed." action="Back to tickets" onAction={onBack} />;
+
+  const t = normalizeTicket(ticket);
+  // Response shape is undocumented — messages array key and each message's
+  // own fields/sender-flag are all read defensively.
+  const messages = ticket.messages ?? ticket.replies ?? [];
+
+  return (
+    <>
+      <div className="row between" style={{ marginBottom: 6, flexWrap: 'wrap', gap: 10 }}>
+        <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="chevleft" size={15} /> All tickets</button>
+        {t.status !== 'closed' && <button className="btn btn-outline btn-sm" onClick={closeTicket}>Close ticket</button>}
+      </div>
+      <h1 style={{ fontSize: 22, marginBottom: 4 }}>{t.subject}</h1>
+      <p className="muted" style={{ marginBottom: 18 }}>Ticket #{t.id} · <StatusPill status={t.status} /></p>
+      <div className="acct-panel" style={{ marginBottom: 18 }}>
+        {(Array.isArray(messages) ? messages : []).length === 0 ? <p className="muted">No messages yet.</p> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {messages.map((m, i) => {
+              const fromStaff = m.is_staff ?? m.from_admin ?? (m.author?.role === 'staff') ?? (m.sender === 'staff');
+              return (
+                <div key={m.id ?? i} style={{ alignSelf: fromStaff ? 'flex-start' : 'flex-end', maxWidth: '80%', background: fromStaff ? 'var(--surface-2)' : 'var(--primary-soft)', borderRadius: 'var(--r-md)', padding: '10px 14px' }}>
+                  <p style={{ margin: 0, fontSize: 13.5 }}>{m.message ?? m.body ?? m.text}</p>
+                  <small className="muted" style={{ fontSize: 11 }}>{fmtDate(m.created_at)}</small>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {t.status !== 'closed' && (
+        <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+          <textarea rows="2" style={{ flex: 1 }} value={reply} onChange={e => setReply(e.target.value)} placeholder="Type a reply…" />
+          <button className="btn btn-primary" onClick={sendReply} disabled={sending || !reply.trim()}>{sending ? 'Sending…' : 'Send'}</button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function SupportTickets() {
+  const { toast } = useStore();
+  const [tickets, setTickets] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [openTicket, setOpenTicket] = useState(null);
+
+  const load = async () => {
+    try {
+      const res = await supportTicketsApi.list();
+      const list = Array.isArray(res) ? res : (res?.data?.items ?? res?.items ?? res?.data ?? []);
+      setTickets((Array.isArray(list) ? list : []).map(normalizeTicket));
+    } catch (e) {
+      setTickets([]);
+    } finally {
+      setLoaded(true);
+    }
+  };
+  // Initial network hydration is intentionally triggered when the page mounts.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, []);
+
+  const createTicket = async (data) => {
+    setSaving(true);
+    try {
+      const res = await supportTicketsApi.create(data);
+      const created = res?.data ?? res;
+      toast('Ticket created');
+      setCreating(false);
+      await load();
+      if (created?.id) setOpenTicket(created.id);
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (openTicket) return <TicketThread ticketId={openTicket} onBack={() => { setOpenTicket(null); load(); }} onClosed={load} />;
+
+  return (
+    <>
+      <div className="row between" style={{ marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+        <h1 style={{ fontSize: 26 }}>Support tickets</h1>
+        <button className="btn btn-primary btn-sm" onClick={() => setCreating(true)}><Icon name="plus" size={15} /> New ticket</button>
+      </div>
+      {!loaded ? <p className="muted">Loading tickets…</p> : tickets.length === 0 ? (
+        <EmptyState icon="headset" title="No support tickets yet" body="Need help with something? Open a ticket and we'll get back to you." action="New ticket" onAction={() => setCreating(true)} />
+      ) : (
+        <div className="order-list">
+          {tickets.map(t => (
+            <div className="order-row" key={t.id} style={{ cursor: 'pointer' }} onClick={() => setOpenTicket(t.id)}>
+              <div className="or-main">
+                <div className="or-id"><b>#{t.id}</b><StatusPill status={t.status} /></div>
+                <span className="muted" style={{ fontSize: 13 }}>{t.subject}</span>
+              </div>
+              <div className="or-meta">
+                <span className="muted" style={{ fontSize: 12.5 }}>{fmtDate(t.date)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {creating && <CreateTicketModal onClose={() => setCreating(false)} onCreate={createTicket} saving={saving} />}
     </>
   );
 }
@@ -538,7 +723,7 @@ function MyRewards() {
 
 export function AccountPage({ tab }) {
   const t = tab || 'dashboard';
-  const map = { dashboard: <Dashboard />, orders: <Orders />, addresses: <Addresses />, payments: <Payments />, profile: <Profile />, referrals: <Referrals />, rewards: <MyRewards /> };
+  const map = { dashboard: <Dashboard />, orders: <Orders />, support: <SupportTickets />, addresses: <Addresses />, payments: <Payments />, profile: <Profile />, referrals: <Referrals />, rewards: <MyRewards /> };
   return <AccountShell active={t}>{map[t] || <Dashboard />}</AccountShell>;
 }
 
@@ -669,8 +854,8 @@ export function TrackingPage({ id }) {
   const current = STEP_INDEX[order.status] ?? 0;
   // Response shape is undocumented — courier/tracking-number fields are read
   // defensively and simply hidden (not fabricated) if the order has neither.
-  const courier = order.raw.courier ?? order.raw.carrier ?? order.raw.delivery_partner;
-  const trackingNumber = order.raw.tracking_number ?? order.raw.tracking_id ?? order.raw.waybill_number;
+  const courier = order.raw.tracking?.courier ?? order.raw.courier ?? order.raw.carrier ?? order.raw.delivery_partner;
+  const trackingNumber = order.raw.tracking?.tracking_number ?? order.raw.tracking_number ?? order.raw.tracking_id ?? order.raw.waybill_number;
   return (
     <AccountShell active="tracking">
       <div className="row between" style={{ marginBottom: 6, flexWrap: 'wrap', gap: 10 }}>
@@ -717,9 +902,28 @@ export function TrackingPage({ id }) {
 
 /* ---------------- HELP CENTER ---------------- */
 export function HelpPage({ section }) {
-  const { go } = useStore();
+  const { go, toast, isAuthenticated } = useStore();
   const [open, setOpen] = useState(0);
   const [q, setQ] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [savingTicket, setSavingTicket] = useState(false);
+  const startChat = () => {
+    if (!isAuthenticated) { toast('Sign in to start a support chat'); go('auth', 'signin'); return; }
+    setCreating(true);
+  };
+  const createTicket = async (data) => {
+    setSavingTicket(true);
+    try {
+      await supportTicketsApi.create(data);
+      toast('Ticket created — we’ll be in touch');
+      setCreating(false);
+      go('account', 'support');
+    } catch (e) {
+      toast(messageFrom(e));
+    } finally {
+      setSavingTicket(false);
+    }
+  };
   useEffect(() => {
     if (section === 'contact') {
       const t = setTimeout(() => { const el = document.getElementById('help-contact'); if (el) { const y = el.getBoundingClientRect().top + window.scrollY - 90; window.scrollTo({ top: y, behavior: 'smooth' }); } }, 120);
@@ -783,15 +987,16 @@ export function HelpPage({ section }) {
         </div>
 
         <div className="help-contact" id="help-contact">
-          {[['headset', '24/7 support', 'Chat with our team any time', 'Start chat'], ['mail', 'Email us', 'support@limitra.com.ng · replies in 2 hrs', 'Send email'], ['phone', 'Call us', '+234 700 LIMITRA · 8am–8pm', 'Call now']].map(([ic, t, sub, cta]) => (
+          {[['headset', '24/7 support', 'Chat with our team any time', 'Start chat', startChat], ['mail', 'Email us', 'support@limitra.com.ng · replies in 2 hrs', 'Send email', () => { window.location.href = 'mailto:support@limitra.com.ng'; }], ['phone', 'Call us', '+234 700 LIMITRA · 8am–8pm', 'Call now', () => { window.location.href = 'tel:+234700546487'; }]].map(([ic, t, sub, cta, onClick]) => (
             <div key={t} className="contact-card card">
               <span className="contact-ic"><Icon name={ic} size={22} /></span>
               <b>{t}</b><small className="muted">{sub}</small>
-              <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }}>{cta}</button>
+              <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }} onClick={onClick}>{cta}</button>
             </div>
           ))}
         </div>
       </div>
+      {creating && <CreateTicketModal onClose={() => setCreating(false)} onCreate={createTicket} saving={savingTicket} />}
     </div>
   );
 }

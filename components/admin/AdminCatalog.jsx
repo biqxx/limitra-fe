@@ -10,11 +10,44 @@ import { Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { useStore } from '@/components/store/StoreProvider';
 import { naira, PRODUCTS, CATEGORIES } from '@/lib/data';
 import { getVariants, setVariants, applyStoredVariants } from '@/lib/variantsStore';
-import { productsApi, categoriesApi, adminProductsApi, sourcingApi } from '@/lib/api/endpoints';
+import { cartesianCombos, defaultSku, groupsFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
+import { productsApi, categoriesApi, adminProductsApi, sourcingApi, adminOrdersApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
-import { Kpi, STATUS_CLS } from '@/components/charts/Charts';
+import { Kpi } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead, Pager, usePager, AdmSelect, AdmDate, ADMIN_ORDERS, useHighlight } from './AdminShared';
+import { AdmHead, Pager, usePager, AdmSelect, AdmDate, useHighlight } from './AdminShared';
+
+// Confirmed by the spec's own enum (GET /admin/orders' `status` param) — unlike
+// most of this API, these request/response shapes look real, though still
+// unverified live (see adminOrdersApi in lib/api/endpoints.js).
+const ORDER_STATUSES = ['pending_payment', 'confirmed', 'processing', 'shipped', 'in_transit', 'delivered', 'cancelled'];
+const ORDER_STATUS_LABEL = {
+  pending_payment: 'Pending payment', confirmed: 'Confirmed', processing: 'Processing',
+  shipped: 'Shipped', in_transit: 'In transit', delivered: 'Delivered', cancelled: 'Cancelled',
+};
+const ORDER_STATUS_CLS = {
+  pending_payment: 'warn', confirmed: 'info', processing: 'warn',
+  shipped: 'info', in_transit: 'info', delivered: 'ok', cancelled: 'bad',
+};
+
+function normalizeAdminOrder(o) {
+  const items = o.items ?? o.order_items ?? o.line_items;
+  const itemCount = o.items_count ?? o.item_count
+    ?? (Array.isArray(items) ? items.reduce((s, it) => s + Number(it.quantity ?? it.qty ?? 1), 0) : null) ?? 0;
+  const customer = o.customer_name ?? o.customer?.name ?? o.user?.name
+    ?? [o.user?.first_name, o.user?.last_name].filter(Boolean).join(' ')
+    ?? o.contact_email ?? o.user?.email ?? 'Customer';
+  return {
+    id: o.id ?? o.order_id ?? o.order_number,
+    status: String(o.status ?? 'pending_payment').toLowerCase(),
+    paymentStatus: o.payment_status,
+    customer,
+    date: o.created_at ?? o.date,
+    itemCount,
+    total: Number(o.total ?? o.total_amount ?? o.grand_total ?? o.amount ?? 0),
+    raw: o,
+  };
+}
 
 /* ---------- PRODUCTS ---------- */
 /* module-scope, mirrors the legacy `window.ADMIN_EXTRA_CATS` mutable global */
@@ -37,66 +70,12 @@ let ADMIN_EXTRA_CATS = [];
 // by comboKey() so it survives regardless of group ordering. saveAdminProduct
 // cross-multiplies the groups with variantStock to build the flat payload the
 // backend actually validates.
-function comboKey(attributes) {
-  return Object.entries(attributes || {})
-    .filter(([, v]) => v != null && v !== '')
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}:${v}`)
-    .join('|');
-}
-
-function cartesianCombos(groups) {
-  const usable = (groups || []).filter(g => g?.name && Array.isArray(g.options) && g.options.length);
-  if (!usable.length) return [];
-  const label = (g, o) => (g.type === 'color' ? o.name : o.label);
-  const attrSets = usable.reduce(
-    (acc, g) => acc.flatMap(attrs => g.options.map(o => ({ ...attrs, [g.name]: label(g, o) }))),
-    [{}]
-  );
-  return attrSets.map(attributes => ({ attributes, key: comboKey(attributes) }));
-}
-
-function slugPart(s) {
-  return String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 12);
-}
-
-function defaultSku(productName, attributes) {
-  const parts = [slugPart(productName).slice(0, 6) || 'PROD', ...Object.values(attributes || {}).map(v => slugPart(v).slice(0, 4))];
-  return parts.filter(Boolean).join('-');
-}
-
-// Best-effort reconstruction of authoring groups from the backend's flat
-// records, for a product whose variants were set up on a different browser
-// (so this browser's localStorage copy is empty) — loses colour swatches and
-// per-option price overrides since the backend never stored those.
-function groupsFromFlatVariants(flat) {
-  const order = [];
-  const sets = new Map();
-  (flat || []).forEach(v => {
-    const attrs = v?.attributes && typeof v.attributes === 'object' ? v.attributes : {};
-    Object.entries(attrs).forEach(([name, value]) => {
-      if (value == null || value === '') return;
-      if (!sets.has(name)) { sets.set(name, new Set()); order.push(name); }
-      sets.get(name).add(String(value));
-    });
-  });
-  return order.map(name => ({ name, type: 'text', options: [...sets.get(name)].map(label => ({ label, price: null })) }));
-}
-
-function stockMapFromFlatVariants(flat) {
-  const map = {};
-  (flat || []).forEach(v => {
-    if (!v || typeof v !== 'object') return;
-    const attrs = v.attributes && typeof v.attributes === 'object' ? v.attributes : {};
-    const key = comboKey(attrs);
-    if (key) map[key] = { sku: v.sku || '', stock: v.stock ?? '' };
-  });
-  return map;
-}
-
 export const mapAdminProduct = (p) => {
   const flatVariants = Array.isArray(p.variants) ? p.variants.filter(v => v && typeof v === 'object') : [];
   const localGroups = getVariants(p.id);
+  const firstImg = Array.isArray(p.images) ? p.images[0] : null;
+  const imageUrl = typeof firstImg === 'string' ? firstImg : firstImg?.url || firstImg?.path;
+  if (p.id && imageUrl && !REAL_IMG[p.id]) REAL_IMG[p.id] = imageUrl;
   return {
     id: p.id,
     slug: p.slug,
@@ -167,7 +146,7 @@ export async function saveAdminProduct(d, toast) {
       stock: Math.max(0, Number(rec.stock) || 0),
     };
   });
-  const body = { category_id: catObj?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft', variants: variantsPayload };
+  const body = { category_id: catObj?.id ?? d._raw?.category?.id, name: d.name.trim(), brand: d.brand.trim(), description: d.desc || '', stock: Number(d._stock) || 0, status: d.status || 'draft', variants: variantsPayload };
   if (!sourced) body.price = Number(d.price) || 0;
 
   let productId = d.id;
@@ -597,9 +576,20 @@ export function ProductEditDrawer({ draft, onClose, onSave }) {
 }
 
 /* ---------- ORDERS ---------- */
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Deliberately not toLocaleDateString — its output depends on the runtime's
+// ICU data, which can differ between the Node server (SSR) and the browser
+// (hydration), producing a React hydration mismatch (confirmed live, see
+// the same fix in components/pages/Account.jsx).
+function fmtOrderDate(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  return isNaN(dt) ? String(d) : `${dt.getDate()} ${MONTHS_SHORT[dt.getMonth()]} ${dt.getFullYear()}`;
+}
+
 function InvoiceModal({ order, onClose }) {
   const addToast = useAdminToast();
-  // No order-items backend yet — show the real total only, not a fabricated breakdown.
+  // Itemized line data isn't exposed yet — show the real total only, not a fabricated breakdown.
   const sub = order.total;
   const ship = 0;
   return (
@@ -607,16 +597,16 @@ function InvoiceModal({ order, onClose }) {
       <div className="adm-drawer-scrim" onClick={onClose} />
       <div className="adm-modal inv-modal" role="dialog" aria-label="Invoice">
         <div className="adm-drawer-h">
-          <h3>Invoice · {order.id}</h3>
+          <h3>Invoice · #{order.id}</h3>
           <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
         </div>
         <div className="adm-drawer-body">
           <div className="inv-top">
             <div className="inv-brand"><img src="/assets/logo.png" alt="Limitra" className="inv-logo" /><small className="muted">Lagos, Nigeria · support@limitra.com.ng</small></div>
             <div className="inv-meta">
-              <div><span className="muted">Invoice</span><b>{order.id.replace('LMT', 'INV')}</b></div>
-              <div><span className="muted">Date</span><b>{order.date}</b></div>
-              <div><span className="muted">Status</span><span className={'adm-pill ' + (STATUS_CLS[order.status] || 'muted')}>{order.status}</span></div>
+              <div><span className="muted">Order</span><b>#{order.id}</b></div>
+              <div><span className="muted">Date</span><b>{fmtOrderDate(order.date)}</b></div>
+              <div><span className="muted">Status</span><span className={'adm-pill ' + (ORDER_STATUS_CLS[order.status] || 'muted')}>{ORDER_STATUS_LABEL[order.status] || order.status}</span></div>
             </div>
           </div>
           <div className="inv-billto"><span className="muted">Billed to</span><b>{order.customer}</b></div>
@@ -628,7 +618,7 @@ function InvoiceModal({ order, onClose }) {
           </div>
           <div className="adm-drawer-foot">
             <button className="adm-btn ghost" onClick={onClose}>Close</button>
-            <button className="adm-btn primary" onClick={() => addToast('Invoice ' + order.id + ' downloaded (PDF)')}><Icon name="download" size={15} /> Download PDF</button>
+            <button className="adm-btn primary" onClick={() => addToast('Invoice #' + order.id + ' downloaded (PDF)')}><Icon name="download" size={15} /> Download PDF</button>
           </div>
         </div>
       </div>
@@ -636,24 +626,107 @@ function InvoiceModal({ order, onClose }) {
   );
 }
 
+function OrderDrawer({ title, sub, saving, canSave, onClose, onSave, saveLabel, children }) {
+  return (
+    <>
+      <div className="adm-drawer-scrim" onClick={onClose} />
+      <aside className="adm-drawer" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="adm-drawer-h">
+          <div><h3>{title}</h3>{sub && <small className="muted">{sub}</small>}</div>
+          <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
+        </div>
+        <div className="adm-drawer-body">{children}</div>
+        <div className="adm-drawer-f">
+          <button className="adm-btn ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="adm-btn primary" onClick={onSave} disabled={saving || !canSave}>{saving ? 'Saving…' : saveLabel}</button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// The generic status-update endpoint's own enum only covers
+// processing/in_transit/delivered — "shipped" is set via the dedicated
+// /ship action below instead (it needs courier/tracking_number, not just
+// a status string).
+const STATUS_UPDATE_OPTIONS = ['processing', 'in_transit', 'delivered'];
+
 export function AdminOrders() {
   const highlight = useSearchParams().get('highlight');
   useHighlight(highlight);
+  const toast = useAdminToast();
+  const [orders, setOrders] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState('All');
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('recent');
   const [invoice, setInvoice] = useState(null);
-  const O = ADMIN_ORDERS, CLS = STATUS_CLS;
-  const tabs = ['All', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Refunded'];
-  let list = O.filter(o => (status === 'All' || o.status === status) && (!q || o.id.toLowerCase().includes(q.toLowerCase()) || (o.customer || '').toLowerCase().includes(q.toLowerCase())));
+  const [shipDraft, setShipDraft] = useState(null);
+  const [statusDraft, setStatusDraft] = useState(null);
+  const [refundDraft, setRefundDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const loadOrders = useCallback(async () => {
+    try {
+      const res = await adminOrdersApi.list({ per_page: 100 });
+      const list = Array.isArray(res) ? res : (res?.data ?? res?.items ?? res?.orders ?? []);
+      setOrders((Array.isArray(list) ? list : []).map(normalizeAdminOrder));
+    } catch (error) {
+      toast(messageFrom(error));
+    } finally {
+      setLoaded(true);
+    }
+  }, [toast]);
+
+  // Initial network hydration is intentionally triggered when the page mounts.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadOrders(); }, [loadOrders]);
+
+  const tabs = ['All', ...ORDER_STATUSES];
+  const O = orders;
+  let list = O.filter(o => (status === 'All' || o.status === status) && (!q || String(o.id).toLowerCase().includes(q.toLowerCase()) || (o.customer || '').toLowerCase().includes(q.toLowerCase())));
   list = [...list].sort((a, b) => {
     if (sort === 'total-high') return b.total - a.total;
     if (sort === 'total-low') return a.total - b.total;
-    if (sort === 'items') return b.items - a.items;
-    if (sort === 'oldest') return O.indexOf(b) - O.indexOf(a);
-    return O.indexOf(a) - O.indexOf(b);
+    if (sort === 'items') return b.itemCount - a.itemCount;
+    if (sort === 'oldest') return new Date(a.date) - new Date(b.date);
+    return new Date(b.date) - new Date(a.date);
   });
   const { shown: oShown, page: oPage, pages: oPages, setPage: oSet } = usePager(list, q + status + sort);
+
+  const submitStatus = async () => {
+    if (!statusDraft?.status || !statusDraft.note.trim()) return;
+    setSaving(true);
+    try {
+      await adminOrdersApi.updateStatus(statusDraft.order.id, { status: statusDraft.status, note: statusDraft.note.trim() });
+      toast('Order status updated');
+      setStatusDraft(null);
+      await loadOrders();
+    } catch (error) { toast(messageFrom(error)); } finally { setSaving(false); }
+  };
+
+  const submitShip = async () => {
+    if (!shipDraft?.courier.trim() || !shipDraft.tracking_number.trim()) return;
+    setSaving(true);
+    try {
+      await adminOrdersApi.ship(shipDraft.order.id, { courier: shipDraft.courier.trim(), tracking_number: shipDraft.tracking_number.trim() });
+      toast('Order marked as shipped');
+      setShipDraft(null);
+      await loadOrders();
+    } catch (error) { toast(messageFrom(error)); } finally { setSaving(false); }
+  };
+
+  const submitRefund = async () => {
+    if (!refundDraft?.amount || !refundDraft.reason.trim()) return;
+    setSaving(true);
+    try {
+      await adminOrdersApi.refund(refundDraft.order.id, { amount: Number(refundDraft.amount), method: refundDraft.method, reason: refundDraft.reason.trim() });
+      toast('Refund submitted');
+      setRefundDraft(null);
+      await loadOrders();
+    } catch (error) { toast(messageFrom(error)); } finally { setSaving(false); }
+  };
+
   return (
     <>
       <AdmHead title="Orders" sub={`${O.length} total orders`}>
@@ -661,25 +734,69 @@ export function AdminOrders() {
       </AdmHead>
       <div className="adm-filters">
         <div className="adm-mini-search"><Icon name="search" size={16} className="muted" /><input placeholder="Search order # or customer…" value={q} onChange={e => setQ(e.target.value)} /></div>
-        {tabs.map(t => <button key={t} className={'adm-chip' + (status === t ? ' on' : '')} onClick={() => setStatus(t)}>{t}</button>)}
+        {tabs.map(t => <button key={t} className={'adm-chip' + (status === t ? ' on' : '')} onClick={() => setStatus(t)}>{t === 'All' ? 'All' : (ORDER_STATUS_LABEL[t] || t)}</button>)}
         <div className="adm-filters-r">
           <AdmSelect compact icon="sort" title="Sort by" value={sort} options={[{ value: 'recent', label: 'Most recent' }, { value: 'oldest', label: 'Oldest first' }, { value: 'total-high', label: 'Total: High → Low' }, { value: 'total-low', label: 'Total: Low → High' }, { value: 'items', label: 'Most items' }]} onChange={setSort} />
         </div>
       </div>
       <div className="panel" style={{ padding: 0 }}>
-        <div className="adm-table-wrap"><table className="adm-table">
-          <thead><tr><th>Order</th><th>Customer</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th></th></tr></thead>
-          <tbody>{oShown.map(o => (
-            <tr key={o.id} data-hlkey={o.id + ' ' + (o.customer || '')}>
-              <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>{o.id}</b></td>
-              <td>{o.customer}</td><td className="muted">{o.date}</td><td>{o.items}</td><td><b>{naira(o.total)}</b></td>
-              <td><span className={'adm-pill ' + (CLS[o.status] || 'muted')}>{o.status}</span></td>
-              <td><div className="adm-rowact"><button title="View invoice" onClick={() => setInvoice(o)}><Icon name="eye" size={15} /></button><button title="Download invoice" onClick={() => setInvoice(o)}><Icon name="download" size={15} /></button></div></td>
-            </tr>
-          ))}</tbody>
-        </table>{list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No orders match your filters.</div>}<Pager page={oPage} pages={oPages} onPage={oSet} /></div>
+        {!loaded ? <div className="adm-soon"><p>Loading orders…</p></div> : (
+          <div className="adm-table-wrap">
+            <table className="adm-table">
+              <thead><tr><th>Order</th><th>Customer</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th></th></tr></thead>
+              <tbody>{oShown.map(o => (
+                <tr key={o.id} data-hlkey={o.id + ' ' + (o.customer || '')}>
+                  <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{o.id}</b></td>
+                  <td>{o.customer}</td><td className="muted">{fmtOrderDate(o.date)}</td><td>{o.itemCount}</td><td><b>{naira(o.total)}</b></td>
+                  <td><span className={'adm-pill ' + (ORDER_STATUS_CLS[o.status] || 'muted')}>{ORDER_STATUS_LABEL[o.status] || o.status}</span></td>
+                  <td><div className="adm-rowact">
+                    <button title="View invoice" onClick={() => setInvoice(o)}><Icon name="eye" size={15} /></button>
+                    <button title="Update status" onClick={() => setStatusDraft({ order: o, status: STATUS_UPDATE_OPTIONS[0], note: '' })}><Icon name="edit" size={15} /></button>
+                    <button title="Mark as shipped" onClick={() => setShipDraft({ order: o, courier: '', tracking_number: '' })}><Icon name="truck" size={15} /></button>
+                    <button title="Refund" onClick={() => setRefundDraft({ order: o, amount: o.total, method: 'original_payment', reason: '' })}><Icon name="dollar" size={15} /></button>
+                  </div></td>
+                </tr>
+              ))}</tbody>
+            </table>
+            {list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No orders match your filters.</div>}
+            <Pager page={oPage} pages={oPages} onPage={oSet} />
+          </div>
+        )}
       </div>
       {invoice && <InvoiceModal order={invoice} onClose={() => setInvoice(null)} />}
+
+      {statusDraft && (
+        <OrderDrawer title={`Update status · #${statusDraft.order.id}`} saving={saving} canSave={!!statusDraft.note.trim()} onClose={() => setStatusDraft(null)} onSave={submitStatus} saveLabel="Update status">
+          <label className="adm-field"><span>New status</span>
+            <select value={statusDraft.status} onChange={e => setStatusDraft(c => ({ ...c, status: e.target.value }))}>
+              {STATUS_UPDATE_OPTIONS.map(s => <option key={s} value={s}>{ORDER_STATUS_LABEL[s]}</option>)}
+            </select>
+          </label>
+          <label className="adm-field"><span>Note</span><textarea rows="3" value={statusDraft.note} onChange={e => setStatusDraft(c => ({ ...c, note: e.target.value }))} placeholder="Why this status changed (required)" autoFocus /></label>
+        </OrderDrawer>
+      )}
+
+      {shipDraft && (
+        <OrderDrawer title={`Mark as shipped · #${shipDraft.order.id}`} saving={saving} canSave={!!(shipDraft.courier.trim() && shipDraft.tracking_number.trim())} onClose={() => setShipDraft(null)} onSave={submitShip} saveLabel="Mark as shipped">
+          <label className="adm-field"><span>Courier</span><input value={shipDraft.courier} onChange={e => setShipDraft(c => ({ ...c, courier: e.target.value }))} placeholder="e.g. GIG Logistics" autoFocus /></label>
+          <label className="adm-field"><span>Tracking number</span><input value={shipDraft.tracking_number} onChange={e => setShipDraft(c => ({ ...c, tracking_number: e.target.value }))} /></label>
+        </OrderDrawer>
+      )}
+
+      {refundDraft && (
+        <OrderDrawer title={`Refund · #${refundDraft.order.id}`} saving={saving} canSave={!!(Number(refundDraft.amount) > 0 && refundDraft.reason.trim())} onClose={() => setRefundDraft(null)} onSave={submitRefund} saveLabel="Submit refund">
+          <div className="adm-field-row">
+            <label className="adm-field"><span>Amount (₦)</span><input type="number" min="0" value={refundDraft.amount} onChange={e => setRefundDraft(c => ({ ...c, amount: e.target.value }))} autoFocus /></label>
+            <label className="adm-field"><span>Refund to</span>
+              <select value={refundDraft.method} onChange={e => setRefundDraft(c => ({ ...c, method: e.target.value }))}>
+                <option value="original_payment">Original payment method</option>
+                <option value="wallet">Wallet credit</option>
+              </select>
+            </label>
+          </div>
+          <label className="adm-field"><span>Reason</span><textarea rows="3" value={refundDraft.reason} onChange={e => setRefundDraft(c => ({ ...c, reason: e.target.value }))} placeholder="Why this order is being refunded (required)" /></label>
+        </OrderDrawer>
+      )}
     </>
   );
 }

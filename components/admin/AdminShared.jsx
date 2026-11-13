@@ -17,7 +17,7 @@ export const ADMIN_NAV = [
 ['Catalog', [['products', 'Products', 'bag'], ['categories', 'Categories', 'list'], ['sourcing', 'Product sourcing', 'search'], ['pricing', 'Pricing rules', 'dollar'], ['inventory', 'Inventory', 'package'], ['orders', 'Orders', 'truck'], ['returns', 'Returns & Refunds', 'refresh'], ['coupons', 'Coupons & Promos', 'tag'], ['delivery', 'Delivery & Shipping', 'truck']]],
 ['People', [['customers', 'Customers', 'user'], ['affiliates', 'Affiliates', 'share'], ['referrals', 'Referrals', 'dollar']]],
 ['Engagement', [['spin', 'Spin & Win', 'gift'], ['videos', 'Videos', 'video'], ['elo', 'Elo AI', 'headset']]],
-['System', [['cms', 'Content', 'edit'], ['roles', 'Roles & Access', 'lock'], ['reports', 'Reports', 'download']]]];
+['System', [['cms', 'Content', 'edit'], ['roles', 'Roles & Access', 'lock'], ['reports', 'Reports', 'download'], ['support', 'Support Tickets', 'headset']]]];
 
 /* ---------- shared bits ---------- */
 export function AdmHead({ title, sub, children }) {
