@@ -24,6 +24,7 @@ export { AdminReturns } from './AdminReturns';
 export { AdminElo } from './AdminElo';
 export { AdminPricing } from './AdminPricing';
 export { AdminCustomers, AdminAffiliates, AdminReferrals } from './AdminPeople';
+export { AdminStaff } from './AdminStaff';
 export { AdminSpin, AdminVideos } from './AdminEngagement';
 export { AdminCMS, AdminRoles, AdminReports } from './AdminSystem';
 export { AdminActivity } from './AdminActivity';
