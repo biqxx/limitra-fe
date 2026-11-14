@@ -255,7 +255,7 @@ export function AdminProducts({ editId }) {
     if (sort === 'stock-high') return b.stock - a.stock;
     return 0;
   });
-  const { shown: pShown, page: pPage, pages: pPages, setPage: pSet } = usePager(list, q + cat + sort + stat + stockStat);
+  const { shown: pShown, pagerProps: pPager } = usePager(list, q + cat + sort + stat + stockStat);
   return (
     <>
       <AdmHead title="Products" sub={`${items.length} products across ${cats.length - 1} categories`}>
@@ -294,7 +294,7 @@ export function AdminProducts({ editId }) {
               }}><Icon name="trash" size={15} /></button></div></td>
             </tr>
           ))}</tbody>
-        </table>{loaded && list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager page={pPage} pages={pPages} onPage={pSet} /></div>
+        </table>{loaded && list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager {...pPager} /></div>
       </div>
       {editing && <ProductEditDrawer key={`${editing.id}:${(editing._raw?.sources || []).map(source => source.id).join(',')}`} draft={editing} onClose={closeEditing} onSave={async (d) => {
         try {
@@ -692,7 +692,7 @@ export function AdminOrders() {
     if (sort === 'oldest') return new Date(a.date) - new Date(b.date);
     return new Date(b.date) - new Date(a.date);
   });
-  const { shown: oShown, page: oPage, pages: oPages, setPage: oSet } = usePager(list, q + status + sort);
+  const { shown: oShown, pagerProps: oPager } = usePager(list, q + status + sort);
 
   const submitStatus = async () => {
     if (!statusDraft?.status || !statusDraft.note.trim()) return;
@@ -759,7 +759,7 @@ export function AdminOrders() {
               ))}</tbody>
             </table>
             {list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No orders match your filters.</div>}
-            <Pager page={oPage} pages={oPages} onPage={oSet} />
+            <Pager {...oPager} />
           </div>
         )}
       </div>
@@ -809,7 +809,7 @@ export function AdminCoupons() {
   const [coupons, setCoupons] = useState(ADMIN_COUPONS.map(c => ({ code: c[0], desc: c[1], uses: c[2], status: c[3] })));
   const [edit, setEdit] = useState(null);
   const t = (m) => addToast(m);
-  const { shown: cpShown, page: cpPage, pages: cpPages, setPage: cpSet } = usePager(coupons, coupons.length);
+  const { shown: cpShown, pagerProps: cpPager } = usePager(coupons, coupons.length);
   const save = (d) => {
     setCoupons(cs => {
       const i = cs.findIndex(c => c.code === d._orig);
@@ -830,7 +830,7 @@ export function AdminCoupons() {
               <td><div className="adm-rowact"><button title="Edit" onClick={() => setEdit({ _orig: c.code, code: c.code, desc: c.desc, type: 'Percentage', value: '', status: c.status })}><Icon name="edit" size={15} /></button><button className="del" title="Delete" onClick={() => { setCoupons(cs => cs.filter(x => x.code !== c.code)); t('Coupon ' + c.code + ' deleted'); }}><Icon name="trash" size={15} /></button></div></td>
             </tr>
           ))}</tbody>
-        </table><Pager page={cpPage} pages={cpPages} onPage={cpSet} /></div>
+        </table><Pager {...cpPager} /></div>
       </div>
       {edit && <CouponModal draft={edit} onClose={() => setEdit(null)} onSave={save} />}
       <AffPromoAdmin />
@@ -920,7 +920,7 @@ export function AdminInventory() {
     if (sort === 'name-az') return a.name.localeCompare(b.name);
     return stk(a) - stk(b);
   });
-  const { shown: invShown, page: invPage, pages: invPages, setPage: invSet } = usePager(low, q + stat + sort);
+  const { shown: invShown, pagerProps: invPager } = usePager(low, q + stat + sort);
   return (
     <>
       <AdmHead title="Inventory" sub="Stock levels & alerts" />
@@ -946,7 +946,7 @@ export function AdminInventory() {
               <td><span className={'adm-pill ' + (s === 0 ? 'bad' : s < 6 ? 'warn' : 'ok')}>{statusOf(s)}</span></td>
               <td><div className="adm-rowact"><button title="Restock" onClick={() => addToast('Restock order placed')}><Icon name="plus" size={15} /></button></div></td></tr>
           ); })}</tbody>
-        </table>{low.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager page={invPage} pages={invPages} onPage={invSet} /></div>
+        </table>{low.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager {...invPager} /></div>
       </div>
     </>
   );

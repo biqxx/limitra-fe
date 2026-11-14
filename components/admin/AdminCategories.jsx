@@ -112,7 +112,6 @@ export function AdminCategories() {
       const response = await adminCategoriesApi.list();
       const items = Array.isArray(response) ? response : response?.items || response?.data || [];
       setCategories(items);
-      setExpanded(current => current.size ? current : new Set(items.map(category => category.id)));
     } catch (error) {
       toast(messageFrom(error));
     } finally {
@@ -194,6 +193,33 @@ export function AdminCategories() {
     }
   };
 
+  const moveSubcategory = async (parentId, subIndex, direction) => {
+    const parent = categories.find(c => c.id === parentId);
+    const subs = [...(parent?.subcategories || [])];
+    const targetIndex = subIndex + direction;
+    if (!parent || targetIndex < 0 || targetIndex >= subs.length) return;
+
+    const [moved] = subs.splice(subIndex, 1);
+    subs.splice(targetIndex, 0, moved);
+
+    const updates = subs.map((item, idx) => ({ id: item.id, sort_order: idx, prev: item.sort_order }));
+    const changed = updates.filter((u, idx) => Number(u.prev) !== idx);
+
+    setCategories(prev => prev.map(c => (
+      c.id === parentId
+        ? { ...c, subcategories: subs.map((s, idx) => ({ ...s, sort_order: idx })) }
+        : c
+    )));
+
+    try {
+      await Promise.all(changed.map(u => adminCategoriesApi.update(u.id, { sort_order: u.sort_order })));
+      toast('Subcategory order updated');
+    } catch (error) {
+      toast(messageFrom(error));
+      await loadCategories();
+    }
+  };
+
   return (
     <>
       <AdmHead title="Categories" sub="Organize storefront departments, subcategories and visibility.">
@@ -233,7 +259,7 @@ export function AdminCategories() {
                   <button className="del" onClick={() => removeCategory(category)} title="Delete category" aria-label="Delete category"><Icon name="trash" size={15} /></button>
                 </div>
               </div>
-              {open && (category.subcategories || []).map(item => (
+              {open && (category.subcategories || []).map((item, subIdx, subArr) => (
                 <div className="cat-child-row" key={item.id}>
                   <span className="cat-branch" />
                   <div className="cat-main"><b>{item.name}</b><small>/{item.slug} · order {item.sort_order}</small></div>
@@ -241,6 +267,8 @@ export function AdminCategories() {
                   {item.age_gated && <span className="adm-pill warn">18+</span>}
                   <span className="cat-products">{item.products_count || 0} products</span>
                   <div className="adm-rowact">
+                    <button onClick={() => moveSubcategory(category.id, subIdx, -1)} disabled={subIdx === 0 || Boolean(query)} title="Move up" aria-label="Move subcategory up"><Icon name="chevup" size={15} /></button>
+                    <button onClick={() => moveSubcategory(category.id, subIdx, 1)} disabled={subIdx === subArr.length - 1 || Boolean(query)} title="Move down" aria-label="Move subcategory down"><Icon name="chevdown" size={15} /></button>
                     <button onClick={() => setActive(item, !item.active)} title={item.active ? 'Hide subcategory' : 'Show subcategory'} aria-label={item.active ? 'Hide subcategory' : 'Show subcategory'}><Icon name={item.active ? 'eye' : 'check'} size={15} /></button>
                     <button onClick={() => setDraft(categoryDraft(item))} title="Edit subcategory" aria-label="Edit subcategory"><Icon name="edit" size={15} /></button>
                     <button className="del" onClick={() => removeCategory(item)} title="Delete subcategory" aria-label="Delete subcategory"><Icon name="trash" size={15} /></button>

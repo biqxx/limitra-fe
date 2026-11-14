@@ -86,7 +86,7 @@ export function AdminVideos() {
   const [edit, setEdit] = useState(null);
   const [assign, setAssign] = useState(null);
   const t = (m) => addToast(m);
-  const { shown: vShown, page: vPage, pages: vPages, setPage: vSet } = usePager(V, '');
+  const { shown: vShown, pagerProps: vPager } = usePager(V, '');
   return (
     <>
       <AdmHead title="Videos" sub={`${V.length} videos · demos, reviews, reels`}><button className="adm-btn primary" onClick={() => setEdit({ _new: true, title: '', cat: 'Demos', dur: '0:30' })}><Icon name="plus" size={15} /> Upload video</button></AdmHead>
@@ -108,7 +108,7 @@ export function AdminVideos() {
               <td><div className="adm-rowact"><button title="Edit" onClick={() => setEdit({ ...v })}><Icon name="edit" size={15} /></button><button title="Assign products" onClick={() => setAssign({ ...v, products: [...(v.products || [])] })}><Icon name="bag" size={15} /></button></div></td>
             </tr>
           ))}</tbody>
-        </table><Pager page={vPage} pages={vPages} onPage={vSet} /></div>
+        </table><Pager {...vPager} /></div>
       </div>
       {edit && <VideoEditDrawer draft={edit} onClose={() => setEdit(null)} onSave={() => { t(edit._new ? 'Video uploaded' : 'Video updated'); setEdit(null); }} />}
       {assign && <VideoAssignModal draft={assign} onClose={() => setAssign(null)} onSave={(ids) => { t(ids.length + ' product(s) tagged to ' + assign.title); setAssign(null); }} />}

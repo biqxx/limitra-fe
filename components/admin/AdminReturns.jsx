@@ -12,7 +12,7 @@ import { naira } from '@/lib/data';
 import { adminReturnsApi, adminRefundsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead } from './AdminShared';
+import { AdmHead, Pager, usePager } from './AdminShared';
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // Deliberately not toLocaleDateString — its output depends on the runtime's
@@ -82,6 +82,68 @@ function Drawer({ title, sub, saving, canSave, onClose, onSave, saveLabel, child
 }
 
 const SECTIONS = [['returns', 'Returns'], ['refunds', 'Refunds']];
+
+function ReturnsTable({ rows, loaded, onEdit, onRefund, q, status }) {
+  const { shown, pagerProps } = usePager(rows, q + status);
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      {!loaded ? <div className="adm-soon"><p>Loading returns…</p></div> : (
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead><tr><th>Return</th><th>Order</th><th>Customer</th><th>Date</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+            <tbody>{shown.map(r => (
+              <tr key={r.id}>
+                <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{r.id}</b></td>
+                <td className="muted">{r.orderId ? `#${r.orderId}` : '—'}</td>
+                <td>{r.customer}</td>
+                <td className="muted">{fmtDate(r.date)}</td>
+                <td className="muted">{r.reason || '—'}</td>
+                <td><span className={'adm-pill ' + (RETURN_STATUS_CLS[r.status] || 'muted')}>{r.status.replace(/_/g, ' ')}</span></td>
+                <td><div className="adm-rowact">
+                  <button title="Update return" onClick={() => onEdit(r)}><Icon name="edit" size={15} /></button>
+                  <button title="Refund this return" onClick={() => onRefund(r)}><Icon name="dollar" size={15} /></button>
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </table>
+          {rows.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No returns match your filters.</div>}
+          <Pager {...pagerProps} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RefundsTable({ rows, loaded, onResolve, onRetry, q, status }) {
+  const { shown, pagerProps } = usePager(rows, q + status);
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      {!loaded ? <div className="adm-soon"><p>Loading refunds…</p></div> : (
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead><tr><th>Refund</th><th>Amount</th><th>Method</th><th>Source</th><th>Date</th><th>Status</th><th></th></tr></thead>
+            <tbody>{shown.map(r => (
+              <tr key={r.id}>
+                <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{r.id}</b></td>
+                <td><b>{naira(r.amount)}</b></td>
+                <td className="muted">{r.method || '—'}</td>
+                <td className="muted">{r.source || '—'}</td>
+                <td className="muted">{fmtDate(r.date)}</td>
+                <td><span className={'adm-pill ' + (REFUND_STATUS_CLS[r.status] || 'muted')}>{r.status.replace(/_/g, ' ')}</span></td>
+                <td><div className="adm-rowact">
+                  <button title="Resolve refund" onClick={() => onResolve(r)}><Icon name="check" size={15} /></button>
+                  <button title="Retry refund" onClick={() => onRetry(r)}><Icon name="refresh" size={15} /></button>
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </table>
+          {rows.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No refunds match your filters.</div>}
+          <Pager {...pagerProps} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function AdminReturns() {
   const toast = useAdminToast();
@@ -196,57 +258,11 @@ export function AdminReturns() {
       </div>
 
       {section === 'returns' && (
-        <div className="panel" style={{ padding: 0 }}>
-          {!loaded ? <div className="adm-soon"><p>Loading returns…</p></div> : (
-            <div className="adm-table-wrap">
-              <table className="adm-table">
-                <thead><tr><th>Return</th><th>Order</th><th>Customer</th><th>Date</th><th>Reason</th><th>Status</th><th></th></tr></thead>
-                <tbody>{visibleReturns.map(r => (
-                  <tr key={r.id}>
-                    <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{r.id}</b></td>
-                    <td className="muted">{r.orderId ? `#${r.orderId}` : '—'}</td>
-                    <td>{r.customer}</td>
-                    <td className="muted">{fmtDate(r.date)}</td>
-                    <td className="muted">{r.reason || '—'}</td>
-                    <td><span className={'adm-pill ' + (RETURN_STATUS_CLS[r.status] || 'muted')}>{r.status.replace(/_/g, ' ')}</span></td>
-                    <td><div className="adm-rowact">
-                      <button title="Update return" onClick={() => setUpdateDraft({ ret: r, status: RETURN_UPDATE_STATUSES[0], reason: r.reason || '', notes: '' })}><Icon name="edit" size={15} /></button>
-                      <button title="Refund this return" onClick={() => setReturnRefundDraft({ ret: r, amount: '', method: 'original_payment', reason: '' })}><Icon name="dollar" size={15} /></button>
-                    </div></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-              {visibleReturns.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No returns match your filters.</div>}
-            </div>
-          )}
-        </div>
+        <ReturnsTable rows={visibleReturns} loaded={loaded} onEdit={r => setUpdateDraft({ ret: r, status: RETURN_UPDATE_STATUSES[0], reason: r.reason || '', notes: '' })} onRefund={r => setReturnRefundDraft({ ret: r, amount: '', method: 'original_payment', reason: '' })} q={q} status={status} />
       )}
 
       {section === 'refunds' && (
-        <div className="panel" style={{ padding: 0 }}>
-          {!loaded ? <div className="adm-soon"><p>Loading refunds…</p></div> : (
-            <div className="adm-table-wrap">
-              <table className="adm-table">
-                <thead><tr><th>Refund</th><th>Amount</th><th>Method</th><th>Source</th><th>Date</th><th>Status</th><th></th></tr></thead>
-                <tbody>{visibleRefunds.map(r => (
-                  <tr key={r.id}>
-                    <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{r.id}</b></td>
-                    <td><b>{naira(r.amount)}</b></td>
-                    <td className="muted">{r.method || '—'}</td>
-                    <td className="muted">{r.source || '—'}</td>
-                    <td className="muted">{fmtDate(r.date)}</td>
-                    <td><span className={'adm-pill ' + (REFUND_STATUS_CLS[r.status] || 'muted')}>{r.status.replace(/_/g, ' ')}</span></td>
-                    <td><div className="adm-rowact">
-                      <button title="Resolve refund" onClick={() => setResolveDraft({ refund: r, status: 'processed', note: '', provider_reference: '' })}><Icon name="check" size={15} /></button>
-                      <button title="Retry refund" onClick={() => retryRefund(r)}><Icon name="refresh" size={15} /></button>
-                    </div></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-              {visibleRefunds.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No refunds match your filters.</div>}
-            </div>
-          )}
-        </div>
+        <RefundsTable rows={visibleRefunds} loaded={loaded} onResolve={r => setResolveDraft({ refund: r, status: 'processed', note: '', provider_reference: '' })} onRetry={retryRefund} q={q} status={status} />
       )}
 
       {updateDraft && (

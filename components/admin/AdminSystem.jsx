@@ -1,10 +1,14 @@
 'use client';
 /* System nav group (Content/CMS, Roles & Access, Reports) — ported verbatim from
    legacy/admin-sections.jsx. `window.admToast` calls replaced with `useAdminToast()`. */
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
+import { adminRolesApi } from '@/lib/api/endpoints';
+import { messageFrom } from '@/lib/api/errors';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead, AdmSelect } from './AdminShared';
+import { AdmHead, Pager, usePager } from './AdminShared';
+
+const asList = res => (Array.isArray(res) ? res : res?.items || res?.data || []);
 
 /* ---------- CMS ---------- */
 // Starter seed content an admin is expected to edit — module scope so AdminCMS's
@@ -106,126 +110,367 @@ export function AdminCMS() {
   );
 }
 
-/* ---------- ROLES ---------- */
-const ADMIN_ROLES = [['Super Admin', 'Full access to everything', 1, '#0438B6'], ['Admin', 'Manage store operations', 3, '#2F4BDB'], ['Manager', 'Products, orders, inventory', 5, '#1F8A5B'], ['Customer Support', 'Orders & customer help', 8, '#0E9BD6'], ['Marketing Manager', 'Promos, videos, affiliates', 4, '#F67208'], ['Inventory Manager', 'Stock & warehouse', 2, '#7A5AE0']];
-const ROLE_PERMS = ['Dashboard & analytics', 'Product management', 'Order management', 'Customer management', 'Affiliate management', 'Referral management', 'Video management', 'AI assistant', 'Coupons & promotions', 'Inventory', 'Roles & permissions', 'Website settings'];
+/* ---------- ROLES & ACCESS ---------- */
+const ROLE_COLORS = ['#0438B6', '#2F4BDB', '#1F8A5B', '#0E9BD6', '#F67208', '#7A5AE0'];
 
-const ROLE_NAMES = ['Super Admin', 'Admin', 'Manager', 'Customer Support', 'Marketing Manager', 'Inventory Manager'];
-// No staff-directory backend yet — stays genuinely empty rather than fake people.
-const STAFF = [];
+function permKey(p) {
+  return typeof p === 'string' ? p : (p?.name || p?.key || p?.slug || '');
+}
 
-function RoleDrawer({ role, onClose, members, roleNames, onAssign, onAdd, onRemove }) {
+function RoleDrawer({ role, permissionsList, onSaved, onClose }) {
   const addToast = useAdminToast();
-  const isNew = !role;
-  const [name, setName] = useState(role ? role[0] : '');
-  const [desc, setDesc] = useState(role ? role[1] : '');
-  const full = role && role[0] === 'Super Admin';
-  // No stored per-role permissions backend yet — only Super Admin starts fully
-  // on; every other role starts with nothing granted rather than an arbitrary pattern.
-  const [perms, setPerms] = useState(() => {
-    const o = {};
-    ROLE_PERMS.forEach((p) => { o[p] = full; });
-    return o;
-  });
-  const toggle = (p) => { if (full) return; setPerms(m => ({ ...m, [p]: !m[p] })); };
-  const [adding, setAdding] = useState(false);
-  const [nn, setNn] = useState('');
-  const [ne, setNe] = useState('');
-  const [pending, setPending] = useState([]);
-  const list = isNew ? pending : (members || []);
-  const submitAdd = () => {
-    const rn = role ? role[0] : name.trim();
-    if (!rn) { addToast('Enter a role name first'); return; }
-    if (!nn.trim() || !/^\S+@\S+\.\S+$/.test(ne)) { addToast('Enter a name and valid email'); return; }
-    if (isNew) { setPending(p => [...p, [nn.trim(), ne.trim(), rn]]); addToast(nn.trim() + ' added'); }
-    else { onAdd && onAdd(nn.trim(), ne.trim(), rn); }
-    setNn(''); setNe(''); setAdding(false);
+  const isNew = !role?.id;
+  const [name, setName] = useState(role?.name || '');
+  const [description, setDescription] = useState(role?.description || '');
+  const [selectedPerms, setSelectedPerms] = useState(() => new Set((role?.permissions || []).map(permKey)));
+  const [members, setMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(!isNew);
+  const [memberUserId, setMemberUserId] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (isNew) return;
+    let active = true;
+    adminRolesApi.members(role.id)
+      .then(res => { if (active) setMembers(asList(res)); })
+      .catch(() => {})
+      .finally(() => { if (active) setLoadingMembers(false); });
+    return () => { active = false; };
+  }, [isNew, role?.id]);
+
+  const togglePerm = (key) => {
+    setSelectedPerms(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
   };
-  const removeFrom = (email) => { if (isNew) setPending(p => p.filter(m => m[1] !== email)); else onRemove && onRemove(email); };
+
+  const saveRole = async () => {
+    if (!name.trim()) { addToast('Enter a role name'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        name: name.trim(),
+        description: description.trim() || null,
+        permissions: [...selectedPerms],
+      };
+      if (isNew) await adminRolesApi.create(payload);
+      else await adminRolesApi.update(role.id, payload);
+      addToast(isNew ? 'Role created' : `${name} updated`);
+      await onSaved();
+      onClose();
+    } catch (error) {
+      addToast(messageFrom(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addMember = async () => {
+    if (!memberUserId.trim() || isNew) return;
+    try {
+      await adminRolesApi.addMember(role.id, { user_id: Number(memberUserId) });
+      setMemberUserId('');
+      const res = await adminRolesApi.members(role.id);
+      setMembers(asList(res));
+      await onSaved();
+      addToast('Member added to role');
+    } catch (error) {
+      addToast(messageFrom(error));
+    }
+  };
+
+  const removeMember = async (userId) => {
+    try {
+      await adminRolesApi.removeMember(role.id, userId);
+      setMembers(prev => prev.filter(m => m.id !== userId));
+      await onSaved();
+      addToast('Member removed');
+    } catch (error) {
+      addToast(messageFrom(error));
+    }
+  };
+
   return (
-    <div className="role-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="role-modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="role-modal">
         <div className="role-modal-h">
           <div className="row" style={{ gap: 12 }}>
-            <span className="kpi-ic" style={{ background: (role ? role[3] : 'var(--primary)') + '22', color: role ? role[3] : 'var(--primary)' }}><Icon name="lock" size={18} /></span>
-            <div><h3 style={{ fontSize: 18 }}>{isNew ? 'Add role' : 'Edit role'}</h3><small className="muted">Configure access & members</small></div>
+            <span className="kpi-ic" style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}><Icon name="lock" size={18} /></span>
+            <div>
+              <h3 style={{ fontSize: 18 }}>{isNew ? 'Create role' : `Edit · ${role.name}`}</h3>
+              <small className="muted">Configure permissions and assigned members</small>
+            </div>
           </div>
-          <button className="role-modal-x" onClick={onClose}><Icon name="close" size={18} /></button>
+          <button className="role-modal-x" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
+
         <div className="role-modal-b">
-          <div className="adm-field-row">
-            <label className="adm-field"><span>Role name</span><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Marketing Manager" /></label>
-            <label className="adm-field"><span>Members</span><input value={role ? list.length : 0} readOnly /></label>
-          </div>
-          <label className="adm-field"><span>Description</span><input value={desc} onChange={e => setDesc(e.target.value)} placeholder="What this role can do" /></label>
+          <label className="adm-field"><span>Role name</span><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Catalog Manager" /></label>
+          <label className="adm-field"><span>Description</span><input value={description} onChange={e => setDescription(e.target.value)} placeholder="Short summary of access scope" /></label>
+
+          {!isNew && (
+            <div className="adm-field">
+              <div className="row between" style={{ marginBottom: 8 }}>
+                <span>Members ({members.length})</span>
+                <div className="row" style={{ gap: 6 }}>
+                  <input
+                    type="number"
+                    min="1"
+                    value={memberUserId}
+                    onChange={e => setMemberUserId(e.target.value)}
+                    placeholder="User ID"
+                    style={{ width: 96, padding: '6px 8px', fontSize: 12.5 }}
+                  />
+                  <button type="button" className="adm-btn ghost" style={{ padding: '6px 10px', fontSize: 12.5 }} onClick={addMember}>
+                    <Icon name="plus" size={13} /> Assign
+                  </button>
+                </div>
+              </div>
+              {loadingMembers ? <small className="muted">Loading members…</small>
+                : members.length === 0 ? <div className="role-members-empty">No members assigned to this role yet.</div>
+                : (
+                  <div className="role-members">
+                    {members.map(mem => (
+                      <div className="role-member" key={mem.id}>
+                        <span className="adm-li-av">{String(mem.name || mem.email || 'U').slice(0, 2).toUpperCase()}</span>
+                        <div className="role-member-info"><b>{mem.name || mem.username || `User #${mem.id}`}</b><small>{mem.email}</small></div>
+                        <button type="button" className="role-member-x" title="Remove member" onClick={() => removeMember(mem.id)}><Icon name="trash" size={15} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          )}
+
           <div className="adm-field">
-            <span className="row between" style={{ alignItems: 'center' }}><span>Members ({list.length})</span> <button type="button" className="adm-link-btn" onClick={() => setAdding(a => !a)}><Icon name={adding ? 'close' : 'plus'} size={13} /> {adding ? 'Cancel' : 'Add member'}</button></span>
-              {adding && (
-                <div className="role-add">
-                  <input value={nn} onChange={e => setNn(e.target.value)} placeholder="Full name" />
-                  <input value={ne} onChange={e => setNe(e.target.value)} placeholder="Email address" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitAdd(); } }} />
-                  <button type="button" className="adm-btn primary" onClick={submitAdd}>Add</button>
-                </div>
-              )}
-              {list.length === 0 && !adding ? <small className="muted">{isNew ? 'Name the role, then add members.' : 'No members assigned to this role yet.'}</small> : (
-                <div className="role-members">
-                  {list.map(mem => (
-                    <div key={mem[1]} className="role-member">
-                      <span className="adm-li-av">{mem[0].split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
-                      <div className="role-member-info"><b>{mem[0]}</b><small>{mem[1]}</small></div>
-                      <AdmSelect value={mem[2]} options={roleNames} onChange={(nv) => onAssign && onAssign(mem[1], nv)} />
-                      <button type="button" className="role-member-x" title="Remove member" onClick={() => removeFrom(mem[1])}><Icon name="trash" size={15} /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          <div className="adm-field"><span>Permissions</span>
+            <span>Permissions ({selectedPerms.size})</span>
             <div className="role-perms">
-              {ROLE_PERMS.map(p => (
-                <label key={p} className="role-perm">
-                  <span>{p}</span>
-                  <button type="button" className={'toggle' + (perms[p] ? ' on' : '')} onClick={() => toggle(p)} aria-label={p} disabled={full} />
-                </label>
-              ))}
+              {permissionsList.map(p => {
+                const key = permKey(p);
+                const on = selectedPerms.has(key);
+                return (
+                  <label key={key} className="role-perm">
+                    <span>{p?.label || key}</span>
+                    <button type="button" className={'toggle' + (on ? ' on' : '')} onClick={() => togglePerm(key)} aria-label={key} />
+                  </label>
+                );
+              })}
             </div>
-            {full && <small className="muted" style={{ marginTop: 8, display: 'block' }}>Super Admin always has full access and can’t be limited.</small>}
           </div>
         </div>
+
         <div className="role-modal-f">
-          <button className="adm-btn ghost" onClick={onClose}>Cancel</button>
-          <button className="adm-btn primary" onClick={() => { addToast(isNew ? 'Role created' : role[0] + ' updated'); onClose(); }}>{isNew ? 'Create role' : 'Save changes'}</button>
+          <button className="adm-btn ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="adm-btn primary" onClick={saveRole} disabled={saving}>{saving ? 'Saving…' : isNew ? 'Create role' : 'Save changes'}</button>
         </div>
       </div>
     </div>
   );
 }
 
-export function AdminRoles() {
+function InviteStaffDrawer({ roles, onInvited, onClose }) {
   const addToast = useAdminToast();
-  const [edit, setEdit] = useState(null); // role array or 'new'
-  const [staff, setStaff] = useState(STAFF);
-  const assign = (email, newRole) => { setStaff(s => s.map(m => m[1] === email ? [m[0], m[1], newRole] : m)); addToast(email + ' → ' + newRole); };
-  const addMember = (nm, email, roleName) => {
-    if (staff.some(m => m[1] === email)) { addToast('That email is already a member'); return; }
-    setStaff(s => [...s, [nm, email, roleName]]); addToast(nm + ' added to ' + roleName);
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [roleId, setRoleId] = useState(roles[0]?.id || '');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!email.trim()) return;
+    setSaving(true);
+    try {
+      await adminRolesApi.inviteStaff({
+        email: email.trim(),
+        name: name.trim() || undefined,
+        role_id: roleId ? Number(roleId) : undefined,
+      });
+      addToast('Staff invitation sent');
+      await onInvited();
+      onClose();
+    } catch (error) {
+      addToast(messageFrom(error));
+    } finally {
+      setSaving(false);
+    }
   };
-  const removeMember = (email) => { setStaff(s => s.filter(m => m[1] !== email)); addToast('Member removed'); };
-  const editRole = edit && edit !== 'new' ? edit : null;
+
   return (
     <>
-      <AdmHead title="Roles & Access" sub="Role-based permissions"><button className="adm-btn primary" onClick={() => setEdit('new')}><Icon name="plus" size={15} /> Add role</button></AdmHead>
-      <div className="adm-row c3">
-        {ADMIN_ROLES.map((r, i) => (
-          <div className="panel" key={i}>
-            <span className="kpi-ic" style={{ background: r[3] + '22', color: r[3] }}><Icon name="lock" size={18} /></span>
-            <h3 style={{ margin: '12px 0 4px', fontSize: 16 }}>{r[0]}</h3>
-            <p className="muted" style={{ fontSize: 13 }}>{r[1]}</p>
-            <div className="row between" style={{ marginTop: 14 }}><small className="muted" style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}>{staff.filter(s => s[2] === r[0]).length} member{staff.filter(s => s[2] === r[0]).length !== 1 ? 's' : ''}</small><a onClick={() => setEdit(r)} style={{ color: 'var(--primary)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Edit</a></div>
-          </div>
-        ))}
+      <div className="adm-drawer-scrim" onClick={onClose} />
+      <aside className="adm-drawer" role="dialog" aria-label="Invite staff member">
+        <div className="adm-drawer-h">
+          <div><h3>Invite staff member</h3><small className="muted">Send a role-scoped invitation email.</small></div>
+          <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
+        </div>
+        <div className="adm-drawer-body">
+          <label className="adm-field"><span>Full name</span><input value={name} onChange={e => setName(e.target.value)} placeholder="Jane Doe" /></label>
+          <label className="adm-field"><span>Work email</span><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="jane@limitra.com.ng" /></label>
+          <label className="adm-field">
+            <span>Assign role</span>
+            <select value={roleId} onChange={e => setRoleId(e.target.value)}>
+              {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="adm-drawer-f">
+          <button className="adm-btn ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="adm-btn primary" onClick={submit} disabled={saving || !email.trim()}>{saving ? 'Sending…' : 'Send invite'}</button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+export function AdminRoles() {
+  const addToast = useAdminToast();
+  const [roles, setRoles] = useState([]);
+  const [permissions, setPermissions] = useState([]);
+  const [invitations, setInvitations] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [edit, setEdit] = useState(null);
+  const [inviting, setInviting] = useState(false);
+
+  const loadAll = useCallback(async () => {
+    try {
+      const [rolesRes, permsRes, invitesRes] = await Promise.all([
+        adminRolesApi.list().catch(() => []),
+        adminRolesApi.permissions().catch(() => []),
+        adminRolesApi.invitations().catch(() => []),
+      ]);
+      setRoles(asList(rolesRes));
+      setPermissions(asList(permsRes));
+      setInvitations(asList(invitesRes));
+    } catch (error) {
+      addToast(messageFrom(error));
+    } finally {
+      setLoaded(true);
+    }
+  }, [addToast]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  const { shown: shownInvites, pagerProps: invitePager } = usePager(invitations, invitations.length);
+
+  const deleteRole = async (role) => {
+    if (!window.confirm(`Delete role “${role.name}”?`)) return;
+    try {
+      await adminRolesApi.remove(role.id);
+      addToast('Role deleted');
+      await loadAll();
+    } catch (error) {
+      addToast(messageFrom(error));
+    }
+  };
+
+  const resendInvite = async (inv) => {
+    try {
+      await adminRolesApi.resendInvite(inv.id);
+      addToast(`Invitation resent to ${inv.email}`);
+    } catch (error) {
+      addToast(messageFrom(error));
+    }
+  };
+
+  const revokeInvite = async (inv) => {
+    try {
+      await adminRolesApi.revokeInvite(inv.id);
+      addToast('Invitation revoked');
+      await loadAll();
+    } catch (error) {
+      addToast(messageFrom(error));
+    }
+  };
+
+  return (
+    <>
+      <AdmHead title="Roles & Access" sub="Role-based permissions and staff invitations synced with Limitra API.">
+        <button className="adm-btn ghost" onClick={() => setInviting(true)} disabled={roles.length === 0}><Icon name="mail" size={15} /> Invite staff</button>
+        <button className="adm-btn primary" onClick={() => setEdit('new')}><Icon name="plus" size={15} /> Add role</button>
+      </AdmHead>
+
+      <div className="prc-kpis" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        <div className="prc-kpi accent">
+          <div className="prc-kpi-top"><span>Defined Roles</span><Icon name="lock" size={15} /></div>
+          <b>{loaded ? roles.length : '—'}</b>
+          <small>Access profiles</small>
+        </div>
+        <div className="prc-kpi">
+          <div className="prc-kpi-top"><span>Permissions</span><Icon name="shield" size={15} /></div>
+          <b>{loaded ? permissions.length : '—'}</b>
+          <small>Granular capabilities</small>
+        </div>
+        <div className="prc-kpi">
+          <div className="prc-kpi-top"><span>Staff Invitations</span><Icon name="mail" size={15} /></div>
+          <b>{loaded ? invitations.length : '—'}</b>
+          <small>Pending &amp; sent invites</small>
+        </div>
       </div>
-      {edit && <RoleDrawer role={editRole} members={editRole ? staff.filter(s => s[2] === editRole[0]) : []} roleNames={ROLE_NAMES} onAssign={assign} onAdd={addMember} onRemove={removeMember} onClose={() => setEdit(null)} />}
+
+      {!loaded ? (
+        <div className="panel"><div className="adm-soon"><p>Loading roles &amp; permissions…</p></div></div>
+      ) : (
+        <div className="adm-row c3" style={{ marginBottom: 20 }}>
+          {roles.map((r, i) => {
+            const color = ROLE_COLORS[i % ROLE_COLORS.length];
+            const memberCount = r.users_count ?? r.members_count ?? r.members?.length ?? 0;
+            const permCount = r.permissions_count ?? r.permissions?.length ?? 0;
+            return (
+              <div className="panel" key={r.id || r.name}>
+                <div className="row between">
+                  <span className="kpi-ic" style={{ background: color + '22', color }}><Icon name="lock" size={18} /></span>
+                  <span className="adm-pill muted">{permCount} perm{permCount === 1 ? '' : 's'}</span>
+                </div>
+                <h3 style={{ margin: '12px 0 4px', fontSize: 16 }}>{r.name}</h3>
+                <p className="muted" style={{ fontSize: 13 }}>{r.description || 'Custom access role'}</p>
+                <div className="row between" style={{ marginTop: 14 }}>
+                  <small className="muted" style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}>
+                    {memberCount} member{memberCount === 1 ? '' : 's'}
+                  </small>
+                  <div className="row" style={{ gap: 10 }}>
+                    <button type="button" className="link-btn" onClick={() => setEdit(r)}>Edit</button>
+                    {!r.is_system && <button type="button" className="link-btn" style={{ color: 'var(--red)' }} onClick={() => deleteRole(r)}>Delete</button>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="panel" style={{ padding: 0 }}>
+        <div className="panel-h" style={{ padding: '18px 20px 10px' }}>
+          <h3>Staff Invitations <span className="muted" style={{ fontWeight: 400 }}>· {invitations.length}</span></h3>
+        </div>
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th></th></tr></thead>
+            <tbody>
+              {shownInvites.map(inv => (
+                <tr key={inv.id}>
+                  <td data-label="Email"><b>{inv.email}</b>{inv.name && <small style={{ display: 'block' }} className="muted">{inv.name}</small>}</td>
+                  <td data-label="Role"><span className="adm-pill info">{inv.role?.name || inv.role_name || 'Staff'}</span></td>
+                  <td data-label="Status"><span className={'adm-pill ' + (inv.accepted_at ? 'ok' : 'warn')}>{inv.accepted_at ? 'Accepted' : (inv.status || 'Pending')}</span></td>
+                  <td data-label="Expires" className="muted">{inv.expires_at ? new Date(inv.expires_at).toLocaleDateString('en-NG') : '—'}</td>
+                  <td data-label="Actions">
+                    <div className="adm-rowact">
+                      {!inv.accepted_at && <button title="Resend invite" onClick={() => resendInvite(inv)}><Icon name="refresh" size={15} /></button>}
+                      <button className="del" title="Revoke invite" onClick={() => revokeInvite(inv)}><Icon name="trash" size={15} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {invitations.length === 0 && <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-faint)' }}>No staff invitations yet.</div>}
+          <Pager {...invitePager} />
+        </div>
+      </div>
+
+      {edit && <RoleDrawer role={edit === 'new' ? null : edit} permissionsList={permissions} onSaved={loadAll} onClose={() => setEdit(null)} />}
+      {inviting && <InviteStaffDrawer roles={roles} onInvited={loadAll} onClose={() => setInviting(false)} />}
     </>
   );
 }

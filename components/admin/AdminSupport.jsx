@@ -13,7 +13,7 @@ import { Icon } from '@/components/icons/Icon';
 import { adminSupportTicketsApi, supportTicketsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead } from './AdminShared';
+import { AdmHead, Pager, usePager } from './AdminShared';
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // Deliberately not toLocaleDateString — ICU-data divergence between server
@@ -178,6 +178,7 @@ export function AdminSupport() {
 
   const tabs = ['all', ...TICKET_STATUSES];
   const visible = tickets.filter(t => (status === 'all' || t.status === status) && (!q || String(t.id).includes(q) || t.subject.toLowerCase().includes(q.toLowerCase()) || t.customer.toLowerCase().includes(q.toLowerCase())));
+  const { shown: shownTickets, pagerProps: ticketPager } = usePager(visible, q + status);
 
   if (openTicket) {
     return (
@@ -188,19 +189,29 @@ export function AdminSupport() {
     );
   }
 
+  const openCount = tickets.filter(t => ['open', 'in_progress', 'waiting_customer'].includes(t.status)).length;
+  const resolvedCount = tickets.filter(t => ['resolved', 'closed'].includes(t.status)).length;
+
   return (
     <>
-      <AdmHead title="Support Tickets" sub={`${tickets.length} total tickets`} />
+      <AdmHead title="Support Tickets" sub={`${tickets.length} total tickets`}>
+        <button className="adm-btn ghost" onClick={loadAll}><Icon name="refresh" size={14} /> Refresh</button>
+      </AdmHead>
+      <div className="prc-kpis" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        <div className="prc-kpi accent"><div className="prc-kpi-top"><span>Total Tickets</span><Icon name="headset" size={15} /></div><b>{loaded ? tickets.length : '—'}</b><small>All support threads</small></div>
+        <div className="prc-kpi warn"><div className="prc-kpi-top"><span>Active / Open</span><Icon name="chat" size={15} /></div><b>{loaded ? openCount : '—'}</b><small>Needs attention</small></div>
+        <div className="prc-kpi"><div className="prc-kpi-top"><span>Resolved</span><Icon name="check" size={15} /></div><b>{loaded ? resolvedCount : '—'}</b><small>Completed threads</small></div>
+      </div>
       <div className="adm-filters">
         <div className="adm-mini-search"><Icon name="search" size={16} className="muted" /><input placeholder="Search ticket #, subject or customer…" value={q} onChange={e => setQ(e.target.value)} /></div>
-        {tabs.map(t => <button key={t} className={'adm-chip' + (status === t ? ' on' : '')} onClick={() => setStatus(t)}>{t === 'all' ? 'All' : t}</button>)}
+        {tabs.map(t => <button key={t} className={'adm-chip' + (status === t ? ' on' : '')} onClick={() => setStatus(t)}>{t === 'all' ? 'All' : t.replace(/_/g, ' ')}</button>)}
       </div>
       <div className="panel" style={{ padding: 0 }}>
         {!loaded ? <div className="adm-soon"><p>Loading tickets…</p></div> : (
           <div className="adm-table-wrap">
             <table className="adm-table">
               <thead><tr><th>Ticket</th><th>Subject</th><th>Customer</th><th>Date</th><th>Priority</th><th>Status</th><th></th></tr></thead>
-              <tbody>{visible.map(t => (
+              <tbody>{shownTickets.map(t => (
                 <tr key={t.id}>
                   <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{t.id}</b></td>
                   <td>{t.subject}</td>
@@ -216,6 +227,7 @@ export function AdminSupport() {
               ))}</tbody>
             </table>
             {visible.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No tickets match your filters.</div>}
+            <Pager {...ticketPager} />
           </div>
         )}
       </div>

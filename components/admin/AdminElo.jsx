@@ -10,7 +10,7 @@ import { Icon } from '@/components/icons/Icon';
 import { adminAiApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead } from './AdminShared';
+import { AdmHead, Pager, usePager } from './AdminShared';
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // Deliberately not toLocaleDateString — ICU-data divergence between server
@@ -90,6 +90,16 @@ export function AdminElo() {
   const [convoDraft, setConvoDraft] = useState(null);
   const [docDraft, setDocDraft] = useState(null);
   const [settingsDraft, setSettingsDraft] = useState(null);
+  const [q, setQ] = useState('');
+
+  const { shown: shownConvos, pagerProps: convoPager } = usePager(
+    conversations.filter(c => !q || String(c.id).includes(q) || (c.customer || '').toLowerCase().includes(q.toLowerCase())),
+    q + section,
+  );
+  const { shown: shownDocs, pagerProps: docPager } = usePager(
+    docs.filter(d => !q || (d.title || '').toLowerCase().includes(q.toLowerCase()) || (d.category || '').toLowerCase().includes(q.toLowerCase())),
+    q + section,
+  );
 
   const loadAll = useCallback(async () => {
     try {
@@ -202,6 +212,12 @@ export function AdminElo() {
         {SECTIONS.map(([key, label]) => (
           <button key={key} className={'adm-chip' + (section === key ? ' on' : '')} onClick={() => setSection(key)}>{label}</button>
         ))}
+        {section !== 'settings' && (
+          <div className="adm-mini-search" style={{ marginLeft: 'auto' }}>
+            <Icon name="search" size={15} className="muted" />
+            <input placeholder={section === 'conversations' ? 'Search conversations…' : 'Search knowledge base…'} value={q} onChange={e => setQ(e.target.value)} />
+          </div>
+        )}
       </div>
 
       {section === 'conversations' && (
@@ -210,7 +226,7 @@ export function AdminElo() {
             <div className="adm-table-wrap">
               <table className="adm-table">
                 <thead><tr><th>Conversation</th><th>Customer</th><th>Channel</th><th>Date</th><th>Status</th><th></th></tr></thead>
-                <tbody>{conversations.map(c => (
+                <tbody>{shownConvos.map(c => (
                   <tr key={c.id}>
                     <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{c.id}</b></td>
                     <td>{c.customer}</td>
@@ -223,7 +239,8 @@ export function AdminElo() {
                   </tr>
                 ))}</tbody>
               </table>
-              {conversations.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No conversations yet.</div>}
+              {shownConvos.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No conversations match your filter.</div>}
+              <Pager {...convoPager} />
             </div>
           )}
         </div>
@@ -231,9 +248,9 @@ export function AdminElo() {
 
       {section === 'knowledge' && (
         <div className="panel cat-panel">
-          {!loaded ? <div className="adm-soon"><p>Loading knowledge base…</p></div> : docs.length === 0 ? (
-            <div className="adm-soon"><div className="as-ic"><Icon name="edit" size={26} /></div><h3>No knowledge documents yet</h3><p>Add one so Elo can ground its answers in real store policy and info.</p></div>
-          ) : docs.map(doc => (
+          {!loaded ? <div className="adm-soon"><p>Loading knowledge base…</p></div> : shownDocs.length === 0 ? (
+            <div className="adm-soon"><div className="as-ic"><Icon name="edit" size={26} /></div><h3>No knowledge documents match</h3><p>Add one so Elo can ground its answers in real store policy and info.</p></div>
+          ) : shownDocs.map(doc => (
             <div className="cat-parent-row" key={doc.id}>
               <div className="cat-icon"><Icon name="edit" size={19} /></div>
               <div className="cat-main"><b>{doc.title}</b><small>{[doc.category, doc.slug].filter(Boolean).join(' · ')}</small></div>
@@ -245,6 +262,7 @@ export function AdminElo() {
               </div>
             </div>
           ))}
+          {loaded && docs.length > 0 && <Pager {...docPager} />}
         </div>
       )}
 

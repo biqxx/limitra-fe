@@ -24,7 +24,7 @@ export function AdmHead({ title, sub, children }) {
   return <div className="adm-h"><div><h1>{title}</h1><p>{sub}</p></div><div className="adm-h-actions">{children}</div></div>;
 }
 
-export function Pager({ page, pages, onPage }) {
+export function Pager({ page, pages, onPage, perPage, onPerPage, total }) {
   // windowed page list with ellipsis: 1 … (p-1) p (p+1) … last
   const nums = [];
   const push = (n) => { if (!nums.includes(n) && n >= 1 && n <= pages) nums.push(n); };
@@ -38,23 +38,47 @@ export function Pager({ page, pages, onPage }) {
     withGaps.push(n);
   });
   return (
-    <div className="adm-pager">
-      <button className="pg" disabled={page <= 1} onClick={() => onPage(page - 1)}><Icon name="chevleft" size={16} /></button>
-      {withGaps.map((n, i) => n === '…'
-        ? <span key={'g' + i} className="pg-gap">…</span>
-        : <button key={n} className={'pg' + (page === n ? ' on' : '')} onClick={() => onPage(n)}>{n}</button>)}
-      <button className="pg" disabled={page >= pages} onClick={() => onPage(page + 1)}><Icon name="chevright" size={16} /></button>
+    <div className="adm-pager-wrap">
+      {onPerPage && (
+        <div className="adm-per-page">
+          <span>Rows:</span>
+          <select value={perPage} onChange={e => onPerPage(Number(e.target.value))} aria-label="Rows per page">
+            {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+          {typeof total === 'number' && (
+            <small className="muted">
+              {total === 0 ? '0 items' : `${(page - 1) * perPage + 1}–${Math.min(page * perPage, total)} of ${total}`}
+            </small>
+          )}
+        </div>
+      )}
+      <div className="adm-pager">
+        <button className="pg" disabled={page <= 1} onClick={() => onPage(page - 1)}><Icon name="chevleft" size={16} /></button>
+        {withGaps.map((n, i) => n === '…'
+          ? <span key={'g' + i} className="pg-gap">…</span>
+          : <button key={n} className={'pg' + (page === n ? ' on' : '')} onClick={() => onPage(n)}>{n}</button>)}
+        <button className="pg" disabled={page >= pages} onClick={() => onPage(page + 1)}><Icon name="chevright" size={16} /></button>
+      </div>
     </div>
   );
 }
 
-export function usePager(list, q, extra) {
+export function usePager(list, q, extra, initialPer = 10) {
   const [pg, setPg] = useState(1);
-  const per = 10;
+  const [per, setPer] = useState(initialPer);
   const pages = Math.max(1, Math.ceil(list.length / per));
   const cur = Math.min(pg, pages);
-  useEffect(() => { setPg(1); }, [q, extra]);
-  return { shown: list.slice((cur - 1) * per, cur * per), page: cur, pages, setPage: setPg };
+  useEffect(() => { setPg(1); }, [q, extra, per]);
+  return {
+    shown: list.slice((cur - 1) * per, cur * per),
+    page: cur,
+    pages,
+    setPage: setPg,
+    perPage: per,
+    setPerPage: setPer,
+    total: list.length,
+    pagerProps: { page: cur, pages, onPage: setPg, perPage: per, onPerPage: setPer, total: list.length },
+  };
 }
 
 export function Toggle({ defaultOn, locked }) {
