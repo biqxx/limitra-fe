@@ -21,6 +21,21 @@ const moneyKeys = new Set([
   'pricing.local_shipping_ngn_minor',
 ]);
 
+const marginKeys = new Set([
+  'pricing.profit_markup_basis_points',
+  'pricing.sales_tax_basis_points',
+  'pricing.customs_basis_points',
+  'pricing.reprice_threshold_basis_points',
+]);
+
+const logisticsKeys = new Set([
+  'pricing.air_cargo_usd_cents_per_lb',
+  'pricing.local_shipping_ngn_minor',
+  'pricing.fx_buffer_ngn_minor',
+  'pricing.processing_fee_ngn_minor',
+  'pricing.rounding_unit_ngn_minor',
+]);
+
 function displayValue(setting) {
   if (percentKeys.has(setting.key)) return Number(setting.value) / 100;
   if (moneyKeys.has(setting.key)) return Number(setting.value) / 100;
@@ -67,8 +82,22 @@ export function AdminPricing() {
   const [categories, setCategories] = useState([]);
   const [catDraft, setCatDraft] = useState({});
   const [catFilter, setCatFilter] = useState('');
+  const [onlyOverrides, setOnlyOverrides] = useState(false);
+  const [collapsed, setCollapsed] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const hydrateDrafts = useCallback((items, catList) => {
+    setDraft(Object.fromEntries(items.map(setting => [setting.key, displayValue(setting)])));
+    const nextCatDraft = {};
+    catList.forEach(cat => {
+      nextCatDraft[cat.id] = categoryMarkupDisplay(cat);
+      (cat.subcategories || []).forEach(sub => {
+        nextCatDraft[sub.id] = categoryMarkupDisplay(sub);
+      });
+    });
+    setCatDraft(nextCatDraft);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -77,34 +106,27 @@ export function AdminPricing() {
         adminCategoriesApi.list().catch(() => []),
       ]);
       const items = Array.isArray(response) ? response : response?.items || response?.data || [];
-      setSettings(items);
-      setDraft(Object.fromEntries(items.map(setting => [setting.key, displayValue(setting)])));
-
       const catList = Array.isArray(rawCats) ? rawCats : rawCats?.items || rawCats?.data || [];
+      setSettings(items);
       setCategories(catList);
-      const nextCatDraft = {};
-      catList.forEach(cat => {
-        nextCatDraft[cat.id] = categoryMarkupDisplay(cat);
-        (cat.subcategories || []).forEach(sub => {
-          nextCatDraft[sub.id] = categoryMarkupDisplay(sub);
-        });
-      });
-      setCatDraft(nextCatDraft);
+      hydrateDrafts(items, catList);
     } catch (error) {
       toast(messageFrom(error));
     } finally {
       setLoaded(true);
     }
-  }, [toast]);
+  }, [hydrateDrafts, toast]);
 
   // Initial network hydration is intentionally triggered when the page mounts.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
-  const changed = useMemo(() => settings.filter(setting => {
+  const isSettingDirty = useCallback((setting) => {
     const next = storedValue(setting, draft[setting.key]);
     return JSON.stringify(next) !== JSON.stringify(setting.value);
-  }), [draft, settings]);
+  }, [draft]);
+
+  const changed = useMemo(() => settings.filter(isSettingDirty), [isSettingDirty, settings]);
 
   const flatCategories = useMemo(() => {
     const rows = [];
@@ -117,23 +139,54 @@ export function AdminPricing() {
     return rows;
   }, [categories]);
 
-  const changedCategories = useMemo(() => flatCategories.filter(cat => {
+  const isCatDirty = useCallback((cat) => {
     const nextBp = categoryMarkupBasisPoints(catDraft[cat.id]);
     const currentBp = cat.profit_markup_basis_points == null ? null : Number(cat.profit_markup_basis_points);
     return nextBp !== currentBp;
-  }), [catDraft, flatCategories]);
+  }, [catDraft]);
+
+  const changedCategories = useMemo(() => flatCategories.filter(isCatDirty), [flatCategories, isCatDirty]);
+
+  const overrideCount = useMemo(
+    () => flatCategories.filter(cat => String(catDraft[cat.id] ?? '').trim() !== '').length,
+    [catDraft, flatCategories],
+  );
 
   const totalChanges = changed.length + changedCategories.length;
   const globalMarkupPct = Number(draft['pricing.profit_markup_basis_points'] ?? 0);
 
+  const ruleGroups = useMemo(() => {
+    const margins = [];
+    const logistics = [];
+    const sourcing = [];
+    settings.forEach(s => {
+      if (marginKeys.has(s.key)) margins.push(s);
+      else if (logisticsKeys.has(s.key)) logistics.push(s);
+      else sourcing.push(s);
+    });
+    return [
+      { id: 'margins', title: 'Margins, Taxes & Repricing', sub: 'Default profit markup, US sales tax, customs duty, and auto-reprice threshold.', icon: 'tag', items: margins },
+      { id: 'logistics', title: 'Shipping, FX & Processing Fees', sub: 'Air cargo per-lb rate, local delivery, FX buffer, payment fees, and rounding.', icon: 'truck', items: logistics },
+      { id: 'sourcing', title: 'Sourcing Guards & Exclusions', sub: 'Weight and delivery limits plus keyword filters applied during supplier import.', icon: 'shield', items: sourcing },
+    ].filter(g => g.items.length > 0);
+  }, [settings]);
+
   const filteredCategories = useMemo(() => {
     const q = catFilter.trim().toLowerCase();
-    if (!q) return categories;
-    return categories.filter(cat =>
-      cat.name?.toLowerCase().includes(q)
-      || (cat.subcategories || []).some(sub => sub.name?.toLowerCase().includes(q))
-    );
-  }, [categories, catFilter]);
+    return categories.filter(cat => {
+      const catHasOverride = String(catDraft[cat.id] ?? '').trim() !== '';
+      const subHasOverride = (cat.subcategories || []).some(sub => String(catDraft[sub.id] ?? '').trim() !== '');
+      if (onlyOverrides && !catHasOverride && !subHasOverride) return false;
+      if (!q) return true;
+      return cat.name?.toLowerCase().includes(q)
+        || (cat.subcategories || []).some(sub => sub.name?.toLowerCase().includes(q));
+    });
+  }, [categories, catDraft, catFilter, onlyOverrides]);
+
+  const resetDraft = () => {
+    hydrateDrafts(settings, categories);
+    toast('Unsaved changes discarded.');
+  };
 
   const save = async () => {
     if (totalChanges === 0) return;
@@ -161,91 +214,180 @@ export function AdminPricing() {
 
   return (
     <>
-      <AdmHead title="Pricing rules" sub="The Limitra API is the single source of truth for sourced-product prices.">
+      <AdmHead title="Pricing rules" sub="Single source of truth for global margins, landed-cost fees, and category overrides.">
+        {totalChanges > 0 && (
+          <button type="button" className="adm-btn ghost" onClick={resetDraft} disabled={saving}>
+            <Icon name="refresh" size={14} /> Discard
+          </button>
+        )}
         <button className="adm-btn primary" onClick={save} disabled={saving || totalChanges === 0}>
-          <Icon name="check" size={15} /> {saving ? 'Saving…' : `Save ${totalChanges || ''} change${totalChanges === 1 ? '' : 's'}`}
+          <Icon name="check" size={15} /> {saving ? 'Saving…' : totalChanges > 0 ? `Save ${totalChanges} change${totalChanges === 1 ? '' : 's'}` : 'All changes saved'}
         </button>
       </AdmHead>
+
+      <div className="prc-kpis">
+        <div className="prc-kpi accent">
+          <div className="prc-kpi-top"><span>Global Markup</span><Icon name="tag" size={15} /></div>
+          <b>{loaded && Number.isFinite(globalMarkupPct) ? `${globalMarkupPct}%` : '—'}</b>
+          <small>Default profit margin</small>
+        </div>
+        <div className="prc-kpi">
+          <div className="prc-kpi-top"><span>Global Rules</span><Icon name="shield" size={15} /></div>
+          <b>{loaded ? settings.length : '—'}</b>
+          <small>Synced from Limitra API</small>
+        </div>
+        <div className="prc-kpi">
+          <div className="prc-kpi-top"><span>Custom Overrides</span><Icon name="grid" size={15} /></div>
+          <b>{loaded ? overrideCount : '—'}</b>
+          <small>Across {flatCategories.length} categories</small>
+        </div>
+        <div className={`prc-kpi${totalChanges > 0 ? ' warn' : ''}`}>
+          <div className="prc-kpi-top"><span>Pending Edits</span><Icon name="edit" size={15} /></div>
+          <b>{totalChanges}</b>
+          <small>{totalChanges > 0 ? 'Ready to save & reprice' : 'No unsaved changes'}</small>
+        </div>
+      </div>
 
       <div className="adm-note" style={{ marginBottom: 18 }}>
         <Icon name="info" size={15} /> Saving any rule or category markup override queues a background review of affected sourced products. New prices still require administrator approval before publishing.
       </div>
 
-      <div className="panel" style={{ padding: 0, marginBottom: 22 }}>
-        {!loaded ? <div className="adm-soon"><p>Loading pricing rules…</p></div> : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 0 }}>
-            {settings.map(setting => {
-              const isDecimal = percentKeys.has(setting.key) || moneyKeys.has(setting.key) || setting.key === 'pricing.air_cargo_usd_cents_per_lb';
-              return (
-                <label key={setting.key} className="adm-field" style={{ padding: 20, margin: 0, borderBottom: '1px solid var(--border)' }}>
-                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><b>{setting.label}</b><small className="muted">v{setting.version}</small></span>
-                  {setting.type === 'boolean' ? (
-                    <select value={draft[setting.key] ? 'yes' : 'no'} onChange={event => setDraft(current => ({ ...current, [setting.key]: event.target.value === 'yes' }))}>
-                      <option value="no">No — charge at checkout</option>
-                      <option value="yes">Yes — include in product price</option>
-                    </select>
-                  ) : setting.type === 'array' ? (
-                    <textarea rows="4" value={draft[setting.key] ?? ''} onChange={event => setDraft(current => ({ ...current, [setting.key]: event.target.value }))} placeholder="Comma-separated keywords" />
-                  ) : (
-                    <div style={{ position: 'relative' }}>
-                      <input type="number" min="0" step={isDecimal ? '0.01' : '1'} value={draft[setting.key] ?? ''} onChange={event => setDraft(current => ({ ...current, [setting.key]: event.target.value }))} />
-                      {unitFor(setting) && <small className="muted" style={{ position: 'absolute', right: 12, top: 12 }}>{unitFor(setting)}</small>}
+      {!loaded ? (
+        <div className="panel"><div className="adm-soon"><p>Loading pricing rules…</p></div></div>
+      ) : (
+        ruleGroups.map(group => (
+          <section key={group.id} className="prc-section">
+            <div className="prc-sec-head">
+              <div className="prc-sec-title">
+                <span className="prc-sec-ic"><Icon name={group.icon} size={17} /></span>
+                <div>
+                  <h3>{group.title}</h3>
+                  <small>{group.sub}</small>
+                </div>
+              </div>
+              <span className="adm-pill muted">{group.items.length} rule{group.items.length === 1 ? '' : 's'}</span>
+            </div>
+
+            <div className="prc-grid">
+              {group.items.map(setting => {
+                const isDecimal = percentKeys.has(setting.key) || moneyKeys.has(setting.key) || setting.key === 'pricing.air_cargo_usd_cents_per_lb';
+                const dirty = isSettingDirty(setting);
+                const unit = unitFor(setting);
+                return (
+                  <label key={setting.key} className={`prc-rule${dirty ? ' dirty' : ''}${setting.type === 'array' ? ' wide' : ''}`}>
+                    <div className="prc-rule-head">
+                      <b>{setting.label}</b>
+                      <div className="prc-rule-meta">
+                        {dirty && <span className="adm-pill warn">Modified</span>}
+                        <span className="prc-ver">v{setting.version}</span>
+                      </div>
                     </div>
-                  )}
-                  <small className="muted" style={{ lineHeight: 1.5 }}>{setting.description}</small>
-                </label>
-              );
-            })}
-          </div>
-        )}
-      </div>
+
+                    {setting.type === 'boolean' ? (
+                      <div className="prc-input-wrap">
+                        <select value={draft[setting.key] ? 'yes' : 'no'} onChange={event => setDraft(current => ({ ...current, [setting.key]: event.target.value === 'yes' }))}>
+                          <option value="no">No — charge at checkout</option>
+                          <option value="yes">Yes — include in product price</option>
+                        </select>
+                      </div>
+                    ) : setting.type === 'array' ? (
+                      <textarea className="prc-textarea" rows="3" value={draft[setting.key] ?? ''} onChange={event => setDraft(current => ({ ...current, [setting.key]: event.target.value }))} placeholder="Comma-separated keywords" />
+                    ) : (
+                      <div className="prc-input-wrap">
+                        <input type="number" min="0" step={isDecimal ? '0.01' : '1'} value={draft[setting.key] ?? ''} onChange={event => setDraft(current => ({ ...current, [setting.key]: event.target.value }))} />
+                        {unit && <span className="prc-unit">{unit}</span>}
+                      </div>
+                    )}
+
+                    <p className="prc-rule-desc">{setting.description}</p>
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+        ))
+      )}
 
       {loaded && categories.length > 0 && (
-        <div className="panel" style={{ padding: 20 }}>
-          <div className="row between" style={{ marginBottom: 14, flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: 17 }}>Category &amp; subcategory profit markup overrides</h3>
-              <small className="muted">Precedence: subcategory override → category override → global default ({Number.isFinite(globalMarkupPct) ? `${globalMarkupPct}%` : '—'}). Leave blank to inherit.</small>
+        <section className="prc-section">
+          <div className="prc-sec-head">
+            <div className="prc-sec-title">
+              <span className="prc-sec-ic"><Icon name="grid" size={17} /></span>
+              <div>
+                <h3>Category &amp; Subcategory Markup Overrides</h3>
+                <small>Precedence: Subcategory → Category → Global ({Number.isFinite(globalMarkupPct) ? `${globalMarkupPct}%` : '—'}). Leave blank to inherit.</small>
+              </div>
             </div>
-            <input
-              type="search"
-              value={catFilter}
-              onChange={e => setCatFilter(e.target.value)}
-              placeholder="Filter categories…"
-              style={{ maxWidth: 240, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)' }}
-            />
+
+            <div className="prc-cat-tools">
+              <button type="button" className={`adm-chip${!onlyOverrides ? ' on' : ''}`} onClick={() => setOnlyOverrides(false)}>All</button>
+              <button type="button" className={`adm-chip${onlyOverrides ? ' on' : ''}`} onClick={() => setOnlyOverrides(true)}>Overrides ({overrideCount})</button>
+              <div className="adm-mini-search">
+                <Icon name="search" size={14} />
+                <input
+                  type="search"
+                  value={catFilter}
+                  onChange={e => setCatFilter(e.target.value)}
+                  placeholder="Filter categories…"
+                />
+              </div>
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gap: 10 }}>
-            {filteredCategories.map(cat => {
-              const catVal = catDraft[cat.id] ?? '';
-              const catEff = catVal !== '' ? `${catVal}%` : `${globalMarkupPct}% (global)`;
+          <div className="prc-cat-list">
+            {filteredCategories.length === 0 ? (
+              <div className="adm-soon"><p>No categories match the current filter.</p></div>
+            ) : filteredCategories.map(cat => {
+              const catVal = String(catDraft[cat.id] ?? '').trim();
+              const catDirty = isCatDirty(cat);
               const subs = cat.subcategories || [];
               const q = catFilter.trim().toLowerCase();
-              const visibleSubs = q && !cat.name?.toLowerCase().includes(q)
-                ? subs.filter(s => s.name?.toLowerCase().includes(q))
-                : subs;
+              const visibleSubs = subs.filter(s => {
+                if (onlyOverrides && String(catDraft[s.id] ?? '').trim() === '' && catVal === '') return false;
+                if (q && !cat.name?.toLowerCase().includes(q)) return s.name?.toLowerCase().includes(q);
+                return true;
+              });
+              const isOpen = !collapsed[cat.id] || q !== '';
 
               return (
-                <div key={cat.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
-                  <div className="row between" style={{ gap: 12, flexWrap: 'wrap' }}>
-                    <div>
-                      <b>{cat.name}</b>
-                      <small className="muted" style={{ display: 'block', marginTop: 2 }}>Effective markup: {catEff}</small>
+                <div key={cat.id} className="prc-cat-group">
+                  <div className={`prc-cat-row${catDirty ? ' dirty' : ''}`}>
+                    <div className="prc-cat-left">
+                      {subs.length > 0 ? (
+                        <button
+                          type="button"
+                          className="cat-expand"
+                          aria-label={isOpen ? 'Collapse subcategories' : 'Expand subcategories'}
+                          onClick={() => setCollapsed(c => ({ ...c, [cat.id]: !c[cat.id] }))}
+                        >
+                          <Icon name={isOpen ? 'chevdown' : 'chevright'} size={15} />
+                        </button>
+                      ) : <span style={{ width: 26 }} />}
+
+                      <div className="prc-cat-name">
+                        <b>{cat.name}</b>
+                        {catVal !== '' ? (
+                          <span className="adm-pill info">{catVal}% override</span>
+                        ) : (
+                          <span className="adm-pill muted">Inherits {globalMarkupPct}%</span>
+                        )}
+                        {catDirty && <span className="adm-pill warn">Modified</span>}
+                        {subs.length > 0 && <small className="muted">{subs.length} subcategor{subs.length === 1 ? 'y' : 'ies'}</small>}
+                      </div>
                     </div>
-                    <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                      <div style={{ position: 'relative', width: 130 }}>
+
+                    <div className="prc-cat-right">
+                      <div className="prc-input-wrap prc-cat-input">
                         <input
                           type="number"
                           min="0"
                           max="1000"
                           step="0.01"
                           placeholder={String(globalMarkupPct)}
-                          value={catVal}
+                          value={catDraft[cat.id] ?? ''}
                           onChange={e => setCatDraft(c => ({ ...c, [cat.id]: e.target.value }))}
-                          style={{ width: '100%', paddingRight: 28 }}
                         />
-                        <small className="muted" style={{ position: 'absolute', right: 10, top: 10 }}>%</small>
+                        <span className="prc-unit">%</span>
                       </div>
                       {catVal !== '' && (
                         <button type="button" className="adm-btn ghost" onClick={() => setCatDraft(c => ({ ...c, [cat.id]: '' }))}>Clear</button>
@@ -253,30 +395,39 @@ export function AdminPricing() {
                     </div>
                   </div>
 
-                  {visibleSubs.length > 0 && (
-                    <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)', display: 'grid', gap: 8 }}>
+                  {isOpen && visibleSubs.length > 0 && (
+                    <div className="prc-sub-list">
                       {visibleSubs.map(sub => {
-                        const subVal = catDraft[sub.id] ?? '';
-                        const subEff = subVal !== '' ? `${subVal}%` : (catVal !== '' ? `${catVal}% (category)` : `${globalMarkupPct}% (global)`);
+                        const subVal = String(catDraft[sub.id] ?? '').trim();
+                        const subDirty = isCatDirty(sub);
+                        const inheritedLabel = catVal !== '' ? `Inherits ${catVal}% (category)` : `Inherits ${globalMarkupPct}% (global)`;
                         return (
-                          <div key={sub.id} className="row between" style={{ gap: 12, paddingLeft: 12, flexWrap: 'wrap' }}>
-                            <div>
-                              <span style={{ fontSize: 13.5 }}>{sub.name}</span>
-                              <small className="muted" style={{ marginLeft: 8 }}>({subEff})</small>
+                          <div key={sub.id} className={`prc-sub-row${subDirty ? ' dirty' : ''}`}>
+                            <div className="prc-cat-left">
+                              <span className="cat-branch" aria-hidden="true" />
+                              <div className="prc-cat-name">
+                                <span style={{ fontSize: 13.5, fontWeight: 600 }}>{sub.name}</span>
+                                {subVal !== '' ? (
+                                  <span className="adm-pill info">{subVal}% override</span>
+                                ) : (
+                                  <span className="adm-pill muted">{inheritedLabel}</span>
+                                )}
+                                {subDirty && <span className="adm-pill warn">Modified</span>}
+                              </div>
                             </div>
-                            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                              <div style={{ position: 'relative', width: 130 }}>
+
+                            <div className="prc-cat-right">
+                              <div className="prc-input-wrap prc-cat-input">
                                 <input
                                   type="number"
                                   min="0"
                                   max="1000"
                                   step="0.01"
                                   placeholder={catVal !== '' ? catVal : String(globalMarkupPct)}
-                                  value={subVal}
+                                  value={catDraft[sub.id] ?? ''}
                                   onChange={e => setCatDraft(c => ({ ...c, [sub.id]: e.target.value }))}
-                                  style={{ width: '100%', paddingRight: 28 }}
                                 />
-                                <small className="muted" style={{ position: 'absolute', right: 10, top: 10 }}>%</small>
+                                <span className="prc-unit">%</span>
                               </div>
                               {subVal !== '' && (
                                 <button type="button" className="adm-btn ghost" onClick={() => setCatDraft(c => ({ ...c, [sub.id]: '' }))}>Clear</button>
@@ -290,6 +441,21 @@ export function AdminPricing() {
                 </div>
               );
             })}
+          </div>
+        </section>
+      )}
+
+      {totalChanges > 0 && (
+        <div className="prc-savebar">
+          <div className="prc-savebar-info">
+            <span className="adm-pill warn">{totalChanges}</span>
+            <span>Unsaved pricing change{totalChanges === 1 ? '' : 's'}</span>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="adm-btn ghost" onClick={resetDraft} disabled={saving}>Discard</button>
+            <button type="button" className="adm-btn primary" onClick={save} disabled={saving}>
+              <Icon name="check" size={15} /> {saving ? 'Saving…' : 'Save & queue reprice'}
+            </button>
           </div>
         </div>
       )}
