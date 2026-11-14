@@ -223,3 +223,4 @@ export function AdminMicrostores() {
 export function AdminCelebrityStores() {
   return <StoreConsole mode="celebrity" />;
 }
+
