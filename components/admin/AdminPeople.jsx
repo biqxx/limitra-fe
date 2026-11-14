@@ -151,7 +151,7 @@ export function AdminCustomers() {
 
   const load = useCallback(async () => {
     try {
-      const res = await adminUsersApi.list({ per_page: 100 });
+      const res = await adminUsersApi.list({ role: 'customer', per_page: 100 });
       setUsers(asList(res));
     } catch (error) {
       addToast(messageFrom(error));
