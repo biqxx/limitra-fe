@@ -366,9 +366,17 @@ export function StoreProvider({ children }) {
   const toggleTheme = () => setTheme(t => (t === 'light' ? 'dark' : 'light'));
 
   /* routing */
+  const isAdmin = isAuthenticated && String(user?.role || '').toLowerCase() === 'admin';
+  const ADMIN_BLOCKED_ROUTES = useMemo(() => new Set(['account', 'orders', 'wishlist', 'tracking', 'cart', 'checkout']), []);
+  useEffect(() => {
+    if (authLoading || !isAdmin || !pathname) return;
+    if (/^\/(account|orders|wishlist|tracking|cart|checkout)(\/|$)/.test(pathname)) {
+      router.replace('/admin');
+    }
+  }, [authLoading, isAdmin, pathname, router]);
   useEffect(() => { window.scrollTo({ top: 0 }); }, [pathname]);
   const go = useCallback((name, ...params) => {
-    const target = routeFor(name, params);
+    const target = isAdmin && ADMIN_BLOCKED_ROUTES.has(name) ? '/admin' : routeFor(name, params);
     if (typeof window !== 'undefined') {
       const current = `${window.location.pathname}${window.location.search}`;
       if (target !== current) {
@@ -376,7 +384,7 @@ export function StoreProvider({ children }) {
       }
     }
     router.push(target);
-  }, [router]);
+  }, [ADMIN_BLOCKED_ROUTES, isAdmin, router]);
 
   /* persistence — gated on `hydrated` (see the hydrate effect above) so a
      pre-hydration default never gets written back over real stored data. */
