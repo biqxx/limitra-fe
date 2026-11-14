@@ -28,5 +28,8 @@ export { AdminStaff } from './AdminStaff';
 export { AdminSpin, AdminVideos } from './AdminEngagement';
 export { AdminCMS, AdminRoles, AdminReports } from './AdminSystem';
 export { AdminActivity } from './AdminActivity';
+export { AdminMicrostores, AdminCelebrityStores } from './AdminStores';
+export { AdminProcurement, AdminReviews } from './AdminCommerceOps';
+export { AdminCareers, AdminQueues, AdminNotifications, AdminMailLogs, AdminSettings } from './AdminPlatformOps';
 
 export { Toggle, AdmSelect, AdmDate, ADMIN_NAV, ADMIN_ORDERS } from './AdminShared';

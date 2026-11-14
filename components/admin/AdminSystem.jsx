@@ -1,111 +1,217 @@
 'use client';
 /* System nav group (Content/CMS, Roles & Access, Reports) — ported verbatim from
    legacy/admin-sections.jsx. `window.admToast` calls replaced with `useAdminToast()`. */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
-import { adminRolesApi } from '@/lib/api/endpoints';
+import { adminRolesApi, adminContentApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
+import { useStore } from '@/components/store/StoreProvider';
+import { hasPermission } from '@/lib/auth/permissions';
 import { useAdminToast } from './AdminToastContext';
 import { AdmHead, Pager, usePager } from './AdminShared';
 
 const asList = res => (Array.isArray(res) ? res : res?.items || res?.data || []);
 
-/* ---------- CMS ---------- */
-// Starter seed content an admin is expected to edit — module scope so AdminCMS's
-// tile subtitles can report the real counts instead of hardcoded numbers.
-const CMS_HERO_SLIDES = [
-  { title: 'Premium marketplace, smarter shopping.', sub: 'Quality products. Secure shopping. Reliable delivery.', cta: 'Shop Now' },
-  { title: 'Elevate every listening moment.', sub: 'Discover premium audio equipment.', cta: 'Shop audio' },
-  { title: 'Wear your confidence every day.', sub: 'Fresh-season clothing and footwear.', cta: 'Shop fashion' },
-];
-const CMS_FAQS = [
-  { q: 'How long does delivery take?', a: 'Standard delivery takes 10–14 days nationwide.' },
-  { q: 'What payment methods are accepted?', a: 'Cards, bank transfer and pay-on-delivery in select cities.' },
-  { q: 'What is your return policy?', a: 'Returns accepted within 7 days of delivery.' },
-];
-
-function CmsManageDrawer({ item, onClose }) {
-  const addToast = useAdminToast();
-  const [tab, setTab] = useState(0);
-  const key = item[0];
-  const heroSlides = CMS_HERO_SLIDES;
-  const faqs = CMS_FAQS;
-  const isHero = key === 'Homepage hero';
-  const isBanner = key === 'Featured banners';
-  const isFaq = key === 'FAQs';
-  const isBlog = key === 'Blog posts';
-  const isDoc = key === 'Terms & Conditions' || key === 'Privacy Policy';
-
-  return (
-    <div className="role-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="role-modal">
-        <div className="role-modal-h">
-          <div className="row" style={{ gap: 12 }}>
-            <span className="kpi-ic" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon name={item[2]} size={18} /></span>
-            <div><h3 style={{ fontSize: 18 }}>Manage · {key}</h3><small className="muted">Edit site content</small></div>
-          </div>
-          <button className="role-modal-x" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
-        </div>
-        <div className="role-modal-b">
-
-          {isHero && <>
-            <div className="cms-tabs">{heroSlides.map((_, i) => <button key={i} className={'cms-tab' + (tab === i ? ' on' : '')} onClick={() => setTab(i)}>Slide {i + 1}</button>)}</div>
-            <label className="adm-img-drop" style={{ height: 150 }}><span className="adm-img-empty"><Icon name="eye" size={26} /><b>Add slide image</b><small>Drag &amp; drop or click to browse · JPG, PNG</small></span><input type="file" accept="image/*" hidden onChange={() => addToast('Image attached')} /></label>
-            <label className="adm-field"><span>Headline</span><input defaultValue={heroSlides[tab].title} /></label>
-            <label className="adm-field"><span>Subtext</span><textarea rows={2} defaultValue={heroSlides[tab].sub} /></label>
-            <label className="adm-field"><span>Button label</span><input defaultValue={heroSlides[tab].cta} /></label>
-            <div className="adm-field-row"><label className="adm-field"><span>Links to</span><input defaultValue="/shop" /></label><label className="adm-field"><span>Offer badge</span><input defaultValue="Up to 40% off" /></label></div>
-          </>}
-
-          {isBanner && <>
-            <label className="adm-img-drop" style={{ height: 150 }}><span className="adm-img-empty"><Icon name="tag" size={26} /><b>Add banner image</b><small>Drag &amp; drop or click to browse · JPG, PNG</small></span><input type="file" accept="image/*" hidden onChange={() => addToast('Image attached')} /></label>
-            <label className="adm-field"><span>Banner title</span><input defaultValue="Eid Mubarak, Big Savings" /></label>
-            <label className="adm-field"><span>Description</span><textarea rows={2} defaultValue="Up to 50% off on selected electronics & fashion." /></label>
-            <div className="adm-field-row"><label className="adm-field"><span>CTA label</span><input defaultValue="Shop the sale" /></label><label className="adm-field"><span>Placement</span><input defaultValue="Homepage, mid" /></label></div>
-          </>}
-
-          {isFaq && <div className="cms-list">
-            {faqs.map((f, i) => (
-              <div className="cms-faq" key={i}>
-                <label className="adm-field"><span>Question {i + 1}</span><input defaultValue={f.q} /></label>
-                <label className="adm-field"><span>Answer</span><textarea rows={2} defaultValue={f.a} /></label>
-              </div>
-            ))}
-            <button className="adm-btn ghost" onClick={() => addToast('New FAQ row added')}><Icon name="plus" size={15} /> Add FAQ</button>
-          </div>}
-
-          {isBlog && <>
-            <label className="adm-img-drop" style={{ height: 150 }}><span className="adm-img-empty"><Icon name="edit" size={26} /><b>Add cover image</b><small>Drag &amp; drop or click to browse · JPG, PNG</small></span><input type="file" accept="image/*" hidden onChange={() => addToast('Image attached')} /></label>
-            <label className="adm-field"><span>Post title</span><input placeholder="e.g. 5 gadgets to upgrade your setup" /></label>
-            <label className="adm-field"><span>Excerpt</span><textarea rows={2} placeholder="Short summary shown in listings…" /></label>
-            <label className="adm-field"><span>Body</span><textarea rows={6} placeholder="Write your post…" /></label>
-          </>}
-
-          {isDoc && <>
-            <label className="adm-field"><span>Page title</span><input defaultValue={key} /></label>
-            <label className="adm-field"><span>Content</span><textarea rows={12} defaultValue={'Last updated May 2026.\n\nEnter the ' + key + ' content here. This supports multiple paragraphs and will be shown on the public page.'} /></label>
-          </>}
-
-        </div>
-        <div className="role-modal-f">
-          <button className="adm-btn ghost" onClick={onClose}>Cancel</button>
-          <button className="adm-btn primary" onClick={() => { addToast(key + ' saved'); onClose(); }}><Icon name="check" size={15} /> Save changes</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
+/* ---------- CMS (Content, Blog, Media, Newsletter) ---------- */
 export function AdminCMS() {
-  const [manage, setManage] = useState(null);
-  const items = [['Homepage hero', `${CMS_HERO_SLIDES.length} slides`, 'spark'], ['Featured banners', 'Promo placements', 'tag'], ['Blog posts', 'No posts yet', 'edit'], ['FAQs', `${CMS_FAQS.length} entries`, 'info'], ['Terms & Conditions', 'Starter content', 'shield'], ['Privacy Policy', 'Starter content', 'lock']];
+  const { user } = useStore();
+  const canManageCms = hasPermission(user, 'cms.manage');
+  const canReadCms = hasPermission(user, 'cms.read') || canManageCms;
+  const canReadMedia = hasPermission(user, 'media.read') || hasPermission(user, 'media.manage');
+  const canManageMedia = hasPermission(user, 'media.manage');
+
+  const addToast = useAdminToast();
+  const [tab, setTab] = useState(canReadCms ? 'content' : 'media');
+  const [entries, setEntries] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [media, setMedia] = useState([]);
+  const [subscribers, setSubscribers] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [q, setQ] = useState('');
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    const [cRes, bRes, mRes, nRes] = await Promise.allSettled([
+      canReadCms ? adminContentApi.list({ per_page: 100 }) : Promise.resolve([]),
+      canReadCms ? adminContentApi.blogPosts({ per_page: 100 }) : Promise.resolve([]),
+      canReadMedia ? adminContentApi.media({ per_page: 100 }) : Promise.resolve([]),
+      canReadCms ? adminContentApi.newsletter({ per_page: 100 }) : Promise.resolve([]),
+    ]);
+    if (cRes.status === 'fulfilled') setEntries(asList(cRes.value));
+    if (bRes.status === 'fulfilled') setPosts(asList(bRes.value));
+    if (mRes.status === 'fulfilled') setMedia(asList(mRes.value));
+    if (nRes.status === 'fulfilled') setSubscribers(asList(nRes.value));
+    setLoaded(true);
+  }, [canReadCms, canReadMedia]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [load]);
+
+  const activeList = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const raw = tab === 'content' ? entries : tab === 'blog' ? posts : tab === 'media' ? media : subscribers;
+    if (!needle) return raw;
+    return raw.filter(it => JSON.stringify(it).toLowerCase().includes(needle));
+  }, [entries, media, posts, q, subscribers, tab]);
+
+  const { shown, pagerProps } = usePager(activeList, tab + q + activeList.length);
+
+  const saveDraft = async () => {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      if (draft.kind === 'content') {
+        const body = { key: draft.key.trim(), title: draft.title.trim(), type: draft.type || 'page', body: draft.body };
+        if (draft.id) await adminContentApi.update(draft.id, body);
+        else await adminContentApi.create(body);
+        addToast(draft.id ? 'Content updated' : 'Content created');
+      } else if (draft.kind === 'blog') {
+        const body = { title: draft.title.trim(), slug: draft.slug?.trim() || undefined, excerpt: draft.excerpt || undefined, content: draft.body };
+        if (draft.id) await adminContentApi.updateBlogPost(draft.id, body);
+        else await adminContentApi.createBlogPost(body);
+        addToast(draft.id ? 'Blog post updated' : 'Blog post created');
+      }
+      setDraft(null);
+      await load();
+    } catch (err) {
+      addToast(messageFrom(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
-      <AdmHead title="Content" sub="Manage site content & pages" />
-      <div className="adm-row c3">{items.map((it, i) => (
-        <div className="panel" key={i}><span className="kpi-ic" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon name={it[2]} size={18} /></span><h3 style={{ margin: '12px 0 4px', fontSize: 16 }}>{it[0]}</h3><p className="muted" style={{ fontSize: 13 }}>{it[1]}</p><a onClick={() => setManage(it)} style={{ color: 'var(--primary)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, cursor: 'pointer', marginTop: 12, display: 'inline-block' }}>Manage →</a></div>
-      ))}</div>
-      {manage && <CmsManageDrawer item={manage} onClose={() => setManage(null)} />}
+      <AdmHead title="Content & CMS" sub="Manage content blocks, blog posts, media library, and newsletter subscribers.">
+        <button className="adm-btn ghost" onClick={load}><Icon name="refresh" size={14} /> Refresh</button>
+        {tab === 'content' && canManageCms && (
+          <button className="adm-btn primary" onClick={() => setDraft({ kind: 'content', key: '', title: '', type: 'page', body: '' })}><Icon name="plus" size={15} /> New entry</button>
+        )}
+        {tab === 'blog' && canManageCms && (
+          <button className="adm-btn primary" onClick={() => setDraft({ kind: 'blog', title: '', slug: '', excerpt: '', body: '' })}><Icon name="plus" size={15} /> New post</button>
+        )}
+      </AdmHead>
+
+      <div className="adm-filters" style={{ flexWrap: 'wrap', gap: 8 }}>
+        {canReadCms && <button className={'adm-chip' + (tab === 'content' ? ' on' : '')} onClick={() => setTab('content')}>Content ({entries.length})</button>}
+        {canReadCms && <button className={'adm-chip' + (tab === 'blog' ? ' on' : '')} onClick={() => setTab('blog')}>Blog posts ({posts.length})</button>}
+        {canReadMedia && <button className={'adm-chip' + (tab === 'media' ? ' on' : '')} onClick={() => setTab('media')}>Media ({media.length})</button>}
+        {canReadCms && <button className={'adm-chip' + (tab === 'newsletter' ? ' on' : '')} onClick={() => setTab('newsletter')}>Newsletter ({subscribers.length})</button>}
+        <div className="adm-mini-search" style={{ marginLeft: 'auto' }}>
+          <Icon name="search" size={15} className="muted" />
+          <input placeholder="Filter items…" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="panel" style={{ padding: 0 }}>
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead>
+              {tab === 'content' && <tr><th>Title / Key</th><th>Type</th><th>Status</th><th></th></tr>}
+              {tab === 'blog' && <tr><th>Post</th><th>Slug</th><th>Status</th><th></th></tr>}
+              {tab === 'media' && <tr><th>File</th><th>MIME / Size</th><th>URL</th><th></th></tr>}
+              {tab === 'newsletter' && <tr><th>Email</th><th>Status</th><th>Subscribed</th><th></th></tr>}
+            </thead>
+            <tbody>
+              {!loaded ? (
+                <tr><td colSpan={4} className="muted" style={{ textAlign: 'center', padding: 28 }}>Loading…</td></tr>
+              ) : shown.length === 0 ? (
+                <tr><td colSpan={4} className="muted" style={{ textAlign: 'center', padding: 28 }}>No items found.</td></tr>
+              ) : shown.map((it) => {
+                if (tab === 'content') {
+                  return (
+                    <tr key={it.id}>
+                      <td><b>{it.title || it.key}</b>{it.key && <small className="muted" style={{ display: 'block' }}>{it.key}</small>}</td>
+                      <td className="muted">{it.type || 'page'}</td>
+                      <td><span className={'adm-pill ' + (it.status === 'published' || it.published_at ? 'ok' : 'muted')}>{it.status || (it.published_at ? 'published' : 'draft')}</span></td>
+                      <td>{canManageCms && (
+                        <div className="adm-rowact">
+                          <button title="Publish" onClick={async () => { try { await adminContentApi.publish(it.id); addToast('Published'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="check" size={15} /></button>
+                          <button title="Edit" onClick={() => setDraft({ kind: 'content', id: it.id, key: it.key || '', title: it.title || '', type: it.type || 'page', body: typeof it.body === 'string' ? it.body : JSON.stringify(it.body || '', null, 2) })}><Icon name="edit" size={15} /></button>
+                        </div>
+                      )}</td>
+                    </tr>
+                  );
+                }
+                if (tab === 'blog') {
+                  return (
+                    <tr key={it.id}>
+                      <td><b>{it.title}</b>{it.excerpt && <small className="muted" style={{ display: 'block' }}>{it.excerpt}</small>}</td>
+                      <td className="muted">{it.slug || '—'}</td>
+                      <td><span className={'adm-pill ' + (it.status === 'published' || it.published_at ? 'ok' : 'muted')}>{it.status || (it.published_at ? 'published' : 'draft')}</span></td>
+                      <td>{canManageCms && (
+                        <div className="adm-rowact">
+                          <button title="Publish" onClick={async () => { try { await adminContentApi.publishBlogPost(it.id); addToast('Published'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="check" size={15} /></button>
+                          <button title="Edit" onClick={() => setDraft({ kind: 'blog', id: it.id, title: it.title || '', slug: it.slug || '', excerpt: it.excerpt || '', body: it.content || it.body || '' })}><Icon name="edit" size={15} /></button>
+                          <button className="del" title="Delete" onClick={async () => { if (!window.confirm('Delete post?')) return; try { await adminContentApi.removeBlogPost(it.id); addToast('Deleted'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="trash" size={15} /></button>
+                        </div>
+                      )}</td>
+                    </tr>
+                  );
+                }
+                if (tab === 'media') {
+                  return (
+                    <tr key={it.id}>
+                      <td><b>{it.name || it.filename || `Media #${it.id}`}</b></td>
+                      <td className="muted">{it.mime_type || '—'}</td>
+                      <td className="muted" style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.url || it.path || '—'}</td>
+                      <td>{canManageMedia && (
+                        <div className="adm-rowact">
+                          <button className="del" title="Delete" onClick={async () => { if (!window.confirm('Delete media item?')) return; try { await adminContentApi.removeMedia(it.id); addToast('Deleted'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="trash" size={15} /></button>
+                        </div>
+                      )}</td>
+                    </tr>
+                  );
+                }
+                return (
+                  <tr key={it.id || it.email}>
+                    <td><b>{it.email}</b></td>
+                    <td><span className={'adm-pill ' + (it.status === 'unsubscribed' ? 'muted' : 'ok')}>{it.status || 'subscribed'}</span></td>
+                    <td className="muted">{it.created_at ? String(it.created_at).slice(0, 10) : '—'}</td>
+                    <td>{canManageCms && (
+                      <div className="adm-rowact">
+                        <button className="del" title="Remove" onClick={async () => { try { await adminContentApi.removeSubscriber(it.id); addToast('Subscriber removed'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="trash" size={15} /></button>
+                      </div>
+                    )}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <Pager {...pagerProps} />
+        </div>
+      </div>
+
+      {draft && (
+        <div className="role-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setDraft(null); }}>
+          <div className="role-modal">
+            <div className="role-modal-h">
+              <div><h3 style={{ fontSize: 18 }}>{draft.id ? 'Edit' : 'Create'} {draft.kind === 'blog' ? 'blog post' : 'content entry'}</h3></div>
+              <button className="role-modal-x" onClick={() => setDraft(null)} aria-label="Close"><Icon name="close" size={18} /></button>
+            </div>
+            <div className="role-modal-b">
+              <label className="adm-field"><span>Title</span><input value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} /></label>
+              {draft.kind === 'content' ? (
+                <div className="adm-field-row">
+                  <label className="adm-field"><span>Key</span><input value={draft.key} onChange={e => setDraft(d => ({ ...d, key: e.target.value }))} placeholder="e.g. homepage_hero" /></label>
+                  <label className="adm-field"><span>Type</span><input value={draft.type} onChange={e => setDraft(d => ({ ...d, type: e.target.value }))} placeholder="page / banner / faq" /></label>
+                </div>
+              ) : (
+                <>
+                  <label className="adm-field"><span>Slug (optional)</span><input value={draft.slug} onChange={e => setDraft(d => ({ ...d, slug: e.target.value }))} /></label>
+                  <label className="adm-field"><span>Excerpt</span><textarea rows={2} value={draft.excerpt} onChange={e => setDraft(d => ({ ...d, excerpt: e.target.value }))} /></label>
+                </>
+              )}
+              <label className="adm-field"><span>Body / Content</span><textarea rows={8} value={draft.body} onChange={e => setDraft(d => ({ ...d, body: e.target.value }))} /></label>
+            </div>
+            <div className="role-modal-f">
+              <button className="adm-btn ghost" onClick={() => setDraft(null)} disabled={saving}>Cancel</button>
+              <button className="adm-btn primary" onClick={saveDraft} disabled={saving || !draft.title.trim()}>{saving ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

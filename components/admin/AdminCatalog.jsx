@@ -11,7 +11,8 @@ import { useStore } from '@/components/store/StoreProvider';
 import { naira, PRODUCTS, CATEGORIES } from '@/lib/data';
 import { getVariants, setVariants, applyStoredVariants } from '@/lib/variantsStore';
 import { cartesianCombos, defaultSku, groupsFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
-import { productsApi, categoriesApi, adminProductsApi, sourcingApi, adminOrdersApi } from '@/lib/api/endpoints';
+import { productsApi, categoriesApi, adminProductsApi, sourcingApi, adminOrdersApi, adminPromotionsApi } from '@/lib/api/endpoints';
+import { hasPermission } from '@/lib/auth/permissions';
 import { messageFrom } from '@/lib/api/errors';
 import { Kpi } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
@@ -841,75 +842,119 @@ export function AdminOrders() {
   );
 }
 
-/* ---------- COUPONS ---------- */
-// Starter coupon templates — `uses` isn't faked since there's no redemption backend yet.
-const ADMIN_COUPONS = [['WELCOME15', '15% off first order', 0, 'Active'], ['CASH5K', '₦5,000 spin reward', 0, 'Active'], ['FLASH40', 'Flash sale 40%', 0, 'Scheduled'], ['FREESHIP', 'Free shipping', 0, 'Active'], ['EID20', 'Eid promo 20%', 0, 'Expired']];
+/* ---------- COUPONS (connected to /admin/promotions) ---------- */
+function promoTypeLabel(t) {
+  if (t === 'fixed') return 'Fixed amount';
+  if (t === 'free_shipping') return 'Free shipping';
+  return 'Percentage';
+}
+function promoTypeSlug(label) {
+  if (label === 'Fixed amount' || label === 'fixed') return 'fixed';
+  if (label === 'Free shipping' || label === 'free_shipping') return 'free_shipping';
+  return 'percentage';
+}
+
 export function AdminCoupons() {
+  const { user } = useStore();
+  const canManage = hasPermission(user, 'promotions.manage');
   const addToast = useAdminToast();
-  const [coupons, setCoupons] = useState(ADMIN_COUPONS.map(c => ({ code: c[0], desc: c[1], uses: c[2], status: c[3] })));
+  const [coupons, setCoupons] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [edit, setEdit] = useState(null);
-  const t = (m) => addToast(m);
-  const { shown: cpShown, pagerProps: cpPager } = usePager(coupons, coupons.length);
-  const save = (d) => {
-    setCoupons(cs => {
-      const i = cs.findIndex(c => c.code === d._orig);
-      if (i >= 0) { const n = [...cs]; n[i] = { code: d.code, desc: d.desc, uses: cs[i].uses, status: d.status }; return n; }
-      return [{ code: d.code, desc: d.desc, uses: 0, status: d.status }, ...cs];
-    });
-    t(d._orig ? 'Coupon updated' : 'Coupon created'); setEdit(null);
+  const [q, setQ] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const res = await adminPromotionsApi.list({ per_page: 100 });
+      const list = Array.isArray(res) ? res : (res?.items || res?.data || []);
+      setCoupons(list);
+    } catch (err) {
+      addToast(messageFrom(err));
+    } finally {
+      setLoaded(true);
+    }
+  }, [addToast]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = coupons.filter(c =>
+    !q.trim() || `${c.code || ''} ${c.name || ''}`.toLowerCase().includes(q.trim().toLowerCase())
+  );
+  const { shown: cpShown, pagerProps: cpPager } = usePager(filtered, q + coupons.length);
+
+  const save = async (d) => {
+    try {
+      const type = promoTypeSlug(d.type);
+      const payload = {
+        code: d.code.trim().toUpperCase(),
+        name: d.name.trim() || d.code.trim().toUpperCase(),
+        type,
+        value: type === 'free_shipping' ? 0 : Number(d.value || 0),
+        minimum_spend: d.minimum_spend ? Number(d.minimum_spend) : 0,
+        active: d.active !== false,
+        ends_at: d.expires || null,
+      };
+      if (d.id) await adminPromotionsApi.update(d.id, payload);
+      else await adminPromotionsApi.create(payload);
+      addToast(d.id ? 'Promotion updated' : 'Promotion created');
+      setEdit(null);
+      await load();
+    } catch (err) {
+      addToast(messageFrom(err));
+    }
   };
+
+  const remove = async (c) => {
+    if (!window.confirm(`Deactivate promotion "${c.code}"?`)) return;
+    try {
+      await adminPromotionsApi.remove(c.id);
+      addToast('Promotion ' + c.code + ' deactivated');
+      await load();
+    } catch (err) {
+      addToast(messageFrom(err));
+    }
+  };
+
   return (
     <>
-      <AdmHead title="Coupons & Promotions" sub="Discounts, flash sales & campaigns"><button className="adm-btn primary" onClick={() => setEdit({ _new: true, code: '', desc: '', type: 'Percentage', value: '', status: 'Active' })}><Icon name="plus" size={15} /> Create coupon</button></AdmHead>
+      <AdmHead title="Coupons & Promotions" sub="Discounts, flash sales & campaigns">
+        <button className="adm-btn ghost" onClick={load}><Icon name="refresh" size={14} /> Refresh</button>
+        {canManage && (
+          <button className="adm-btn primary" onClick={() => setEdit({ _new: true, code: '', name: '', type: 'Percentage', value: '', minimum_spend: '', active: true, expires: '' })}><Icon name="plus" size={15} /> Create coupon</button>
+        )}
+      </AdmHead>
+      <div className="adm-filters">
+        <div className="adm-mini-search"><Icon name="search" size={16} className="muted" /><input placeholder="Search promo code or name…" value={q} onChange={e => setQ(e.target.value)} /></div>
+      </div>
       <div className="panel" style={{ padding: 0 }}>
         <div className="adm-table-wrap"><table className="adm-table">
-          <thead><tr><th>Code</th><th>Description</th><th>Uses</th><th>Status</th><th></th></tr></thead>
-          <tbody>{cpShown.map((c, i) => (
-            <tr key={i}><td><b style={{ fontFamily: 'var(--font-display)', letterSpacing: '.03em' }}>{c.code}</b></td><td className="muted">{c.desc}</td><td>{c.uses.toLocaleString()}</td>
-              <td><span className={'adm-pill ' + (c.status === 'Active' ? 'ok' : c.status === 'Scheduled' ? 'info' : 'muted')}>{c.status}</span></td>
-              <td><div className="adm-rowact"><button title="Edit" onClick={() => setEdit({ _orig: c.code, code: c.code, desc: c.desc, type: 'Percentage', value: '', status: c.status })}><Icon name="edit" size={15} /></button><button className="del" title="Delete" onClick={() => { setCoupons(cs => cs.filter(x => x.code !== c.code)); t('Coupon ' + c.code + ' deleted'); }}><Icon name="trash" size={15} /></button></div></td>
-            </tr>
-          ))}</tbody>
+          <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Value</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            {!loaded ? (
+              <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading promotions…</td></tr>
+            ) : cpShown.length === 0 ? (
+              <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 24 }}>No promotions found.</td></tr>
+            ) : cpShown.map((c) => (
+              <tr key={c.id || c.code}>
+                <td><b style={{ fontFamily: 'var(--font-display)', letterSpacing: '.03em' }}>{c.code}</b></td>
+                <td className="muted">{c.name || '—'}</td>
+                <td>{promoTypeLabel(c.type)}</td>
+                <td>{c.type === 'free_shipping' ? 'Free shipping' : c.type === 'fixed' ? naira(Number(c.value || 0)) : `${Number(c.value || 0)}%`}</td>
+                <td><span className={'adm-pill ' + (c.active ? 'ok' : 'muted')}>{c.active ? 'Active' : 'Inactive'}</span></td>
+                <td>{canManage && (
+                  <div className="adm-rowact">
+                    <button title="Edit" onClick={() => setEdit({ id: c.id, code: c.code, name: c.name || '', type: promoTypeLabel(c.type), value: c.value ?? '', minimum_spend: c.minimum_spend ?? '', active: c.active !== false, expires: c.ends_at ? String(c.ends_at).slice(0, 10) : '' })}><Icon name="edit" size={15} /></button>
+                    <button className="del" title="Deactivate" onClick={() => remove(c)}><Icon name="trash" size={15} /></button>
+                  </div>
+                )}</td>
+              </tr>
+            ))}
+          </tbody>
         </table><Pager {...cpPager} /></div>
       </div>
       {edit && <CouponModal draft={edit} onClose={() => setEdit(null)} onSave={save} />}
-      <AffPromoAdmin />
     </>
-  );
-}
-
-function AffPromoAdmin() {
-  const addToast = useAdminToast();
-  const [max, setMax] = useState(1);
-  const [codes, setCodes] = useState([]);
-  useEffect(() => {
-    try { setMax(parseInt(localStorage.getItem('lim_aff_promo_max') || '1', 10)); } catch (e) {}
-    try { setCodes(JSON.parse(localStorage.getItem('lim_aff_promos') || '[]')); } catch (e) {}
-  }, []);
-  const saveMax = (v) => { const n = Math.max(0, Math.min(10, v)); setMax(n); localStorage.setItem('lim_aff_promo_max', String(n)); addToast('Affiliates can now create ' + n + ' code' + (n !== 1 ? 's' : '')); };
-  const removeCode = (code) => { const next = codes.filter(c => c.code !== code); setCodes(next); localStorage.setItem('lim_aff_promos', JSON.stringify(next)); addToast('Affiliate code removed'); };
-  return (
-    <div style={{ marginTop: 24 }}>
-      <div className="adm-row c2" style={{ alignItems: 'start' }}>
-        <div className="panel">
-          <div className="panel-h"><h3>Affiliate promo codes</h3></div>
-          <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.6, marginBottom: 16 }}>Control how many promo codes each affiliate may create from their dashboard. Codes apply at checkout and are attributed to the affiliate.</p>
-          <div className="adm-li"><div className="adm-li-main"><b>Codes allowed per affiliate</b><small>Super-admin controlled · 0 disables</small></div>
-            <div className="aff-max-stepper"><button onClick={() => saveMax(max - 1)} disabled={max <= 0}><Icon name="minus" size={15} /></button><span>{max}</span><button onClick={() => saveMax(max + 1)} disabled={max >= 10}><Icon name="plus" size={15} /></button></div>
-          </div>
-        </div>
-        <div className="panel" style={{ padding: 0 }}>
-          <div className="panel-h" style={{ padding: '18px 20px 0' }}><h3>Active affiliate codes <span className="muted" style={{ fontWeight: 400 }}>· {codes.length}</span></h3></div>
-          <div className="adm-table-wrap"><table className="adm-table">
-            <thead><tr><th>Code</th><th>Affiliate</th><th>Discount</th><th>Uses</th><th></th></tr></thead>
-            <tbody>{codes.map((c, i) => (
-              <tr key={i}><td><b style={{ fontFamily: 'var(--font-display)', letterSpacing: '.03em' }}>{c.code}</b></td><td className="muted">{c.affName}</td><td>{Math.round(c.pct * 100)}%</td><td>{c.uses || 0}</td>
-                <td><div className="adm-rowact"><button className="del" title="Revoke" onClick={() => removeCode(c.code)}><Icon name="trash" size={15} /></button></div></td></tr>
-            ))}</tbody>
-          </table>{codes.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-faint)' }}>No affiliate codes created yet.</div>}</div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -923,15 +968,16 @@ function CouponModal({ draft, onClose, onSave }) {
         <div className="adm-drawer-h"><h3>{f._new ? 'Create coupon' : 'Edit coupon'}</h3><button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button></div>
         <div className="adm-drawer-body">
           <label className="adm-field"><span>Coupon code</span><input value={f.code} onChange={e => set('code', e.target.value.toUpperCase())} placeholder="e.g. WELCOME15" /></label>
-          <label className="adm-field"><span>Description</span><input value={f.desc} onChange={e => set('desc', e.target.value)} placeholder="What the coupon does" /></label>
+          <label className="adm-field"><span>Name / Description</span><input value={f.name} onChange={e => set('name', e.target.value)} placeholder="15% off first order" /></label>
           <div className="adm-field-row">
             <label className="adm-field"><span>Type</span><AdmSelect value={f.type} options={['Percentage', 'Fixed amount', 'Free shipping']} onChange={v => set('type', v)} /></label>
-            <label className="adm-field"><span>{f.type === 'Percentage' ? 'Percent off' : f.type === 'Fixed amount' ? 'Amount (₦)' : 'Value'}</span><input value={f.value} onChange={e => set('value', e.target.value)} placeholder={f.type === 'Percentage' ? '15' : '5000'} disabled={f.type === 'Free shipping'} /></label>
+            <label className="adm-field"><span>{f.type === 'Percentage' ? 'Percent off' : f.type === 'Fixed amount' ? 'Amount (₦)' : 'Value'}</span><input type="number" min="0" value={f.value} onChange={e => set('value', e.target.value)} placeholder={f.type === 'Percentage' ? '15' : '5000'} disabled={f.type === 'Free shipping'} /></label>
           </div>
           <div className="adm-field-row">
-            <label className="adm-field"><span>Status</span><AdmSelect value={f.status} options={['Active', 'Scheduled', 'Expired']} onChange={v => set('status', v)} /></label>
-            <label className="adm-field"><span>Expires</span><AdmDate value={f.expires} onChange={v => set('expires', v)} placeholder="Pick a date" /></label>
+            <label className="adm-field"><span>Minimum spend (₦)</span><input type="number" min="0" value={f.minimum_spend} onChange={e => set('minimum_spend', e.target.value)} placeholder="0" /></label>
+            <label className="adm-field"><span>Status</span><AdmSelect value={f.active ? 'Active' : 'Inactive'} options={['Active', 'Inactive']} onChange={v => set('active', v === 'Active')} /></label>
           </div>
+          <label className="adm-field"><span>Expires</span><AdmDate value={f.expires} onChange={v => set('expires', v)} placeholder="Pick a date" /></label>
         </div>
         <div className="adm-drawer-f"><button className="adm-btn ghost" onClick={onClose}>Cancel</button><button className="adm-btn primary" disabled={!f.code.trim()} onClick={() => onSave(f)}>{f._new ? 'Create coupon' : 'Save changes'}</button></div>
       </div>

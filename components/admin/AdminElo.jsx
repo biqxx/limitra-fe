@@ -5,10 +5,12 @@
    SuccessResponse replies) — every read is defensive. Request schemas for
    knowledge/settings/conversation-update ARE documented (unlike most of
    this API) but still unverified live. */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { adminAiApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
+import { useStore } from '@/components/store/StoreProvider';
+import { hasPermission } from '@/lib/auth/permissions';
 import { useAdminToast } from './AdminToastContext';
 import { AdmHead, Pager, usePager } from './AdminShared';
 
@@ -82,6 +84,11 @@ const CONVO_STATUSES = ['open', 'handed_off', 'closed', 'archived'];
 const CONVO_STATUS_CLS = { open: 'info', handed_off: 'warn', resolved: 'ok', closed: 'muted', archived: 'muted' };
 
 export function AdminElo() {
+  const { user } = useStore();
+  const canManageConvo = hasPermission(user, 'ai.manage') || hasPermission(user, 'support.manage');
+  const canManageKnowledge = hasPermission(user, 'ai.knowledge.manage');
+  const canManageSettings = hasPermission(user, 'ai.settings.manage');
+
   const toast = useAdminToast();
   const [section, setSection] = useState('conversations');
 
@@ -90,6 +97,7 @@ export function AdminElo() {
   const [docs, setDocs] = useState([]);
   const [settings, setSettings] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [convoDraft, setConvoDraft] = useState(null);
@@ -97,10 +105,27 @@ export function AdminElo() {
   const [docDraft, setDocDraft] = useState(null);
   const [settingsDraft, setSettingsDraft] = useState(null);
   const [q, setQ] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [channelFilter, setChannelFilter] = useState('all');
+
+  const filteredConvos = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return conversations.filter((c) => {
+      if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+      if (channelFilter !== 'all' && String(c.channel || 'web').toLowerCase() !== channelFilter) return false;
+      if (!needle) return true;
+      return (
+        String(c.id).includes(needle) ||
+        (c.customer || '').toLowerCase().includes(needle) ||
+        (c.email || '').toLowerCase().includes(needle) ||
+        (c.channel || '').toLowerCase().includes(needle)
+      );
+    });
+  }, [channelFilter, conversations, q, statusFilter]);
 
   const { shown: shownConvos, pagerProps: convoPager } = usePager(
-    conversations.filter(c => !q || String(c.id).includes(q) || (c.customer || '').toLowerCase().includes(q.toLowerCase())),
-    q + section,
+    filteredConvos,
+    q + section + statusFilter + channelFilter,
   );
   const { shown: shownDocs, pagerProps: docPager } = usePager(
     docs.filter(d => !q || (d.title || '').toLowerCase().includes(q.toLowerCase()) || (d.category || '').toLowerCase().includes(q.toLowerCase())),
@@ -108,29 +133,33 @@ export function AdminElo() {
   );
 
   const loadAll = useCallback(async () => {
-    try {
-      const [m, c, k, s] = await Promise.all([
-        adminAiApi.metrics().catch(() => null),
-        adminAiApi.listConversations({ per_page: 100 }).catch(() => []),
-        adminAiApi.listKnowledge({ per_page: 100 }).catch(() => []),
-        adminAiApi.getSettings().catch(() => null),
-      ]);
-      setMetrics(m?.data ?? m);
-      setConversations(asList(c).map(normalizeConversation));
-      setDocs(asList(k).map(normalizeDoc));
-      const settingsData = s?.data ?? s;
+    setLoadError('');
+    const [mRes, cRes, kRes, sRes] = await Promise.allSettled([
+      adminAiApi.metrics(),
+      adminAiApi.listConversations({ per_page: 100 }),
+      canManageKnowledge ? adminAiApi.listKnowledge({ per_page: 100 }) : Promise.resolve([]),
+      adminAiApi.getSettings(),
+    ]);
+    if (mRes.status === 'fulfilled') setMetrics(mRes.value?.data ?? mRes.value);
+    if (cRes.status === 'fulfilled') {
+      setConversations(asList(cRes.value).map(normalizeConversation));
+    } else {
+      const errMsg = messageFrom(cRes.reason);
+      setLoadError(errMsg);
+      toast(errMsg);
+    }
+    if (kRes.status === 'fulfilled') setDocs(asList(kRes.value).map(normalizeDoc));
+    if (sRes.status === 'fulfilled') {
+      const settingsData = sRes.value?.data ?? sRes.value;
       setSettings(settingsData);
       setSettingsDraft({
         primary_model: settingsData?.primary_model ?? '',
         fallback_model: settingsData?.fallback_model ?? '',
         high_reasoning_model: settingsData?.high_reasoning_model ?? '',
       });
-    } catch (error) {
-      toast(messageFrom(error));
-    } finally {
-      setLoaded(true);
     }
-  }, [toast]);
+    setLoaded(true);
+  }, [canManageKnowledge, toast]);
 
   // Initial network hydration is intentionally triggered when the page mounts.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -214,11 +243,16 @@ export function AdminElo() {
 
   const metricEntries = metrics && typeof metrics === 'object' ? Object.entries(metrics).filter(([, v]) => typeof v === 'number' || typeof v === 'string') : [];
 
+  const handedOffCount = conversations.filter(c => c.status === 'handed_off').length;
+
   return (
     <>
-      <AdmHead title="Elo AI" sub="Conversations, knowledge base and model settings for the shopping assistant.">
-        {section === 'knowledge' && <button className="adm-btn primary" onClick={() => setDocDraft({ id: null, title: '', slug: '', category: '', content: '' })}><Icon name="plus" size={15} /> Add document</button>}
+      <AdmHead title="Elo AI" sub="Conversations, hand-offs, knowledge base and model settings for the shopping assistant.">
+        <button className="adm-btn ghost" onClick={loadAll}><Icon name="refresh" size={14} /> Refresh</button>
+        {section === 'knowledge' && canManageKnowledge && <button className="adm-btn primary" onClick={() => setDocDraft({ id: null, title: '', slug: '', category: '', content: '' })}><Icon name="plus" size={15} /> Add document</button>}
       </AdmHead>
+
+      {loadError && <div className="adm-note" style={{ marginBottom: 14, color: 'var(--red)' }}><Icon name="info" size={15} /> {loadError}</div>}
 
       {metricEntries.length > 0 && (
         <div className="kpi-grid" style={{ marginBottom: 18 }}>
@@ -231,10 +265,38 @@ export function AdminElo() {
         </div>
       )}
 
-      <div className="adm-filters">
-        {SECTIONS.map(([key, label]) => (
+      <div className="adm-filters" style={{ flexWrap: 'wrap', gap: 8 }}>
+        {SECTIONS.filter(([key]) => key !== 'knowledge' || canManageKnowledge).map(([key, label]) => (
           <button key={key} className={'adm-chip' + (section === key ? ' on' : '')} onClick={() => setSection(key)}>{label}</button>
         ))}
+        {section === 'conversations' && (
+          <>
+            <button
+              className={'adm-chip' + (statusFilter === 'handed_off' ? ' on' : '')}
+              onClick={() => setStatusFilter(s => s === 'handed_off' ? 'all' : 'handed_off')}
+            >
+              Hand-off queue ({handedOffCount})
+            </button>
+            <select
+              className="adm-sel-native"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              style={{ height: 34, borderRadius: 99, border: '1.5px solid var(--border)', padding: '0 12px', background: 'var(--surface)' }}
+            >
+              <option value="all">All statuses</option>
+              {CONVO_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+            </select>
+            <select
+              className="adm-sel-native"
+              value={channelFilter}
+              onChange={e => setChannelFilter(e.target.value)}
+              style={{ height: 34, borderRadius: 99, border: '1.5px solid var(--border)', padding: '0 12px', background: 'var(--surface)' }}
+            >
+              <option value="all">All channels</option>
+              {['web', 'whatsapp', 'instagram', 'facebook', 'x'].map(ch => <option key={ch} value={ch}>{ch}</option>)}
+            </select>
+          </>
+        )}
         {section !== 'settings' && (
           <div className="adm-mini-search" style={{ marginLeft: 'auto' }}>
             <Icon name="search" size={15} className="muted" />
@@ -295,10 +357,28 @@ export function AdminElo() {
       {section === 'settings' && settingsDraft && (
         <div className="panel" style={{ padding: 20 }}>
           <p className="muted" style={{ marginBottom: 16, fontSize: 13.5 }}>Model identifiers are provider-specific strings (e.g. a model name/version) — leave blank to use the backend&apos;s default.</p>
-          <label className="adm-field" style={{ marginBottom: 14 }}><span>Primary model</span><input value={settingsDraft.primary_model} onChange={e => setSettingsDraft(c => ({ ...c, primary_model: e.target.value }))} placeholder="Default" /></label>
-          <label className="adm-field" style={{ marginBottom: 14 }}><span>Fallback model</span><input value={settingsDraft.fallback_model} onChange={e => setSettingsDraft(c => ({ ...c, fallback_model: e.target.value }))} placeholder="Default" /></label>
-          <label className="adm-field" style={{ marginBottom: 18 }}><span>High-reasoning model</span><input value={settingsDraft.high_reasoning_model} onChange={e => setSettingsDraft(c => ({ ...c, high_reasoning_model: e.target.value }))} placeholder="Default" /></label>
-          <button className="adm-btn primary" onClick={saveSettings} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+          <div className="adm-field-row" style={{ marginBottom: 14 }}>
+            <label className="adm-field"><span>Primary model</span><input disabled={!canManageSettings} value={settingsDraft.primary_model} onChange={e => setSettingsDraft(c => ({ ...c, primary_model: e.target.value }))} placeholder="Default" /></label>
+            <label className="adm-field"><span>Fallback model</span><input disabled={!canManageSettings} value={settingsDraft.fallback_model} onChange={e => setSettingsDraft(c => ({ ...c, fallback_model: e.target.value }))} placeholder="Default" /></label>
+          </div>
+          <div className="adm-field-row" style={{ marginBottom: 14 }}>
+            <label className="adm-field"><span>High-reasoning model</span><input disabled={!canManageSettings} value={settingsDraft.high_reasoning_model} onChange={e => setSettingsDraft(c => ({ ...c, high_reasoning_model: e.target.value }))} placeholder="Default" /></label>
+            <label className="adm-field"><span>Max tool iterations</span><input disabled value={settings?.max_tool_iterations ?? '5'} /></label>
+          </div>
+          {settings?.web_greeting && (
+            <label className="adm-field" style={{ marginBottom: 14 }}><span>Web greeting</span><input disabled value={settings.web_greeting} /></label>
+          )}
+          {Array.isArray(settings?.enabled_tools) && settings.enabled_tools.length > 0 && (
+            <div className="adm-field" style={{ marginBottom: 18 }}>
+              <span>Enabled assistant tools</span>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {settings.enabled_tools.map(t => <span key={t} className="adm-pill info">{t}</span>)}
+              </div>
+            </div>
+          )}
+          {canManageSettings && (
+            <button className="adm-btn primary" onClick={saveSettings} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+          )}
         </div>
       )}
 
@@ -363,11 +443,13 @@ export function AdminElo() {
           )}
 
           <label className="adm-field"><span>Status</span>
-            <select value={convoDraft.status} onChange={e => setConvoDraft(c => ({ ...c, status: e.target.value }))}>
+            <select disabled={!canManageConvo} value={convoDraft.status} onChange={e => setConvoDraft(c => ({ ...c, status: e.target.value }))}>
               {CONVO_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
           </label>
-          <label className="adm-field"><span>Add admin note (optional)</span><textarea rows="2" value={convoDraft.notes} onChange={e => setConvoDraft(c => ({ ...c, notes: e.target.value }))} placeholder="Internal note about this conversation…" /></label>
+          {canManageConvo && (
+            <label className="adm-field"><span>Add admin note (optional)</span><textarea rows="2" value={convoDraft.notes} onChange={e => setConvoDraft(c => ({ ...c, notes: e.target.value }))} placeholder="Internal note about this conversation…" /></label>
+          )}
         </Drawer>
       )}
 
