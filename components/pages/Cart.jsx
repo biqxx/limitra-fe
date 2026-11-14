@@ -25,11 +25,20 @@ const FREE_SHIP = 150000;
 // zone-matched pickup method.
 const PICKUP_METHOD_VALUE = '__pickup__';
 
+function promoDiscount(promo, sub) {
+  if (!promo) return 0;
+  const amount = Number(promo.amount ?? 0);
+  if (amount > 0) return Math.min(sub, Math.round(amount));
+  const pct = Number(promo.pct ?? 0);
+  if (pct > 0) return Math.round(sub * pct);
+  return 0;
+}
+
 export function OrderSummary({ items, promo, ship, children, cta, onCta, ctaIcon, useCredit, onToggleCredit }) {
   const { walletBalance } = useStore();
   const sub = items.reduce((s, it) => s + unitPriceOf(it, byId(it.id) || it.product) * it.qty, 0);
-  const disc = promo ? Math.round(sub * promo.pct) : 0;
-  const shipping = ship == null ? 0 : ship;
+  const disc = promoDiscount(promo, sub);
+  const shipping = promo?.freeShipping ? 0 : (ship == null ? 0 : ship);
   const beforeCredit = Math.max(0, sub - disc) + shipping;
   const credit = useCredit ? Math.min(walletBalance, beforeCredit) : 0;
   const total = beforeCredit - credit;
@@ -59,7 +68,7 @@ export function OrderSummary({ items, promo, ship, children, cta, onCta, ctaIcon
 }
 
 function PromoBox({ promo, setPromo, cartId }) {
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(promo?.code || '');
   const [err, setErr] = useState('');
   const [checking, setChecking] = useState(false);
   const apply = async () => {
@@ -68,15 +77,20 @@ function PromoBox({ promo, setPromo, cartId }) {
     if (!cartId) { setErr('Sign in to apply a promo code'); return; }
     setChecking(true);
     try {
-      // Response shape isn't documented (generic SuccessResponse) — read the
-      // discount percentage defensively (as a whole number like 15, or
-      // already a fraction like 0.15); falls back to 0 if neither is present,
-      // the code still "applies" server-side at checkout either way, just
-      // shown with no visible discount here.
       const res = await promotionsApi.validate(c, cartId);
-      const raw = Number(res?.discount_percentage ?? res?.percentage ?? res?.pct ?? 0);
-      const pct = raw > 1 ? raw / 100 : raw;
-      setPromo({ code: c, pct });
+      const amount = Number(res?.discount_amount ?? res?.discount ?? 0);
+      const rawPct = Number(res?.discount_percentage ?? res?.percentage ?? res?.pct ?? 0);
+      const pct = rawPct > 1 ? rawPct / 100 : rawPct;
+      const freeShipping = Boolean(res?.free_shipping || res?.type === 'free_shipping');
+      setPromo({
+        code: res?.code || c,
+        name: res?.name || '',
+        type: res?.type || '',
+        amount,
+        pct,
+        freeShipping,
+      });
+      setCode(res?.code || c);
       setErr('');
     } catch (e) {
       setErr(messageFrom(e));
@@ -85,15 +99,35 @@ function PromoBox({ promo, setPromo, cartId }) {
       setChecking(false);
     }
   };
+  const remove = () => {
+    setPromo(null);
+    setCode('');
+    setErr('');
+  };
   return (
     <div className="promo-box">
       <div className="v-label" style={{ marginBottom: 8 }}>Promo code</div>
       <div className="row" style={{ gap: 8 }}>
-        <input className={'input' + (err ? ' err' : '')} placeholder="Enter code" value={code} onChange={e => { setCode(e.target.value); setErr(''); }} />
-        <button className="btn btn-ghost" disabled={checking} onClick={apply} style={{ flex: 'none' }}>{checking ? 'Checking…' : 'Apply'}</button>
+        <input
+          className={'input' + (err ? ' err' : '')}
+          placeholder="Enter code"
+          value={code}
+          onChange={e => { setCode(e.target.value); setErr(''); }}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } }}
+        />
+        <button type="button" className="btn btn-ghost" disabled={checking} onClick={apply} style={{ flex: 'none' }}>{checking ? 'Checking…' : 'Apply'}</button>
       </div>
       {err && <span className="err-msg" style={{ marginTop: 6, display: 'block' }}>{err}</span>}
-      {promo && <span className="row" style={{ gap: 6, color: 'var(--success)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, marginTop: 8 }}><Icon name="check" size={14} stroke={3} /> {promo.code} applied</span>}
+      {promo && (
+        <div className="row between" style={{ gap: 8, marginTop: 8 }}>
+          <span className="row" style={{ gap: 6, color: 'var(--success)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13 }}>
+            <Icon name="check" size={14} stroke={3} />
+            {promo.code} applied
+            {promo.amount > 0 ? ` (−${naira(promo.amount)})` : promo.freeShipping ? ' (Free delivery)' : ''}
+          </span>
+          <button type="button" className="link-btn" style={{ fontSize: 12 }} onClick={remove}>Remove</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -658,8 +692,9 @@ export function CheckoutPage() {
                 </div>
               </div>
               {(() => {
-                const disc = promo ? Math.round(cartTotal * promo.pct) : 0;
-                const beforeCredit = Math.max(0, cartTotal - disc) + shipFee;
+                const disc = promoDiscount(promo, cartTotal);
+                const effShip = promo?.freeShipping ? 0 : shipFee;
+                const beforeCredit = Math.max(0, cartTotal - disc) + effShip;
                 const credit = useCredit ? Math.min(walletBalance, beforeCredit) : 0;
                 const total = beforeCredit - credit;
                 return (
@@ -667,7 +702,7 @@ export function CheckoutPage() {
                     <div className="rb-head"><span><Icon name="dollar" size={16} /> Order total</span></div>
                     <div className="rev-tot-row"><span className="muted">Subtotal</span><b>{naira(cartTotal)}</b></div>
                     {disc > 0 && <div className="rev-tot-row"><span className="muted">Discount <span className="badge badge-soft" style={{ marginLeft: 4 }}>{promo.code}</span></span><b style={{ color: 'var(--success)' }}>−{naira(disc)}</b></div>}
-                    <div className="rev-tot-row"><span className="muted">Delivery</span>{shipFee === 0 ? <b style={{ color: 'var(--success)' }}>Free</b> : <b>{naira(shipFee)}</b>}</div>
+                    <div className="rev-tot-row"><span className="muted">Delivery</span>{effShip === 0 ? <b style={{ color: 'var(--success)' }}>Free</b> : <b>{naira(effShip)}</b>}</div>
                     {credit > 0 && <div className="rev-tot-row"><span className="muted"><img src="/assets/limcash.png" alt="" className="limcash-ic sm" /> Lim Cash applied</span><b style={{ color: 'var(--success)' }}>−{naira(credit)}</b></div>}
                     <div className="rev-tot-row rev-tot-grand"><span>Total</span><b>{naira(total)}</b></div>
                   </div>
