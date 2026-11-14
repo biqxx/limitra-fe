@@ -80,3 +80,7 @@ export function TopProgressBar() {
     </div>
   );
 }
+
+export default TopProgressBar;
+
+
