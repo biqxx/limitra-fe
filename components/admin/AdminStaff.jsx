@@ -31,11 +31,18 @@ function formatDate(iso) {
 }
 
 function isStaffMember(user) {
+  if (user?.linked_roles?.staff === true) return true;
   const legacy = String(user?.role || '').toLowerCase();
   if (['admin', 'staff', 'super_admin', 'super-admin', 'manager', 'support'].includes(legacy)) {
     return true;
   }
-  return Array.isArray(user?.roles) && user.roles.length > 0;
+  if (Array.isArray(user?.roles)) {
+    return user.roles.some((r) => {
+      const n = String(r?.name || r?.slug || '').toLowerCase();
+      return ['admin', 'staff', 'super_admin', 'super-admin', 'manager', 'support'].includes(n);
+    });
+  }
+  return false;
 }
 
 function roleLabel(user) {

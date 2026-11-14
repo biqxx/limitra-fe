@@ -28,6 +28,21 @@ function formatDate(iso) {
   return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function isStaffOrAdmin(user) {
+  if (user?.linked_roles?.staff === true) return true;
+  const legacy = String(user?.role || '').toLowerCase();
+  if (['admin', 'staff', 'super_admin', 'super-admin', 'manager', 'support'].includes(legacy)) {
+    return true;
+  }
+  if (Array.isArray(user?.roles)) {
+    return user.roles.some((r) => {
+      const n = String(r?.name || r?.slug || '').toLowerCase();
+      return ['admin', 'staff', 'super_admin', 'super-admin', 'manager', 'support'].includes(n);
+    });
+  }
+  return false;
+}
+
 /* ---------- CUSTOMERS & USERS ---------- */
 function CustomerDrawer({ user, onAction, onClose }) {
   const addToast = useAdminToast();
@@ -148,24 +163,24 @@ export function AdminCustomers() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
+  const customerUsers = useMemo(() => users.filter(u => !isStaffOrAdmin(u)), [users]);
+
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return users.filter(u => {
-      const uRole = String(u.role || 'customer').toLowerCase();
+    return customerUsers.filter(u => {
       const suspended = String(u.status || '').toLowerCase() === 'suspended' || Boolean(u.suspended_at);
-      if (roleTab !== 'all' && uRole !== roleTab) return false;
       if (statusTab === 'active' && suspended) return false;
       if (statusTab === 'suspended' && !suspended) return false;
       if (!needle) return true;
       return `${u.name || ''} ${u.email || ''} ${u.username || ''} ${u.phone || ''}`.toLowerCase().includes(needle);
     });
-  }, [q, roleTab, statusTab, users]);
+  }, [customerUsers, q, statusTab]);
 
   const { shown: cShown, pagerProps: cPager } = usePager(list, q + roleTab + statusTab);
 
-  const activeCount = users.filter(u => !u.suspended_at && String(u.status || 'active').toLowerCase() !== 'suspended').length;
-  const suspendedCount = users.length - activeCount;
-  const staffCount = users.filter(u => ['admin', 'staff'].includes(String(u.role || '').toLowerCase())).length;
+  const activeCount = customerUsers.filter(u => !u.suspended_at && String(u.status || 'active').toLowerCase() !== 'suspended').length;
+  const suspendedCount = customerUsers.length - activeCount;
+  const verifiedCount = customerUsers.filter(u => Boolean(u.email_verified_at)).length;
 
   const toggleSuspend = async (u) => {
     const suspended = String(u.status || '').toLowerCase() === 'suspended' || Boolean(u.suspended_at);
@@ -212,15 +227,15 @@ export function AdminCustomers() {
 
   return (
     <>
-      <AdmHead title="Customers & Users" sub={`${users.length} registered accounts across customers and staff`}>
+      <AdmHead title="Customers" sub={`${customerUsers.length} registered customer accounts`}>
         <button className="adm-btn ghost" onClick={load}><Icon name="refresh" size={14} /> Refresh</button>
         <button className="adm-btn ghost" onClick={exportCsv} disabled={list.length === 0}><Icon name="download" size={15} /> Export CSV</button>
       </AdmHead>
 
       <div className="kpi-grid">
-        <Kpi ic="user" tint="#0438B6" label="Total accounts" val={loaded ? users.length : '—'} delta="" up />
+        <Kpi ic="user" tint="#0438B6" label="Total customers" val={loaded ? customerUsers.length : '—'} delta="" up />
         <Kpi ic="check" tint="#1F8A5B" label="Active" val={loaded ? activeCount : '—'} delta="" up />
-        <Kpi ic="lock" tint="#7A5AE0" label="Admin & Staff" val={loaded ? staffCount : '—'} delta="" up />
+        <Kpi ic="shield" tint="#7A5AE0" label="Verified email" val={loaded ? verifiedCount : '—'} delta="" up />
         <Kpi ic="close" tint="#E5484D" label="Suspended" val={loaded ? suspendedCount : '—'} delta="" />
       </div>
 
@@ -229,11 +244,6 @@ export function AdminCustomers() {
           <Icon name="search" size={16} className="muted" />
           <input placeholder="Search name, email, username…" value={q} onChange={e => setQ(e.target.value)} />
         </div>
-        {['all', 'customer', 'staff', 'admin'].map(r => (
-          <button key={r} className={'adm-chip' + (roleTab === r ? ' on' : '')} onClick={() => setRoleTab(r)} style={{ textTransform: 'capitalize' }}>
-            {r === 'all' ? 'All roles' : r}
-          </button>
-        ))}
         {['all', 'active', 'suspended'].map(s => (
           <button key={s} className={'adm-chip' + (statusTab === s ? ' on' : '')} onClick={() => setStatusTab(s)} style={{ textTransform: 'capitalize' }}>
             {s === 'all' ? 'All status' : s}
