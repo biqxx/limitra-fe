@@ -474,8 +474,6 @@ export function Header() {
           <a className="nav-link nav-collapsible" onClick={() => go('shop', 'all')}>All Products</a>
           <span style={{ flex: 1 }} />
           <a className="nav-link deals" onClick={() => go('shop', 'deals')}><Icon name="flame" size={15} fill="currentColor" /> Deals</a>
-          <a className={'nav-link' + (route.name === 'microstores' ? ' active' : '')} onClick={() => go('microstores')}><Icon name="store" size={16} /> MicroStores <span className="nav-badge-new">New</span></a>
-          <a className={'nav-link nav-collapsible' + (route.name === 'celebrityStores' ? ' active' : '')} onClick={() => go('celebrityStores')}>Celebrity Stores</a>
           <a className={'nav-link nav-collapsible' + (route.name === 'affiliate' ? ' active' : '')} onClick={() => go('affiliate')}>Affiliate</a>
           <a className="nav-link" onClick={() => go('videos')}><Icon name="video" size={16} /> Videos</a>
           <a className="nav-link soft" onClick={() => go('help')}><Icon name="headset" size={16} /> Support</a>
