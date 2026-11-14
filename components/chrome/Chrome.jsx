@@ -355,7 +355,9 @@ function MiniCart({ open, onClose }) {
 }
 
 function MobileMenu({ open, onClose }) {
-  const { go, theme, toggleTheme, isAuthenticated, logout } = useStore();
+  const { go, theme, toggleTheme, user, isAuthenticated, logout } = useStore();
+  const router = useRouter();
+  const isAdmin = isAuthenticated && String(user?.role || '').toLowerCase() === 'admin';
   const nav = (n, ...p) => {onClose();go(n, ...p);};
   return (
     <>
@@ -383,6 +385,9 @@ function MobileMenu({ open, onClose }) {
           <a className="mm-link" onClick={() => nav('account')}><span className="row" style={{ gap: 12 }}><Icon name="user" size={18} />My account</span><Icon name="chevright" size={16} /></a>
           <a className="mm-link" onClick={() => nav('orders')}><span className="row" style={{ gap: 12 }}><Icon name="package" size={18} />Orders</span><Icon name="chevright" size={16} /></a>
           <a className="mm-link" onClick={() => nav('wishlist')}><span className="row" style={{ gap: 12 }}><Icon name="heart" size={18} />Wishlist</span><Icon name="chevright" size={16} /></a>
+          {isAdmin && (
+            <a className="mm-link" onClick={() => { onClose(); router.push('/admin'); }}><span className="row" style={{ gap: 12 }}><Icon name="grid" size={18} />Go to admin</span><Icon name="chevright" size={16} /></a>
+          )}
           {isAuthenticated
             ? <a className="mm-link" onClick={async () => { onClose(); await logout(); go('auth', 'signin'); }}><span className="row" style={{ gap: 12 }}><Icon name="lock" size={18} />Sign out</span><Icon name="chevright" size={16} /></a>
             : <a className="mm-link" onClick={() => nav('auth', 'signin')}><span className="row" style={{ gap: 12 }}><Icon name="lock" size={18} />Sign in</span><Icon name="chevright" size={16} /></a>}
@@ -399,6 +404,8 @@ function MobileMenu({ open, onClose }) {
 
 export function Header() {
   const { go, cartCount, cartTotal, wish, route, theme, toggleTheme, catalogVersion, user, isAuthenticated, logout } = useStore();
+  const router = useRouter();
+  const isAdmin = isAuthenticated && String(user?.role || '').toLowerCase() === 'admin';
   const [mega, setMega] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
@@ -466,11 +473,11 @@ export function Header() {
               <span className="ha-txt"><small>Deliver to</small><b>Lagos, NG</b></span>
             </button>
             <div className="user-pop-wrap" onMouseLeave={() => setUserOpen(false)}>
-              <button className="head-act" onMouseEnter={() => setUserOpen(true)} onClick={() => go('account')}>
+              <button className="head-act" onMouseEnter={() => setUserOpen(true)} onClick={() => isAdmin ? router.push('/admin') : go('account')}>
                 <Icon name="user" size={20} />
                 <span className="ha-txt">
-                  <small>Account</small>
-                  <b>{isAuthenticated ? (user?.name?.split(' ')[0] || user?.username || 'My account') : 'Sign in'}</b>
+                  <small>{isAdmin ? 'Admin' : 'Account'}</small>
+                  <b>{isAdmin ? 'Go to admin' : isAuthenticated ? (user?.name?.split(' ')[0] || user?.username || 'My account') : 'Sign in'}</b>
                 </span>
               </button>
               {userOpen &&
@@ -481,10 +488,22 @@ export function Header() {
                       <p className="muted" style={{ fontSize: 12.5, textAlign: 'center', margin: '8px 0 12px' }}>New here? <a onClick={() => go('auth', 'signup')} style={{ color: 'var(--primary)', cursor: 'pointer', fontWeight: 700 }}>Create account</a></p>
                     </>
                   ) : (
-                    <div style={{ padding: '4px 4px 10px', borderBottom: '1px solid var(--border, rgba(0,0,0,.08))', marginBottom: 8 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13.5, lineHeight: 1.3 }}>{user?.name || user?.username || 'Signed in'}</div>
-                      {user?.email && <div className="muted" style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</div>}
-                    </div>
+                    <>
+                      <div style={{ padding: '4px 4px 10px', borderBottom: '1px solid var(--border, rgba(0,0,0,.08))', marginBottom: 8 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13.5, lineHeight: 1.3 }}>{user?.name || user?.username || 'Signed in'}</div>
+                        {user?.email && <div className="muted" style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</div>}
+                      </div>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-block btn-sm"
+                          style={{ marginBottom: 8 }}
+                          onClick={() => { setUserOpen(false); router.push('/admin'); }}
+                        >
+                          Go to admin
+                        </button>
+                      )}
+                    </>
                   )}
                   {[['user', 'My account', 'account'], ['package', 'My orders', 'orders'], ['heart', 'Wishlist', 'wishlist'], ['pin', 'Track order', 'tracking']].map(([ic, lb, rt]) =>
                 <a key={rt} className="pop-link" onClick={() => { setUserOpen(false); go(rt); }}><Icon name={ic} size={17} />{lb}</a>
@@ -565,11 +584,12 @@ const SOCIALS = [
 
 
 export function Footer() {
-  const { go, toast, isAuthenticated, logout } = useStore();
+  const { go, toast, user, isAuthenticated, logout } = useStore();
   const router = useRouter();
+  const isAdmin = isAuthenticated && String(user?.role || '').toLowerCase() === 'admin';
   const cols = [
   ['Shop', [['Phones & Tablets', () => go('shop', 'phones')], ['Computers & Accessories', () => go('shop', 'computing')], ['Electronics', () => go('shop', 'electronics')], ['Women’s Fashion', () => go('shop', 'womens')], ['All deals', () => go('shop', 'deals')]]],
-  ['Account', [['My account', () => go('account')], ['Orders', () => go('orders')], ['Wishlist', () => go('wishlist')], ['Track order', () => go('orders')], isAuthenticated ? ['Sign out', async () => { await logout(); go('auth', 'signin'); }] : ['Sign in', () => go('auth', 'signin')]]],
+  ['Account', [['My account', () => go('account')], ['Orders', () => go('orders')], ['Wishlist', () => go('wishlist')], ['Track order', () => go('orders')], isAdmin ? ['Go to admin', () => router.push('/admin')] : isAuthenticated ? ['Sign out', async () => { await logout(); go('auth', 'signin'); }] : ['Sign in', () => go('auth', 'signin')]]],
   ['Support', [['Help center', () => go('help')], ['About us', () => go('about')], ['Videos', () => go('videos')], ['Channels', () => go('channels')], ['Contact us', () => go('help', 'contact')]]],
   ['Earn from Limitra', [['Limitra MicroStores', () => go('microstores')], ['Limitra Celebrity Stores', () => go('celebrityStores')], ['Become an Affiliate', () => go('affiliate')], ['Affiliate dashboard', () => router.push('/affiliate/dashboard')], ['Careers', () => go('careers')]]]];
 
