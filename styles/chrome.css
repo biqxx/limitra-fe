@@ -103,8 +103,8 @@
    instead of silently overflowing past the edge (overflow:visible) or hiding
    items (the old @media nav-collapsible rule, removed below) — every link
    stays reachable at any width down to where the mobile nav takes over. */
-.nav-bar .wrap.row { gap: 2px !important; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
-.nav-bar .wrap.row::-webkit-scrollbar { display: none; }
+.nav-bar .wrap.row { gap: 4px !important; flex-wrap: nowrap; overflow: hidden; }
+.nav-cats-clip { position: relative; flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden; height: 100%; }
 .nav-cat { position: relative; display: inline-flex; align-items: stretch; }
 .nav-cat-chev { opacity: .6; transition: transform .2s var(--ease); }
 .nav-cat:hover .nav-cat-chev { transform: rotate(180deg); opacity: 1; }

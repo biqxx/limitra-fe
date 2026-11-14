@@ -396,17 +396,43 @@ function MobileMenu({ open, onClose }) {
 }
 
 export function Header() {
-  const { go, cartCount, cartTotal, wish, route, theme, toggleTheme } = useStore();
+  const { go, cartCount, cartTotal, wish, route, theme, toggleTheme, catalogVersion } = useStore();
   const [mega, setMega] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const navCatsRef = useRef(null);
   useEffect(() => {
     const f = () => setScrolled(window.scrollY > 10);
     window.addEventListener('scroll', f);return () => window.removeEventListener('scroll', f);
   }, []);
+  useEffect(() => {
+    const el = navCatsRef.current;
+    if (!el) return;
+    const fit = () => {
+      const items = Array.from(el.children);
+      items.forEach(item => { item.style.display = ''; });
+      const limit = el.clientWidth;
+      if (limit <= 0) return;
+      let overflowed = false;
+      items.forEach(item => {
+        if (overflowed || item.offsetLeft + item.offsetWidth > limit) {
+          overflowed = true;
+          item.style.display = 'none';
+        }
+      });
+    };
+    fit();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
+    if (ro) ro.observe(el);
+    window.addEventListener('resize', fit);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', fit);
+    };
+  }, [catalogVersion]);
 
   return (
     <header className={'site-head' + (scrolled ? ' scrolled' : '')}>
@@ -468,13 +494,13 @@ export function Header() {
           <button className={'nav-all' + (mega ? ' on' : '')} onMouseEnter={() => setMega(true)} onClick={() => setMega((m) => !m)}>
             <Icon name="grid" size={17} /> All Categories <Icon name="chevdown" size={15} />
           </button>
-          {getNav().map((n, i) =>
-          <NavCategory key={n.slug} n={n} active={route.name === 'shop' && route.params[0] === n.slug} go={go} onEnterClose={() => setMega(false)} className={i >= 3 ? 'nav-collapsible' : ''} />
-          )}
+          <div className="nav-cats-clip" ref={navCatsRef}>
+            {getNav().map((n) =>
+            <NavCategory key={n.slug} n={n} active={route.name === 'shop' && route.params[0] === n.slug} go={go} onEnterClose={() => setMega(false)} />
+            )}
+          </div>
           <a className="nav-link nav-collapsible" onClick={() => go('shop', 'all')}>All Products</a>
-          <span style={{ flex: 1 }} />
           <a className="nav-link deals" onClick={() => go('shop', 'deals')}><Icon name="flame" size={15} fill="currentColor" /> Deals</a>
-          <a className={'nav-link nav-collapsible' + (route.name === 'affiliate' ? ' active' : '')} onClick={() => go('affiliate')}>Affiliate</a>
           <a className="nav-link" onClick={() => go('videos')}><Icon name="video" size={16} /> Videos</a>
           <a className="nav-link soft" onClick={() => go('help')}><Icon name="headset" size={16} /> Support</a>
         </div>
