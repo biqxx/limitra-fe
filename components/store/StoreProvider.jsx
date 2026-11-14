@@ -24,6 +24,25 @@ const CAT_TINTS = [
 const StoreCtx = createContext(null);
 export const useStore = () => useContext(StoreCtx);
 
+const CATALOG_TTL_MS = 60 * 1000;
+const CATALOG_CACHE_KEY = 'lim_catalog_cache_v1';
+let _catalogFetchedAt = 0;
+let _catalogPromise = null;
+
+function needsCatalogOnRoute(pathname) {
+  if (!pathname || pathname.startsWith('/admin')) return false;
+  if (pathname === '/') return true;
+  return ['/shop', '/deals', '/category', '/product', '/cart', '/wishlist', '/channels', '/microstores', '/store'].some(
+    prefix => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+}
+
+function defaultVariantFor(product) {
+  const list = Array.isArray(product?.variants) ? product.variants : [];
+  if (!list.length) return null;
+  return list.find(v => (v.status ?? 'active') === 'active' && (v.stock ?? 1) > 0) || list[0];
+}
+
 export function StoreProvider({ children }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -37,8 +56,11 @@ export function StoreProvider({ children }) {
   const [localCart, setLocalCart] = useState([]);
   const localCartRef = useRef(localCart); localCartRef.current = localCart;
   const [localWish, setLocalWish] = useState([]);
+  const localWishRef = useRef(localWish); localWishRef.current = localWish;
   const [remoteCart, setRemoteCart] = useState(null); // raw cartApi cart object, signed-in users only
+  const remoteCartRef = useRef(remoteCart); remoteCartRef.current = remoteCart;
   const [favorites, setFavorites] = useState([]); // [{id, product_id, ...}], signed-in users only
+  const favoritesRef = useRef(favorites); favoritesRef.current = favorites;
   const [addresses, setAddresses] = useState([]);
   const [cards, setCards] = useState([]);
   const cardsRef = useRef(cards); cardsRef.current = cards;
@@ -90,23 +112,44 @@ export function StoreProvider({ children }) {
   }, []);
   const loadCartAndFavorites = useCallback(async () => {
     try {
-      const pendingLocal = localCartRef.current || [];
+      let pendingLocal = localCartRef.current || [];
+      if (pendingLocal.length === 0 && typeof window !== 'undefined') {
+        try { pendingLocal = JSON.parse(localStorage.getItem('lim_cart') || '[]'); } catch (e) {}
+      }
       if (pendingLocal.length > 0) {
+        const failed = [];
         for (const item of pendingLocal) {
           try {
             const payload = { product_id: item.id, quantity: item.qty || 1 };
             if (item.variantId != null) payload.variant_id = item.variantId;
             if (item.selectedOptions && Object.keys(item.selectedOptions).length > 0) payload.selected_options = item.selectedOptions;
             await cartApi.addToActive(payload);
-          } catch (e) { /* skip unavailable guest item */ }
+          } catch (e) {
+            failed.push(item);
+          }
         }
-        setLocalCart([]);
+        setLocalCart(failed);
+        try { localStorage.setItem('lim_cart', JSON.stringify(failed)); } catch (e) {}
       }
       let c;
       try { c = await cartApi.getActive(); } catch (e) { c = await cartApi.getOrCreateActive(); }
       setRemoteCart(c);
     } catch (e) { setRemoteCart(null); }
     try {
+      let pendingWish = localWishRef.current || [];
+      if (pendingWish.length === 0 && typeof window !== 'undefined') {
+        try { pendingWish = JSON.parse(localStorage.getItem('lim_wish') || '[]'); } catch (e) {}
+      }
+      if (pendingWish.length > 0) {
+        for (const pid of pendingWish) {
+          try {
+            const v = defaultVariantFor(byId(pid));
+            await favoritesApi.add(pid, v?.id ?? null);
+          } catch (e) { /* skip unavailable guest favorite */ }
+        }
+        setLocalWish([]);
+        try { localStorage.setItem('lim_wish', '[]'); } catch (e) {}
+      }
       const favs = await favoritesApi.list();
       // Confirmed live: GET /favorites' data is { items: [...], pagination }
       // — not a bare array and not nested under `.data` again, which is why
@@ -159,9 +202,11 @@ export function StoreProvider({ children }) {
       try { profile = await profileApi.get(); } catch (e) { /* no profile yet, proceed with `me` alone */ }
       const resolved = { ...me, ...profile };
       setUser(resolved);
-      loadCartAndFavorites();
-      loadAddresses();
-      loadWallet();
+      await Promise.all([
+        loadCartAndFavorites(),
+        loadAddresses(),
+        loadWallet(),
+      ]);
       return resolved;
     } catch (e) {
       setUser(null); clearTokens();
@@ -193,120 +238,118 @@ export function StoreProvider({ children }) {
      open: an error here just leaves the catalog empty, same as today. */
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogVersion, setCatalogVersion] = useState(0);
-  const loadCatalog = useCallback(async () => {
+  const applyCatalogPayload = useCallback((catList, rawProducts) => {
+    const catsById = {};
+    const mappedCats = catList.map((c, i) => {
+      const slug = c.slug || slugify(c.name) || `category-${c.id}`;
+      const mapped = {
+        id: c.id,
+        slug,
+        name: c.name,
+        count: c.products_count ?? c.product_count ?? c.count ?? 0,
+        tint: CAT_TINTS[i % CAT_TINTS.length],
+      };
+      catsById[c.id] = mapped;
+      return mapped;
+    });
+    const subcats = {};
+    catList.forEach(c => {
+      const slug = catsById[c.id]?.slug;
+      const subs = c.subcategories || c.subCategories || [];
+      if (slug && Array.isArray(subs) && subs.length) subcats[slug] = subs.map(s => s.name).filter(Boolean);
+    });
+
+    const mappedProducts = rawProducts.map(p => {
+      const cat = catsById[p.category_id ?? p.category?.id];
+      const imageUrls = Array.isArray(p.images)
+        ? p.images.map(img => (typeof img === 'string' ? img : img?.url || img?.path)).filter(Boolean)
+        : [];
+      const imageUrl = imageUrls[0];
+      const stock = Number(p.stock) || 0;
+      if (imageUrl) REAL_IMG[p.id] = imageUrl;
+      const createdAt = p.created_at ? new Date(p.created_at) : null;
+      const isNew = createdAt ? (Date.now() - createdAt.getTime()) < 14 * 24 * 60 * 60 * 1000 : false;
+      return {
+        id: p.id,
+        slug: p.slug || slugify(p.name) || `product-${p.id}`,
+        name: p.name,
+        brand: p.brand || '',
+        price: Number(p.price) || 0,
+        was: Number(p.compare_at_price) || 0,
+        off: Number(p.discount_percentage) || 0,
+        stock,
+        category: cat?.slug || p.category?.slug || 'all',
+        subcategoryName: p.subcategory?.name || null,
+        desc: p.description || '',
+        description: p.description || '',
+        store: p.creator?.name || p.creator?.username || 'Limitra',
+        rating: Number(p.average_rating ?? p.rating) || 0,
+        reviews: Number(p.review_count ?? p.reviews_count ?? p.reviews) || 0,
+        specs: Array.isArray(p.specifications)
+          ? p.specifications.filter(s => s?.name).map(s => [s.name, s.value ?? ''])
+          : [],
+        images: imageUrls,
+        variants: Array.isArray(p.variants) ? p.variants : [],
+        badges: [...(stock === 0 ? ['out-of-stock'] : []), ...(isNew ? ['new'] : []), ...(p.is_featured ? ['hot'] : [])],
+        bestseller: !!p.is_bestseller,
+        tint: cat?.tint || CAT_TINTS[0],
+      };
+    });
+
+    setCategories(mappedCats);
+    setSubcats(subcats);
+    setProducts(applyStoredVariants(mappedProducts));
+    setCatalogVersion(v => v + 1);
+  }, []);
+
+  const loadCatalog = useCallback(async (force = false) => {
     try {
-      const [rawCats, rawProductsRes] = await Promise.all([
-        categoriesApi.list().catch(() => []),
-        productsApi.list({ per_page: 100 }).catch(() => null),
-      ]);
+      if (!force && typeof window !== 'undefined') {
+        if (Date.now() - _catalogFetchedAt < CATALOG_TTL_MS) {
+          setCatalogLoading(false);
+          return;
+        }
+        try {
+          const cached = JSON.parse(sessionStorage.getItem(CATALOG_CACHE_KEY) || 'null');
+          if (cached && (Date.now() - cached.ts) < CATALOG_TTL_MS && Array.isArray(cached.products)) {
+            _catalogFetchedAt = cached.ts;
+            applyCatalogPayload(cached.cats || [], cached.products);
+            setCatalogLoading(false);
+            return;
+          }
+        } catch (e) {}
+      }
+
+      if (!_catalogPromise || force) {
+        _catalogPromise = Promise.all([
+          categoriesApi.list().catch(() => []),
+          productsApi.list({ per_page: 100 }).catch(() => null),
+        ]).finally(() => { _catalogPromise = null; });
+      }
+      const [rawCats, rawProductsRes] = await _catalogPromise;
       const catList = Array.isArray(rawCats) ? rawCats : rawCats?.items || rawCats?.data || [];
-
-      const catsById = {};
-      const mappedCats = catList.map((c, i) => {
-        const slug = c.slug || slugify(c.name) || `category-${c.id}`;
-        const mapped = {
-          id: c.id,
-          slug,
-          name: c.name,
-          count: c.products_count ?? c.product_count ?? c.count ?? 0,
-          tint: CAT_TINTS[i % CAT_TINTS.length],
-        };
-        catsById[c.id] = mapped;
-        return mapped;
-      });
-      const subcats = {};
-      catList.forEach(c => {
-        const slug = catsById[c.id]?.slug;
-        const subs = c.subcategories || c.subCategories || [];
-        if (slug && Array.isArray(subs) && subs.length) subcats[slug] = subs.map(s => s.name).filter(Boolean);
-      });
-
       const rawProducts = Array.isArray(rawProductsRes) ? rawProductsRes : rawProductsRes?.items || rawProductsRes?.data || [];
-      const mappedProducts = rawProducts.map(p => {
-        // GET /products nests a full category object (id/name/slug/...) on
-        // each product — there's no flat `category_id` field on the read side
-        // for most deployments (that's only what POST/PATCH accept for
-        // writing), but the `?? p.category_id` fallback is kept here since
-        // this biqxx/main variant's backend has been seen sending one too.
-        // Looking this up via `catsById` (keyed by id) rather than trusting
-        // p.category.slug directly keeps the category's `tint` in sync with
-        // the one computed above for CATEGORIES, but falls back to the
-        // nested slug if for any reason this product's category isn't in
-        // that list.
-        const cat = catsById[p.category_id ?? p.category?.id];
-        // Each entry in p.images is {id, url, alt, position}, not a plain URL
-        // string — storing the object itself (as this used to) renders
-        // <img src="[object Object]">, a broken image with naturalWidth 0.
-        const imageUrls = Array.isArray(p.images)
-          ? p.images.map(img => (typeof img === 'string' ? img : img?.url || img?.path)).filter(Boolean)
-          : [];
-        const imageUrl = imageUrls[0];
-        const stock = Number(p.stock) || 0;
-        if (imageUrl) REAL_IMG[p.id] = imageUrl;
-        // "New" is computed, not a flag the API sends — anything created in
-        // the last 14 days. isFeatured/isBestseller DO come straight from the
-        // API; none of them are true for any live product as of this writing
-        // (freshly-sourced/admin-created items default to false), so this is
-        // currently invisible but is what the "New arrivals"/"Trending this
-        // week" sections (which filter on these) actually need to ever show
-        // real products instead of permanently showing nothing.
-        const createdAt = p.created_at ? new Date(p.created_at) : null;
-        const isNew = createdAt ? (Date.now() - createdAt.getTime()) < 14 * 24 * 60 * 60 * 1000 : false;
-        return {
-          id: p.id,
-          slug: p.slug || slugify(p.name) || `product-${p.id}`,
-          name: p.name,
-          brand: p.brand || '',
-          price: Number(p.price) || 0,
-          was: Number(p.compare_at_price) || 0,
-          // discount_percentage is the API's own field — it was hardcoded to 0
-          // here before, which hid any real discount from the "Deals" page
-          // (filters on off > 0) even when one existed.
-          off: Number(p.discount_percentage) || 0,
-          stock,
-          category: cat?.slug || p.category?.slug || 'all',
-          // ShopPage matches a subcategory route segment against this (exact
-          // name match, see getSubcatIndex() in Chrome.jsx) — the real API
-          // nests a subcategory object with its own `name`/`slug`, not a flat
-          // `sub` field the way the old mock catalog had one.
-          subcategoryName: p.subcategory?.name || null,
-          desc: p.description || '',
-          description: p.description || '',
-          store: p.creator?.name || p.creator?.username || 'Limitra',
-          // The API's fields are `average_rating`/`review_count` — this used
-          // to read `p.rating`/`p.reviews_count`, neither of which exist, so
-          // it silently always fell through to 0. That happened to match
-          // every live product's actual rating/review count so far, which is
-          // exactly why it went unnoticed. The `?? p.rating`/`?? p.reviews_count`
-          // fallbacks are kept for this biqxx/main variant's backend.
-          rating: Number(p.average_rating ?? p.rating) || 0,
-          reviews: Number(p.review_count ?? p.reviews_count ?? p.reviews) || 0,
-          specs: Array.isArray(p.specifications)
-            ? p.specifications.filter(s => s?.name).map(s => [s.name, s.value ?? ''])
-            : [],
-          images: imageUrls,
-          variants: Array.isArray(p.variants) ? p.variants : [],
-          badges: [...(stock === 0 ? ['out-of-stock'] : []), ...(isNew ? ['new'] : []), ...(p.is_featured ? ['hot'] : [])],
-          bestseller: !!p.is_bestseller,
-          tint: cat?.tint || CAT_TINTS[0],
-        };
-      });
-
-      setCategories(mappedCats);
-      setSubcats(subcats);
-      setProducts(applyStoredVariants(mappedProducts));
-      setCatalogVersion(v => v + 1);
+      _catalogFetchedAt = Date.now();
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify({ ts: _catalogFetchedAt, cats: catList, products: rawProducts }));
+        } catch (e) {}
+      }
+      applyCatalogPayload(catList, rawProducts);
     } catch (e) {
-      // leave the catalog empty — every page already renders a graceful
-      // "coming soon" state for CATEGORIES/PRODUCTS.length === 0. Logged (not
-      // swallowed silently) — a silent catch here is exactly what let the
-      // reference-identity bug above go undiagnosed for as long as it did.
       console.error('[catalog] load failed:', e);
     } finally {
       setCatalogLoading(false);
     }
-  }, []);
-  useEffect(() => { loadCatalog(); }, [loadCatalog]);
+  }, [applyCatalogPayload]);
+
+  useEffect(() => {
+    if (!needsCatalogOnRoute(pathname)) {
+      setCatalogLoading(false);
+      return;
+    }
+    loadCatalog();
+  }, [loadCatalog, pathname]);
 
   useEffect(() => {
     const onSignup = () => setSpinUsed(false);
@@ -433,13 +476,17 @@ export function StoreProvider({ children }) {
      guest-cart line so a later price change doesn't retroactively reprice
      something already sitting in someone's cart — see unitPriceOf() in lib/data.js. */
   const addToCart = useCallback(async (product, opts = {}, qty = 1) => {
+    const fallbackVariant = opts.variantId == null ? defaultVariantFor(product) : null;
     const variants = opts.variants || {};
-    const unitPrice = opts.unitPrice ?? product.price;
-    const variantId = opts.variantId ?? null;
-    const selectedOptions = opts.selectedOptions || {};
+    const variantId = opts.variantId ?? fallbackVariant?.id ?? null;
+    const selectedOptions = (opts.selectedOptions && Object.keys(opts.selectedOptions).length > 0)
+      ? opts.selectedOptions
+      : (fallbackVariant?.attributes || {});
+    const unitPrice = opts.unitPrice ?? fallbackVariant?.price ?? product.price;
+
     if (!isAuthenticated) {
       const variantKey = Object.keys(variants).sort().map(k => `${k}:${variants[k].label}`).join('|');
-      const key = [product.id, variantKey].join('|');
+      const key = [product.id, variantId ?? variantKey].join('|');
       setLocalCart(c => {
         const ex = c.find(i => i.key === key);
         if (ex) return c.map(i => i.key === key ? { ...i, qty: i.qty + qty } : i);
@@ -448,14 +495,43 @@ export function StoreProvider({ children }) {
       toast(`Added to cart · ${product.name.split(',')[0]}`);
       return;
     }
+
+    const prevCart = remoteCartRef.current;
+    const prevItems = prevCart?.items || prevCart?.cart_items || [];
+    const matchIdx = prevItems.findIndex(it =>
+      (it.product_id ?? it.product?.id) === product.id
+      && (it.variant_id ?? it.variant?.id ?? null) === variantId
+    );
+    const nextItems = matchIdx >= 0
+      ? prevItems.map((it, idx) => idx === matchIdx ? { ...it, quantity: (it.quantity || 0) + qty } : it)
+      : [
+          ...prevItems,
+          {
+            id: `opt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            product_id: product.id,
+            variant_id: variantId,
+            selected_options: selectedOptions,
+            quantity: qty,
+            unit_price: unitPrice,
+            price: unitPrice,
+            product,
+          },
+        ];
+    setRemoteCart({ ...(prevCart || {}), items: nextItems });
+    toast(`Added to cart · ${product.name.split(',')[0]}`);
+
     try {
       const payload = { product_id: product.id, quantity: qty };
       if (variantId != null) payload.variant_id = variantId;
       if (Object.keys(selectedOptions).length > 0) payload.selected_options = selectedOptions;
-      await cartApi.addToActive(payload);
-      await refreshRemoteCart();
-      toast(`Added to cart · ${product.name.split(',')[0]}`);
+      const updated = await cartApi.addToActive(payload);
+      if (updated && (Array.isArray(updated.items) || Array.isArray(updated.cart_items))) {
+        setRemoteCart(updated);
+      } else {
+        await refreshRemoteCart();
+      }
     } catch (e) {
+      setRemoteCart(prevCart);
       toast(messageFrom(e), 'error');
     }
   }, [isAuthenticated, toast, refreshRemoteCart]);
@@ -502,21 +578,35 @@ export function StoreProvider({ children }) {
       });
       return;
     }
-    const existing = favorites.find(f => (f.product_id ?? f.product?.id) === id);
-    try {
-      if (existing) {
+    const prevFavorites = favoritesRef.current;
+    const existing = prevFavorites.find(f => (f.product_id ?? f.product?.id) === id);
+    const optimisticId = `opt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    if (existing) {
+      setFavorites(fs => fs.filter(f => f.id !== existing.id));
+      toast('Removed from wishlist');
+      try {
         await favoritesApi.remove(existing.id);
-        setFavorites(fs => fs.filter(f => f.id !== existing.id));
-        toast('Removed from wishlist');
-      } else {
-        const created = await favoritesApi.add(id);
-        setFavorites(fs => [...fs, created && created.id ? created : { id: Date.now(), product_id: id }]);
-        toast('Saved to wishlist');
+      } catch (e) {
+        setFavorites(prevFavorites);
+        toast(messageFrom(e), 'error');
+      }
+      return;
+    }
+
+    const defaultVariant = defaultVariantFor(byId(id));
+    setFavorites(fs => [...fs, { id: optimisticId, product_id: id, variant_id: defaultVariant?.id ?? null }]);
+    toast('Saved to wishlist');
+    try {
+      const created = await favoritesApi.add(id, defaultVariant?.id ?? null);
+      if (created && created.id) {
+        setFavorites(fs => fs.map(f => f.id === optimisticId ? created : f));
       }
     } catch (e) {
+      setFavorites(prevFavorites);
       toast(messageFrom(e), 'error');
     }
-  }, [isAuthenticated, favorites, toast]);
+  }, [isAuthenticated, toast]);
 
   /* referrals, referrer earns ₦5,000 store credit per completed referral; credit only offsets order totals */
   const REFERRAL_REWARD = 5000;

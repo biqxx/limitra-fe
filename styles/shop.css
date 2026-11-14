@@ -83,7 +83,8 @@
 
 /* gallery */
 .gallery { display: grid; grid-template-columns: 78px 1fr; gap: 16px; position: sticky; top: calc(var(--header-h) + 16px); }
-.g-thumbs { position: absolute; top: 0; bottom: 0; left: 0; width: 78px; display: flex; flex-direction: column; gap: 12px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.g-thumbs { position: absolute; top: 0; bottom: 0; left: 0; width: 78px; display: flex; flex-direction: column; gap: 12px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; -ms-overflow-style: none; }
+.g-thumbs::-webkit-scrollbar { display: none; }
 .g-thumb { width: 100%; aspect-ratio: 1/1; flex: 0 0 auto; border-radius: var(--r-md); overflow: hidden; border: 2px solid var(--border); background: var(--surface-2); transition: border-color .15s; }
 .g-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .g-thumb.on { border-color: var(--primary); }
