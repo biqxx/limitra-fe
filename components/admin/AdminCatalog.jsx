@@ -483,94 +483,134 @@ export function ProductEditDrawer({ draft, onClose, onSave }) {
       setPricingBusy(false);
     }
   };
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
     <>
       <div className="adm-drawer-scrim" onClick={onClose} />
-      <aside className="adm-drawer" role="dialog" aria-label="Edit product">
+      <div className="adm-modal adm-modal-lg" role="dialog" aria-modal="true" aria-label={f._new ? 'Add product' : 'Edit product'}>
         <div className="adm-drawer-h">
-          <h3>{f._new ? 'Add product' : 'Edit product'}</h3>
+          <div>
+            <h3>{f._new ? 'Add product' : 'Edit product'}</h3>
+            {!f._new && f.id && <small className="muted">Product #{f.id}{source ? ` · ${source.supplier}` : ''}</small>}
+          </div>
           <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
         </div>
         <div className="adm-drawer-body">
-          <label className="adm-img-drop">
-            {f._img
-              ? <img src={f._img} alt="preview" className="adm-img-preview" />
-              : (!f._new && f._raw)
-                ? <div className="adm-drawer-thumb" style={{ height: '100%' }}><Thumb product={f._raw} src={REAL_IMG[f._raw.id]} /></div>
-                : <span className="adm-img-empty"><Icon name="download" size={26} /><b>Add product photo</b><small>Click to upload, JPG, PNG or WEBP</small></span>}
-            <input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={e => {
-              const file = e.target.files && e.target.files[0]; if (!file) return;
-              const r = new FileReader(); r.onload = () => set('_img', r.result); r.readAsDataURL(file);
-            }} />
-            {f._img && <span className="adm-img-replace"><Icon name="edit" size={13} /> Change photo</span>}
-          </label>
-          <label className="adm-field"><span>Product name</span><input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Product name" /></label>
-          <label className="adm-field"><span>Brand</span><input value={f.brand} onChange={e => set('brand', e.target.value)} placeholder="Brand" /></label>
-          <div className="adm-field-row">
-            <label className="adm-field"><span>{sourced ? 'Approved / proposed price (₦)' : 'Price (₦)'}</span><input type="number" value={f.price} onChange={e => set('price', e.target.value)} disabled={sourced} />{sourced && <small className="muted">Managed by the pricing workflow below.</small>}</label>
-            <label className="adm-field"><span>Stock</span><input type="number" value={f._stock} onChange={e => set('_stock', e.target.value)} /></label>
-          </div>
-          {sourced && (
-            <section style={{ border: '1.5px solid var(--border)', borderRadius: 'var(--r-md)', padding: 16, marginBottom: 18 }}>
-              <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-                <div><b>Supplier pricing</b><small className="muted" style={{ display: 'block', marginTop: 3 }}>{source.supplier} · {source.external_product_id}</small></div>
-                <span className={'adm-pill ' + (pricingApproved ? 'ok' : source.pricing_status === 'blocked' ? 'bad' : 'warn')}>{String(source.pricing_status || 'pending').replaceAll('_', ' ')}</span>
-              </div>
+          <div className="adm-prod-modal-grid">
+            <div className="adm-prod-modal-side">
+              <label className="adm-img-drop" style={{ height: 220 }}>
+                {f._img
+                  ? <img src={f._img} alt="preview" className="adm-img-preview" />
+                  : (!f._new && f._raw)
+                    ? <div className="adm-drawer-thumb" style={{ height: '100%' }}><Thumb product={f._raw} src={REAL_IMG[f._raw.id]} /></div>
+                    : <span className="adm-img-empty"><Icon name="download" size={26} /><b>Add product photo</b><small>Click to upload, JPG, PNG or WEBP</small></span>}
+                <input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={e => {
+                  const file = e.target.files && e.target.files[0]; if (!file) return;
+                  const r = new FileReader(); r.onload = () => set('_img', r.result); r.readAsDataURL(file);
+                }} />
+                {f._img && <span className="adm-img-replace"><Icon name="edit" size={13} /> Change photo</span>}
+              </label>
+
+              <label className="adm-field"><span>Category</span>
+                <AdmSelect value={f.category} options={cats.map(c => ({ value: c.slug, label: c.name }))} onChange={v => set('category', v)} creatable onCreate={addCat} />
+              </label>
+
+              <label className="adm-field"><span>Catalog status</span>
+                <AdmSelect value={f.status || 'draft'} options={[{ value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived' }]} onChange={v => set('status', v)} />
+                {sourced && source.pricing_status === 'pending_approval' && <small className="muted">Saving as Active will approve the displayed price and publish the product.</small>}
+                {sourced && !pricingApproved && source.pricing_status !== 'pending_approval' && <small className="muted">{pricingIssueMessage(source)} Update the pricing inputs or pricing settings, then recalculate.</small>}
+              </label>
+            </div>
+
+            <div className="adm-prod-modal-main">
               <div className="adm-field-row">
-                <label className="adm-field"><span>Supplier price</span><input type="number" min="0" step="0.01" value={pricingInputs.supplier_price} onChange={e => setPricingInputs(current => ({ ...current, supplier_price: e.target.value }))} /></label>
-                <label className="adm-field"><span>Currency</span><input maxLength="3" value={pricingInputs.supplier_currency} onChange={e => setPricingInputs(current => ({ ...current, supplier_currency: e.target.value.toUpperCase() }))} /></label>
+                <label className="adm-field"><span>Product name</span><input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Product name" /></label>
+                <label className="adm-field"><span>Brand</span><input value={f.brand} onChange={e => set('brand', e.target.value)} placeholder="Brand" /></label>
               </div>
+
               <div className="adm-field-row">
-                <label className="adm-field"><span>Weight (lb)</span><input type="number" min="0" step="0.01" value={pricingInputs.weight_lb} onChange={e => setPricingInputs(current => ({ ...current, weight_lb: e.target.value }))} /></label>
-                <label className="adm-field"><span>US delivery min (days)</span><input type="number" min="1" value={pricingInputs.delivery_days_min} onChange={e => setPricingInputs(current => ({ ...current, delivery_days_min: e.target.value }))} /></label>
-                <label className="adm-field"><span>US delivery max (days)</span><input type="number" min="1" value={pricingInputs.delivery_days_max} onChange={e => setPricingInputs(current => ({ ...current, delivery_days_max: e.target.value }))} /></label>
+                <label className="adm-field"><span>{sourced ? 'Approved / proposed price (₦)' : 'Price (₦)'}</span><input type="number" value={f.price} onChange={e => set('price', e.target.value)} disabled={sourced} />{sourced && <small className="muted">Managed by supplier pricing below.</small>}</label>
+                <label className="adm-field"><span>Stock</span><input type="number" value={f._stock} onChange={e => set('_stock', e.target.value)} /></label>
               </div>
-              {quote?.missing_inputs?.length > 0 && <div className="adm-note" style={{ marginBottom: 10 }}><Icon name="info" size={14} /> Missing: {quote.missing_inputs.join(', ').replaceAll('_', ' ')}</div>}
-              {quote?.blocked_reasons?.length > 0 && <div className="adm-note" style={{ marginBottom: 10, color: 'var(--red)' }}><Icon name="info" size={14} /> Blocked: {quote.blocked_reasons.join(', ').replaceAll('_', ' ')}</div>}
-              {quote?.proposed_price_ngn && (
-                <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
-                  <div className="row" style={{ justifyContent: 'space-between' }}><span>Proposed selling price</span><b>{naira(Number(quote.proposed_price_ngn))}</b></div>
-                  {quote.cost_breakdown && <small className="muted" style={{ display: 'block', marginTop: 6 }}>Landed cost {naira(Number(quote.cost_breakdown.total_cost_ngn || 0))} · Profit {naira(Number(quote.cost_breakdown.profit_ngn || 0))} · FX {Number(quote.cost_breakdown.supplier_effective_rate_ngn || 0).toLocaleString('en-NG')} NGN/{source.supplier_currency}</small>}
+
+              {sourced && (
+                <section className="adm-supplier-card">
+                  <div className="adm-supplier-head">
+                    <div>
+                      <b>Supplier pricing</b>
+                      <small className="muted" style={{ display: 'block', marginTop: 2 }}>{source.supplier} · {source.external_product_id}</small>
+                    </div>
+                    <span className={'adm-pill ' + (pricingApproved ? 'ok' : source.pricing_status === 'blocked' ? 'bad' : 'warn')}>{String(source.pricing_status || 'pending').replaceAll('_', ' ')}</span>
+                  </div>
+
+                  <div className="adm-field-row">
+                    <label className="adm-field"><span>Supplier price</span><input type="number" min="0" step="0.01" value={pricingInputs.supplier_price} onChange={e => setPricingInputs(current => ({ ...current, supplier_price: e.target.value }))} /></label>
+                    <label className="adm-field"><span>Currency</span><input maxLength="3" value={pricingInputs.supplier_currency} onChange={e => setPricingInputs(current => ({ ...current, supplier_currency: e.target.value.toUpperCase() }))} /></label>
+                  </div>
+
+                  <div className="adm-field-row-3">
+                    <label className="adm-field"><span>Weight (lb)</span><input type="number" min="0" step="0.01" value={pricingInputs.weight_lb} onChange={e => setPricingInputs(current => ({ ...current, weight_lb: e.target.value }))} /></label>
+                    <label className="adm-field"><span>Delivery min (days)</span><input type="number" min="1" value={pricingInputs.delivery_days_min} onChange={e => setPricingInputs(current => ({ ...current, delivery_days_min: e.target.value }))} /></label>
+                    <label className="adm-field"><span>Delivery max (days)</span><input type="number" min="1" value={pricingInputs.delivery_days_max} onChange={e => setPricingInputs(current => ({ ...current, delivery_days_max: e.target.value }))} /></label>
+                  </div>
+
+                  {quote?.missing_inputs?.length > 0 && <div className="adm-note"><Icon name="info" size={14} /> Missing: {quote.missing_inputs.join(', ').replaceAll('_', ' ')}</div>}
+                  {quote?.blocked_reasons?.length > 0 && <div className="adm-note" style={{ color: 'var(--red)' }}><Icon name="info" size={14} /> Blocked: {quote.blocked_reasons.join(', ').replaceAll('_', ' ')}</div>}
+
+                  {quote?.proposed_price_ngn && (
+                    <div className="adm-supplier-quote">
+                      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="muted" style={{ fontSize: 13 }}>Proposed selling price</span>
+                        <b style={{ fontSize: 17, fontFamily: 'var(--font-display)' }}>{naira(Number(quote.proposed_price_ngn))}</b>
+                      </div>
+                      {quote.cost_breakdown && (
+                        <div className="adm-supplier-metrics">
+                          <div><span>Landed cost</span><b>{naira(Number(quote.cost_breakdown.total_cost_ngn || 0))}</b></div>
+                          <div><span>Profit</span><b>{naira(Number(quote.cost_breakdown.profit_ngn || 0))}</b></div>
+                          <div><span>FX rate</span><b>{Number(quote.cost_breakdown.supplier_effective_rate_ngn || 0).toLocaleString('en-NG')} ₦/{source.supplier_currency}</b></div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                    <button type="button" className="adm-btn ghost" onClick={recalculate} disabled={pricingBusy}>{pricingBusy ? 'Working…' : 'Recalculate'}</button>
+                    {source.pricing_status === 'pending_approval' && <button type="button" className="adm-btn primary" onClick={approve} disabled={pricingBusy}>Approve price</button>}
+                  </div>
+                </section>
+              )}
+
+              <label className="adm-field"><span>Description</span><textarea rows={3} value={f.desc || (f._raw && f._raw.desc) || ''} onChange={e => set('desc', e.target.value)} placeholder="Short product description" /></label>
+              <VariantsEditor variants={f.variants} onChange={v => set('variants', v)} />
+              {combos.length > 0 && (
+                <div className="adm-field">
+                  <span>Variant stock &amp; SKU</span>
+                  {combos.map(c => {
+                    const rec = f.variantStock?.[c.key] || {};
+                    return (
+                      <div key={c.key} className="adm-field-row-3" style={{ alignItems: 'flex-end' }}>
+                        <div style={{ paddingBottom: 10, minWidth: 0 }}><small className="muted">{Object.entries(c.attributes).map(([k, v]) => `${k}: ${v}`).join(' · ')}</small></div>
+                        <label className="adm-field"><span>SKU</span><input value={rec.sku ?? ''} placeholder={defaultSku(f.name, c.attributes)} onChange={e => setComboField(c.key, 'sku', e.target.value)} /></label>
+                        <label className="adm-field"><span>Stock</span><input type="number" min="0" value={rec.stock ?? ''} onChange={e => setComboField(c.key, 'stock', e.target.value)} /></label>
+                      </div>
+                    );
+                  })}
+                  <p className="muted" style={{ fontSize: 11.5, marginTop: -4 }}>Each variation combination needs its own stock count. Leave SKU blank to use the auto-generated placeholder shown.</p>
                 </div>
               )}
-              <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-                <button type="button" className="adm-btn ghost" onClick={recalculate} disabled={pricingBusy}>{pricingBusy ? 'Working…' : 'Recalculate'}</button>
-                {source.pricing_status === 'pending_approval' && <button type="button" className="adm-btn primary" onClick={approve} disabled={pricingBusy}>Approve price</button>}
-              </div>
-            </section>
-          )}
-          <label className="adm-field"><span>Category</span>
-            <AdmSelect value={f.category} options={cats.map(c => ({ value: c.slug, label: c.name }))} onChange={v => set('category', v)} creatable onCreate={addCat} />
-          </label>
-          <label className="adm-field"><span>Catalog status</span>
-            <AdmSelect value={f.status || 'draft'} options={[{ value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived' }]} onChange={v => set('status', v)} />
-            {sourced && source.pricing_status === 'pending_approval' && <small className="muted">Saving as Active will approve the displayed price and publish the product.</small>}
-            {sourced && !pricingApproved && source.pricing_status !== 'pending_approval' && <small className="muted">{pricingIssueMessage(source)} Update the pricing inputs or pricing settings, then recalculate.</small>}
-          </label>
-          <label className="adm-field"><span>Description</span><textarea rows={3} value={f.desc || (f._raw && f._raw.desc) || ''} onChange={e => set('desc', e.target.value)} placeholder="Short product description" /></label>
-          <VariantsEditor variants={f.variants} onChange={v => set('variants', v)} />
-          {combos.length > 0 && (
-            <div className="adm-field">
-              <span>Variant stock &amp; SKU</span>
-              {combos.map(c => {
-                const rec = f.variantStock?.[c.key] || {};
-                return (
-                  <div key={c.key} className="adm-field-row" style={{ alignItems: 'flex-end' }}>
-                    <div style={{ flex: 1, paddingBottom: 10 }}><small className="muted">{Object.entries(c.attributes).map(([k, v]) => `${k}: ${v}`).join(' · ')}</small></div>
-                    <label className="adm-field" style={{ flex: 1 }}><span>SKU</span><input value={rec.sku ?? ''} placeholder={defaultSku(f.name, c.attributes)} onChange={e => setComboField(c.key, 'sku', e.target.value)} /></label>
-                    <label className="adm-field" style={{ width: 100 }}><span>Stock</span><input type="number" min="0" value={rec.stock ?? ''} onChange={e => setComboField(c.key, 'stock', e.target.value)} /></label>
-                  </div>
-                );
-              })}
-              <p className="muted" style={{ fontSize: 11.5, marginTop: -4 }}>Each variation combination needs its own stock count. Leave SKU blank to use the auto-generated placeholder shown.</p>
             </div>
-          )}
+          </div>
         </div>
         <div className="adm-drawer-f">
           <button className="adm-btn ghost" onClick={onClose}>Cancel</button>
           <button className="adm-btn primary" disabled={!f.name.trim() || !f.brand.trim()} onClick={() => onSave(f)}>{f._new ? 'Create product' : 'Save changes'}</button>
         </div>
-      </aside>
+      </div>
     </>
   );
 }
