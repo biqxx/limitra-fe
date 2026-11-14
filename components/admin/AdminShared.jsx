@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { useAdminToast } from './AdminToastContext';
+import { ADMIN_SCREEN_PERMISSIONS, hasAnyPermission } from '@/lib/auth/permissions';
 
 // No orders-listing backend yet — stays genuinely empty rather than
 // synthesizing fake orders from the product catalog.
@@ -14,10 +15,22 @@ export const ADMIN_ORDERS = [];
 
 export const ADMIN_NAV = [
 ['Overview', [['dashboard', 'Dashboard', 'grid'], ['analytics', 'Analytics', 'spark']]],
-['Catalog', [['products', 'Products', 'bag'], ['categories', 'Categories', 'list'], ['sourcing', 'Product sourcing', 'search'], ['pricing', 'Pricing rules', 'dollar'], ['inventory', 'Inventory', 'package'], ['orders', 'Orders', 'truck'], ['returns', 'Returns & Refunds', 'refresh'], ['coupons', 'Coupons & Promos', 'tag'], ['delivery', 'Delivery & Shipping', 'truck']]],
-['People', [['customers', 'Customers', 'user'], ['staff', 'Staff & Team', 'user'], ['affiliates', 'Affiliates', 'share'], ['referrals', 'Referrals', 'dollar']]],
+['Catalog', [['products', 'Products', 'bag'], ['categories', 'Categories', 'list'], ['sourcing', 'Product sourcing', 'search'], ['procurement', 'Procurement', 'package'], ['pricing', 'Pricing rules', 'dollar'], ['inventory', 'Inventory', 'package'], ['orders', 'Orders', 'truck'], ['returns', 'Returns & Refunds', 'refresh'], ['coupons', 'Coupons & Promos', 'tag'], ['delivery', 'Delivery & Shipping', 'truck'], ['reviews', 'Product Reviews', 'star']]],
+['People & Stores', [['customers', 'Customers', 'user'], ['staff', 'Staff & Team', 'user'], ['affiliates', 'Affiliates', 'share'], ['referrals', 'Referrals', 'dollar'], ['microstores', 'MicroStores', 'store'], ['celebrity-stores', 'Celebrity Stores', 'star']]],
 ['Engagement', [['spin', 'Spin & Win', 'gift'], ['videos', 'Videos', 'video'], ['elo', 'Elo AI', 'headset']]],
-['System', [['cms', 'Content', 'edit'], ['roles', 'Roles & Access', 'lock'], ['reports', 'Reports', 'download'], ['support', 'Support Tickets', 'headset']]]];
+['System', [['cms', 'Content', 'edit'], ['careers', 'Careers', 'user'], ['roles', 'Roles & Access', 'lock'], ['reports', 'Reports', 'download'], ['support', 'Support Tickets', 'headset'], ['activity', 'Activity Log', 'clock'], ['queues', 'Queue Monitor', 'refresh'], ['notifications', 'Notifications', 'bell'], ['mail-logs', 'Mail Logs', 'info'], ['settings', 'Settings', 'lock']]]];
+
+export function visibleAdminNav(user) {
+  return ADMIN_NAV
+    .map(([grp, items]) => [
+      grp,
+      items.filter(([key]) => {
+        const req = ADMIN_SCREEN_PERMISSIONS[key];
+        return !req || hasAnyPermission(user, req);
+      }),
+    ])
+    .filter(([, items]) => items.length > 0);
+}
 
 /* ---------- shared bits ---------- */
 export function AdmHead({ title, sub, children }) {

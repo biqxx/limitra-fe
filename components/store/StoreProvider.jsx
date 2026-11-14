@@ -8,6 +8,7 @@ import { applyStoredVariants } from '@/lib/variantsStore';
 import { routeFor, parseRoute } from '@/lib/routes';
 import { getToken, clearTokens } from '@/lib/auth';
 import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi } from '@/lib/api/endpoints';
+import { hasAnyAdminAccess } from '@/lib/auth/permissions';
 import { messageFrom } from '@/lib/api/errors';
 
 // cosmetic placeholder tints, cycled per category — the backend has no color/theme
@@ -366,7 +367,7 @@ export function StoreProvider({ children }) {
   const toggleTheme = () => setTheme(t => (t === 'light' ? 'dark' : 'light'));
 
   /* routing */
-  const isAdmin = isAuthenticated && String(user?.role || '').toLowerCase() === 'admin';
+  const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const ADMIN_BLOCKED_ROUTES = useMemo(() => new Set(['account', 'orders', 'wishlist', 'tracking', 'cart', 'checkout']), []);
   useEffect(() => {
     if (authLoading || !isAdmin || !pathname) return;

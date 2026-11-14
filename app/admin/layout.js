@@ -17,9 +17,10 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import '@/styles/admin.css';
 import { Icon } from '@/components/icons/Icon';
-import { ADMIN_NAV, ADMIN_ORDERS } from '@/components/admin/AdminShared';
+import { visibleAdminNav } from '@/components/admin/AdminShared';
 import { AdminToastProvider } from '@/components/admin/AdminToastContext';
 import { StoreProvider, useStore } from '@/components/store/StoreProvider';
+import { canAccessAdminRoute, firstPermittedAdminPath, hasAnyAdminAccess, routeKeyFromPath } from '@/lib/auth/permissions';
 
 const pathForKey = (key) => '/admin' + (key === 'dashboard' ? '' : '/' + key);
 
@@ -42,13 +43,26 @@ function AdminShell({ children }) {
   const pathname = usePathname();
   const { user, isAuthenticated, authLoading, logout } = useStore();
 
-  /* route guard — admin role only, server-enforced role lives on `user.role`
-     (authApi.me()). Wait for the session to resolve before deciding so a
-     signed-in admin doesn't get bounced during the brief authLoading window. */
+  /* route guard — strictly permission-based via user.permissions (authApi.me()).
+     Wait for authLoading so a permitted user isn't bounced during hydration. */
+  const allowedAdmin = isAuthenticated && hasAnyAdminAccess(user);
+  const allowedRoute = allowedAdmin && canAccessAdminRoute(user, pathname);
+
   useEffect(() => {
     if (authLoading) return;
-    if (!isAuthenticated || user?.role !== 'admin') router.replace('/access-denied?need=admin');
-  }, [authLoading, isAuthenticated, user, router]);
+    if (!allowedAdmin) {
+      router.replace('/access-denied?need=admin');
+      return;
+    }
+    if (!allowedRoute) {
+      const fallback = firstPermittedAdminPath(user);
+      if (pathname === '/admin' && fallback !== '/admin') {
+        router.replace(fallback);
+      } else {
+        router.replace('/access-denied?need=' + encodeURIComponent(routeKeyFromPath(pathname)));
+      }
+    }
+  }, [authLoading, allowedAdmin, allowedRoute, pathname, user, router]);
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
@@ -76,18 +90,19 @@ function AdminShell({ children }) {
   useEffect(() => { document.documentElement.setAttribute('data-theme', theme); try { localStorage.setItem('lim_theme', theme); } catch (e) {} }, [theme]);
 
   const adminName = user?.username || [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.email || 'Admin';
+  const primaryRole = user?.roles?.[0]?.display_name || user?.roles?.[0]?.name || user?.role || 'Staff';
   const adm = {
     name: adminName,
-    role: 'Admin',
+    role: String(primaryRole).replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
     initials: adminName.slice(0, 2).toUpperCase(),
     email: user?.email || '',
   };
 
-  if (authLoading || !isAuthenticated || user?.role !== 'admin') return null;
+  if (authLoading || !allowedAdmin || !allowedRoute) return null;
 
   const unread = notifs.filter(n => !n.read).length;
-  // No pending-affiliate-applications backend yet — real zero rather than a fake badge count.
-  const counts = { orders: ADMIN_ORDERS.filter(o => o.status === 'Pending').length, affiliates: 0 };
+  const counts = { orders: 0, affiliates: 0 };
+  const navGroups = visibleAdminNav(user);
 
   const goTo = (key) => {
     const target = pathForKey(key);
@@ -120,7 +135,7 @@ function AdminShell({ children }) {
             <button className="adm-collapse-btn" onClick={() => setCollapsed(c => !c)} aria-label="Collapse sidebar" title="Collapse sidebar"><Icon name="chevleft" size={17} /></button>
           </div>
           <nav className="adm-nav">
-            {ADMIN_NAV.map(([grp, items]) => (
+            {navGroups.map(([grp, items]) => (
               <div key={grp}>
                 <div className="adm-nav-grp">{grp}</div>
                 {items.map(([key, label, ic]) => {

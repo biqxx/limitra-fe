@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
+import { hasAnyAdminAccess } from '@/lib/auth/permissions';
 import { EmptyState, QtyStepper, Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { naira, CATEGORIES, SUBCATS as ALL_SUBCATS, PRODUCTS, byId, unitPriceOf } from '@/lib/data';
 
@@ -357,7 +358,7 @@ function MiniCart({ open, onClose }) {
 function MobileMenu({ open, onClose }) {
   const { go, theme, toggleTheme, user, isAuthenticated, logout } = useStore();
   const router = useRouter();
-  const isAdmin = isAuthenticated && String(user?.role || '').toLowerCase() === 'admin';
+  const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const nav = (n, ...p) => {onClose();go(n, ...p);};
   return (
     <>
@@ -405,7 +406,7 @@ function MobileMenu({ open, onClose }) {
 export function Header() {
   const { go, cartCount, cartTotal, wish, route, theme, toggleTheme, catalogVersion, user, isAuthenticated, logout } = useStore();
   const router = useRouter();
-  const isAdmin = isAuthenticated && String(user?.role || '').toLowerCase() === 'admin';
+  const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const [mega, setMega] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
@@ -586,7 +587,7 @@ const SOCIALS = [
 export function Footer() {
   const { go, toast, user, isAuthenticated, logout } = useStore();
   const router = useRouter();
-  const isAdmin = isAuthenticated && String(user?.role || '').toLowerCase() === 'admin';
+  const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const cols = [
   ['Shop', [['Phones & Tablets', () => go('shop', 'phones')], ['Computers & Accessories', () => go('shop', 'computing')], ['Electronics', () => go('shop', 'electronics')], ['Women’s Fashion', () => go('shop', 'womens')], ['All deals', () => go('shop', 'deals')]]],
   ['Account', [['My account', () => go('account')], ['Orders', () => go('orders')], ['Wishlist', () => go('wishlist')], ['Track order', () => go('orders')], isAdmin ? ['Go to admin', () => router.push('/admin')] : isAuthenticated ? ['Sign out', async () => { await logout(); go('auth', 'signin'); }] : ['Sign in', () => go('auth', 'signin')]]],
