@@ -32,13 +32,18 @@ const asList = (res) => {
 const humanize = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 function normalizeConversation(c) {
+  const nameFromUser = c.user?.name
+    ?? ([c.user?.first_name, c.user?.last_name].filter(Boolean).join(' ') || null)
+    ?? c.user?.username
+    ?? c.user?.email;
+  const socialName = c.social_account?.username ? `@${c.social_account.username}` : null;
   return {
     id: c.id,
-    customer: c.customer_name ?? c.customer?.name ?? c.user?.name
-      ?? ([c.user?.first_name, c.user?.last_name].filter(Boolean).join(' ') || 'Customer'),
+    customer: c.customer_name ?? c.customer?.name ?? nameFromUser ?? socialName ?? 'Guest',
+    email: c.user?.email ?? null,
     status: c.status ?? 'open',
-    channel: c.channel,
-    date: c.updated_at ?? c.created_at,
+    channel: c.channel ?? c.social_account?.platform ?? null,
+    date: c.last_message_at ?? c.updated_at ?? c.created_at,
   };
 }
 
@@ -73,8 +78,8 @@ function Drawer({ title, sub, saving, canSave, onClose, onSave, saveLabel, child
 }
 
 const SECTIONS = [['conversations', 'Conversations'], ['knowledge', 'Knowledge base'], ['settings', 'Settings']];
-const CONVO_STATUSES = ['open', 'active', 'handed_off', 'resolved', 'closed'];
-const CONVO_STATUS_CLS = { open: 'info', active: 'info', handed_off: 'warn', resolved: 'ok', closed: 'muted' };
+const CONVO_STATUSES = ['open', 'handed_off', 'closed', 'archived'];
+const CONVO_STATUS_CLS = { open: 'info', handed_off: 'warn', resolved: 'ok', closed: 'muted', archived: 'muted' };
 
 export function AdminElo() {
   const toast = useAdminToast();
@@ -88,6 +93,7 @@ export function AdminElo() {
   const [saving, setSaving] = useState(false);
 
   const [convoDraft, setConvoDraft] = useState(null);
+  const [convoLoading, setConvoLoading] = useState(false);
   const [docDraft, setDocDraft] = useState(null);
   const [settingsDraft, setSettingsDraft] = useState(null);
   const [q, setQ] = useState('');
@@ -130,13 +136,30 @@ export function AdminElo() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  const openConversation = async (convo) => {
+    setConvoDraft({ convo, detail: null, status: convo.status, notes: '' });
+    setConvoLoading(true);
+    try {
+      const detail = await adminAiApi.getConversation(convo.id);
+      setConvoDraft(curr => curr && curr.convo.id === convo.id ? {
+        ...curr,
+        detail,
+        status: detail?.status ?? curr.status,
+      } : curr);
+    } catch (error) {
+      toast(messageFrom(error));
+    } finally {
+      setConvoLoading(false);
+    }
+  };
+
   const submitConvoUpdate = async () => {
     if (!convoDraft?.status) return;
     setSaving(true);
     try {
-      await adminAiApi.updateConversation(convoDraft.convo.id, { status: convoDraft.status, notes: convoDraft.notes.trim() || undefined });
+      const updated = await adminAiApi.updateConversation(convoDraft.convo.id, { status: convoDraft.status, notes: convoDraft.notes.trim() || undefined });
       toast('Conversation updated');
-      setConvoDraft(null);
+      setConvoDraft(curr => curr ? { ...curr, detail: updated ?? curr.detail, notes: '' } : null);
       await loadAll();
     } catch (error) { toast(messageFrom(error)); } finally { setSaving(false); }
   };
@@ -227,14 +250,17 @@ export function AdminElo() {
               <table className="adm-table">
                 <thead><tr><th>Conversation</th><th>Customer</th><th>Channel</th><th>Date</th><th>Status</th><th></th></tr></thead>
                 <tbody>{shownConvos.map(c => (
-                  <tr key={c.id}>
+                  <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => openConversation(c)}>
                     <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{c.id}</b></td>
-                    <td>{c.customer}</td>
-                    <td className="muted">{c.channel || '—'}</td>
+                    <td>
+                      <div>{c.customer}</div>
+                      {c.email && <small className="muted">{c.email}</small>}
+                    </td>
+                    <td className="muted" style={{ textTransform: 'capitalize' }}>{c.channel || '—'}</td>
                     <td className="muted">{fmtDate(c.date)}</td>
                     <td><span className={'adm-pill ' + (CONVO_STATUS_CLS[c.status] || 'muted')}>{c.status.replace(/_/g, ' ')}</span></td>
-                    <td><div className="adm-rowact">
-                      <button title="Update conversation" onClick={() => setConvoDraft({ convo: c, status: c.status, notes: '' })}><Icon name="edit" size={15} /></button>
+                    <td onClick={e => e.stopPropagation()}><div className="adm-rowact">
+                      <button title="View conversation" onClick={() => openConversation(c)}><Icon name="eye" size={15} /></button>
                     </div></td>
                   </tr>
                 ))}</tbody>
@@ -277,13 +303,71 @@ export function AdminElo() {
       )}
 
       {convoDraft && (
-        <Drawer title={`Update conversation · #${convoDraft.convo.id}`} saving={saving} canSave={!!convoDraft.status} onClose={() => setConvoDraft(null)} onSave={submitConvoUpdate} saveLabel="Update">
+        <Drawer title={`Conversation · #${convoDraft.convo.id}`} saving={saving} canSave={!!convoDraft.status} onClose={() => setConvoDraft(null)} onSave={submitConvoUpdate} saveLabel="Update status">
+          <div className="adm-list" style={{ marginBottom: 4 }}>
+            <div className="adm-li"><div className="adm-li-main"><b>Customer</b><small>{convoDraft.convo.customer}{convoDraft.convo.email ? ` · ${convoDraft.convo.email}` : ''}</small></div></div>
+            <div className="adm-li"><div className="adm-li-main"><b>Channel</b><small style={{ textTransform: 'capitalize' }}>{convoDraft.detail?.channel || convoDraft.convo.channel || 'web'}</small></div></div>
+          </div>
+
+          <div className="adm-field">
+            <span>Conversation messages</span>
+            {convoLoading ? (
+              <div className="adm-note">Loading conversation transcript…</div>
+            ) : (convoDraft.detail?.messages || []).length === 0 ? (
+              <div className="adm-note">No messages recorded in this conversation yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 340, overflowY: 'auto', padding: '10px', background: 'var(--surface-2)', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }}>
+                {(convoDraft.detail?.messages || []).map((msg, idx) => {
+                  const isUser = String(msg.role || '').toLowerCase() === 'user';
+                  return (
+                    <div
+                      key={msg.id || idx}
+                      style={{
+                        alignSelf: isUser ? 'flex-end' : 'flex-start',
+                        maxWidth: '88%',
+                        background: isUser ? 'var(--primary)' : 'var(--surface)',
+                        color: isUser ? '#fff' : 'var(--text)',
+                        border: isUser ? 'none' : '1px solid var(--border)',
+                        borderRadius: 12,
+                        padding: '9px 12px',
+                        fontSize: 13.5,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      <div style={{ fontSize: 11, fontWeight: 700, opacity: isUser ? 0.85 : 0.65, marginBottom: 3, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                        {isUser ? 'Customer' : (msg.role || 'Elo AI')}
+                      </div>
+                      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content || ''}</div>
+                      {msg.created_at && (
+                        <div style={{ fontSize: 10.5, opacity: 0.7, marginTop: 4 }}>{fmtDate(msg.created_at)}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {(convoDraft.detail?.context?.admin_notes || []).length > 0 && (
+            <div className="adm-field">
+              <span>Admin notes history</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {convoDraft.detail.context.admin_notes.map((n, i) => (
+                  <div key={i} className="adm-note" style={{ flexDirection: 'column', gap: 2 }}>
+                    <span>{n.note}</span>
+                    {n.created_at && <small className="muted">{fmtDate(n.created_at)}</small>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <label className="adm-field"><span>Status</span>
             <select value={convoDraft.status} onChange={e => setConvoDraft(c => ({ ...c, status: e.target.value }))}>
               {CONVO_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
           </label>
-          <label className="adm-field"><span>Notes (optional)</span><textarea rows="3" value={convoDraft.notes} onChange={e => setConvoDraft(c => ({ ...c, notes: e.target.value }))} /></label>
+          <label className="adm-field"><span>Add admin note (optional)</span><textarea rows="2" value={convoDraft.notes} onChange={e => setConvoDraft(c => ({ ...c, notes: e.target.value }))} placeholder="Internal note about this conversation…" /></label>
         </Drawer>
       )}
 
