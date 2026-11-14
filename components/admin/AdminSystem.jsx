@@ -199,7 +199,7 @@ function RoleDrawer({ role, permissionsList, onSaved, onClose }) {
           <div className="row" style={{ gap: 12 }}>
             <span className="kpi-ic" style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}><Icon name="lock" size={18} /></span>
             <div>
-              <h3 style={{ fontSize: 18 }}>{isNew ? 'Create role' : `Edit · ${role.name}`}</h3>
+              <h3 style={{ fontSize: 18 }}>{isNew ? 'Create role' : `Edit · ${formatRoleName(role.display_name || role.name)}`}</h3>
               <small className="muted">Configure permissions and assigned members</small>
             </div>
           </div>
@@ -310,7 +310,7 @@ function InviteStaffDrawer({ roles, onInvited, onClose }) {
           <label className="adm-field">
             <span>Assign role</span>
             <select value={roleId} onChange={e => setRoleId(e.target.value)}>
-              {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {roles.map(r => <option key={r.id} value={r.id}>{formatRoleName(r.display_name || r.name)}</option>)}
             </select>
           </label>
         </div>
@@ -322,6 +322,12 @@ function InviteStaffDrawer({ roles, onInvited, onClose }) {
     </>
   );
 }
+
+const formatRoleName = (name) =>
+  String(name || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
 
 export function AdminRoles() {
   const addToast = useAdminToast();
@@ -423,7 +429,7 @@ export function AdminRoles() {
                   <span className="kpi-ic" style={{ background: color + '22', color }}><Icon name="lock" size={18} /></span>
                   <span className="adm-pill muted">{permCount} perm{permCount === 1 ? '' : 's'}</span>
                 </div>
-                <h3 style={{ margin: '12px 0 4px', fontSize: 16 }}>{r.name}</h3>
+                <h3 style={{ margin: '12px 0 4px', fontSize: 16 }}>{formatRoleName(r.display_name || r.name)}</h3>
                 <p className="muted" style={{ fontSize: 13 }}>{r.description || 'Custom access role'}</p>
                 <div className="row between" style={{ marginTop: 14 }}>
                   <small className="muted" style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}>
@@ -451,7 +457,7 @@ export function AdminRoles() {
               {shownInvites.map(inv => (
                 <tr key={inv.id}>
                   <td data-label="Email"><b>{inv.email}</b>{inv.name && <small style={{ display: 'block' }} className="muted">{inv.name}</small>}</td>
-                  <td data-label="Role"><span className="adm-pill info">{inv.role?.name || inv.role_name || 'Staff'}</span></td>
+                  <td data-label="Role"><span className="adm-pill info">{formatRoleName(inv.role?.display_name || inv.role?.name || inv.role_name || 'Staff')}</span></td>
                   <td data-label="Status"><span className={'adm-pill ' + (inv.accepted_at ? 'ok' : 'warn')}>{inv.accepted_at ? 'Accepted' : (inv.status || 'Pending')}</span></td>
                   <td data-label="Expires" className="muted">{inv.expires_at ? new Date(inv.expires_at).toLocaleDateString('en-NG') : '—'}</td>
                   <td data-label="Actions">
