@@ -344,8 +344,8 @@ function MiniCart({ open, onClose }) {
                 <span className="muted" style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}>Subtotal</span>
                 <strong style={{ fontFamily: 'var(--font-display)', fontSize: 21 }}>{naira(cartTotal)}</strong>
               </div>
-              <button className="btn btn-primary btn-block btn-lg" onClick={() => {onClose();go('checkout');}}>Checkout</button>
-              <button className="btn btn-ghost btn-block" style={{ marginTop: 10 }} onClick={() => {onClose();go('cart');}}>View cart</button>
+              <button className="btn btn-primary btn-block btn-lg" onClick={() => {onClose();go('cart');}}>Review cart &amp; checkout</button>
+              <button className="btn btn-ghost btn-block" style={{ marginTop: 10 }} onClick={onClose}>Continue shopping</button>
             </div>
           </>
         }
