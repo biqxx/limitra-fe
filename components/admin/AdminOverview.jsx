@@ -8,6 +8,7 @@ import { useStore } from '@/components/store/StoreProvider';
 import { naira, PRODUCTS } from '@/lib/data';
 import { adminAiApi, adminAnalyticsApi, adminOrdersApi, adminSystemApi } from '@/lib/api/endpoints';
 import { Kpi, BarChart, Donut, STATUS_CLS } from '@/components/charts/Charts';
+import { EmptyState } from './AdminShared';
 
 function RevenueChart({ salesData }) {
   const [range, setRange] = useState('month');
@@ -26,10 +27,15 @@ function RevenueChart({ salesData }) {
         labels: series.map((pt, i) => String(pt.label ?? pt.date ?? pt.period ?? i + 1).slice(0, 8)),
       }
     : fallback[range];
+  const sum = cur.data.reduce((a, b) => a + b, 0);
 
   return (
     <div className="panel">
-      <div className="panel-h"><h3>Revenue</h3>
+      <div className="panel-h">
+        <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <h3>Revenue</h3>
+          {sum > 0 && <span className="adm-pill info">{naira(sum)}</span>}
+        </div>
         <div className="seg">
           {['week', 'month', 'year'].map((r) => <button key={r} className={range === r ? 'on' : ''} onClick={() => setRange(r)}>{r[0].toUpperCase() + r.slice(1)}</button>)}
         </div>
@@ -130,13 +136,18 @@ export function AdminOverview() {
               return (
                 <tr key={o.id} style={{ cursor: 'pointer' }} onClick={() => router.push('/admin/orders')}>
                   <td data-label="Order"><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>{o.order_number || `#${o.id}`}</b></td>
-                  <td data-label="Customer">{cust}</td>
+                  <td data-label="Customer">
+                    <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                      <span className="adm-li-av" style={{ width: 28, height: 28, fontSize: 11 }}>{String(cust).slice(0, 2).toUpperCase()}</span>
+                      <span>{cust}</span>
+                    </div>
+                  </td>
                   <td data-label="Status"><span className={'adm-pill ' + (STATUS_CLS[stLabel] || 'muted')}>{stLabel}</span></td>
                   <td data-label="Total"><b>{naira(Number(o.total ?? o.total_amount ?? 0))}</b></td>
                 </tr>
               );
             })}</tbody>
-          </table>{orders.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No orders yet.</div>}</div>
+          </table>{orders.length === 0 && <EmptyState icon="truck" title="No orders yet" description="New customer orders will appear here as soon as they are placed." />}</div>
         </div>
         <div className="panel">
           <div className="panel-h"><h3>Top products</h3></div>
@@ -218,17 +229,30 @@ export function AdminAnalytics() {
   const mostViewed = Array.isArray(prodStats?.most_viewed) ? prodStats.most_viewed : [];
   const lowPerf = Array.isArray(prodStats?.low_performing) ? prodStats.low_performing : [];
 
-  const renderProdList = (list, emptyMsg) => list.length === 0
-    ? <div style={{ padding: '18px 4px', textAlign: 'center', color: 'var(--text-faint)' }}>{emptyMsg}</div>
-    : list.slice(0, 5).map((item, idx) => (
-      <div className="adm-li" key={item.id || idx}>
-        <div className="adm-li-main">
-          <b style={{ fontSize: 13.5 }}>{item.name || item.title || `Product #${item.product_id || idx + 1}`}</b>
-          <small className="muted">{item.units_sold != null ? `${item.units_sold} sold` : item.views != null ? `${item.views} views` : ''}</small>
+  const renderProdList = (list, emptyMsg) => {
+    if (list.length === 0) return <EmptyState icon="bag" title={emptyMsg} />;
+    const maxVal = Math.max(1, ...list.slice(0, 5).map((x) => Number(x.units_sold ?? x.views ?? 0)));
+    return list.slice(0, 5).map((item, idx) => {
+      const metric = Number(item.units_sold ?? item.views ?? 0);
+      const pct = Math.min(100, Math.round((metric / maxVal) * 100));
+      return (
+        <div className="adm-li" key={item.id || idx} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          <div className="row between" style={{ gap: 10 }}>
+            <div className="adm-li-main">
+              <b style={{ fontSize: 13.5 }}>{item.name || item.title || `Product #${item.product_id || idx + 1}`}</b>
+              <small className="muted">{item.units_sold != null ? `${item.units_sold} sold` : item.views != null ? `${item.views} views` : ''}</small>
+            </div>
+            {item.revenue != null && <b>{naira(Number(item.revenue))}</b>}
+          </div>
+          {metric > 0 && (
+            <div style={{ height: 4, borderRadius: 99, background: 'var(--surface-2)', overflow: 'hidden' }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: 'var(--primary)', borderRadius: 99 }} />
+            </div>
+          )}
         </div>
-        {item.revenue != null && <b>{naira(Number(item.revenue))}</b>}
-      </div>
-    ));
+      );
+    });
+  };
 
   return (
     <>

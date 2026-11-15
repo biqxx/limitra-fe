@@ -615,7 +615,11 @@ export function ProductEditDrawer({ draft, onClose, onSave }) {
                           if (discEndsAt) payload.discount_ends_at = new Date(discEndsAt).toISOString();
                           const res = await adminProductsApi.applyDiscount(f.id, payload);
                           const updated = res?.data ?? res;
-                          setF(curr => ({ ...curr, price: Number(updated?.price ?? curr.price), _raw: updated || curr._raw }));
+                          setF(curr => ({
+                            ...curr,
+                            price: Number(updated?.price ?? curr.price),
+                            _raw: updated ? { ...curr._raw, ...updated, sources: updated.sources ?? curr._raw?.sources } : curr._raw,
+                          }));
                           addToast('Discount applied');
                         } catch (err) {
                           addToast(messageFrom(err));
@@ -640,7 +644,11 @@ export function ProductEditDrawer({ draft, onClose, onSave }) {
                             setDiscValue('');
                             setDiscStartsAt('');
                             setDiscEndsAt('');
-                            setF(curr => ({ ...curr, price: Number(updated?.price ?? curr.price), _raw: updated || curr._raw }));
+                            setF(curr => ({
+                              ...curr,
+                              price: Number(updated?.price ?? curr.price),
+                              _raw: updated ? { ...curr._raw, ...updated, sources: updated.sources ?? curr._raw?.sources } : curr._raw,
+                            }));
                             addToast('Discount removed');
                           } catch (err) {
                             addToast(messageFrom(err));

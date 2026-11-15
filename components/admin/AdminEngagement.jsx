@@ -121,7 +121,31 @@ export function AdminSpin() {
           ))}</div>
           <button className="adm-btn primary" style={{ marginTop: 14 }} disabled={saving} onClick={saveRewards}>{saving ? 'Saving…' : 'Save rewards'}</button>
         </div>
-        <div className="panel"><div className="panel-h"><h3>Settings</h3></div>
+        <div className="panel"><div className="panel-h"><h3>Settings &amp; Preview</h3></div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+            <div style={{ position: 'relative', width: 148, height: 148 }}>
+              <div
+                style={{
+                  width: 148,
+                  height: 148,
+                  borderRadius: '50%',
+                  border: '4px solid var(--surface)',
+                  boxShadow: 'var(--shadow-sm)',
+                  background: total > 0
+                    ? `conic-gradient(${prizes.reduce((acc, p) => {
+                        const w = Math.max(0, Number(p.weight) || 0);
+                        const start = (acc.sum / total) * 360;
+                        const end = ((acc.sum + w) / total) * 360;
+                        return { sum: acc.sum + w, parts: [...acc.parts, `${p.color || '#0438B6'} ${start}deg ${end}deg`] };
+                      }, { sum: 0, parts: [] }).parts.join(', ')})`
+                    : 'var(--surface-2)',
+                }}
+              />
+              <div style={{ position: 'absolute', inset: 46, borderRadius: '50%', background: 'var(--surface)', border: '2px solid var(--border)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12 }}>
+                {prizes.length} slices
+              </div>
+            </div>
+          </div>
           <div className="adm-list">
             <div className="adm-li"><div className="adm-li-main"><b>Wheel enabled</b><small>Show on signup</small></div><Toggle checked={campaignActive} onChange={setCampaignActive} /></div>
             <div className="adm-li"><div className="adm-li-main"><b>Coupon expiry</b><small>Days valid after win</small></div><input type="number" style={{ width: 70, textAlign: 'center', padding: 7, border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }} value={expiryDays} onChange={e => setExpiryDays(Number(e.target.value) || 7)} /></div>

@@ -8,7 +8,7 @@ import { Icon } from '@/components/icons/Icon';
 import { Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { newsletterApi } from '@/lib/api/endpoints';
-import { hasAnyAdminAccess } from '@/lib/auth/permissions';
+import { hasAnyAdminAccess, hasAffiliateAccess } from '@/lib/auth/permissions';
 import { EmptyState, QtyStepper, Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { naira, CATEGORIES, SUBCATS as ALL_SUBCATS, PRODUCTS, byId, unitPriceOf } from '@/lib/data';
 
@@ -383,6 +383,7 @@ function MobileMenu({ open, onClose }) {
   const { go, theme, toggleTheme, user, isAuthenticated, logout } = useStore();
   const router = useRouter();
   const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
+  const isAffiliate = isAuthenticated && hasAffiliateAccess(user);
   const nav = (n, ...p) => {onClose();go(n, ...p);};
   return (
     <>
@@ -413,6 +414,9 @@ function MobileMenu({ open, onClose }) {
           {isAdmin && (
             <a className="mm-link" onClick={() => { onClose(); router.push('/admin'); }}><span className="row" style={{ gap: 12 }}><Icon name="grid" size={18} />Go to admin</span><Icon name="chevright" size={16} /></a>
           )}
+          {isAffiliate && (
+            <a className="mm-link" onClick={() => { onClose(); router.push('/affiliate/dashboard'); }}><span className="row" style={{ gap: 12 }}><Icon name="share" size={18} />Go to dashboard</span><Icon name="chevright" size={16} /></a>
+          )}
           {isAuthenticated
             ? <a className="mm-link" onClick={async () => { onClose(); await logout(); go('auth', 'signin'); }}><span className="row" style={{ gap: 12 }}><Icon name="lock" size={18} />Sign out</span><Icon name="chevright" size={16} /></a>
             : <a className="mm-link" onClick={() => nav('auth', 'signin')}><span className="row" style={{ gap: 12 }}><Icon name="lock" size={18} />Sign in</span><Icon name="chevright" size={16} /></a>}
@@ -431,6 +435,7 @@ export function Header() {
   const { go, cartCount, cartTotal, wish, route, theme, toggleTheme, catalogVersion, user, isAuthenticated, logout } = useStore();
   const router = useRouter();
   const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
+  const isAffiliate = isAuthenticated && hasAffiliateAccess(user);
   const [mega, setMega] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
@@ -498,11 +503,11 @@ export function Header() {
               <span className="ha-txt"><small>Deliver to</small><b>Lagos, NG</b></span>
             </button>
             <div className="user-pop-wrap" onMouseLeave={() => setUserOpen(false)}>
-              <button className="head-act" onMouseEnter={() => setUserOpen(true)} onClick={() => isAdmin ? router.push('/admin') : go('account')}>
+              <button className="head-act" onMouseEnter={() => setUserOpen(true)} onClick={() => isAdmin ? router.push('/admin') : isAffiliate ? router.push('/affiliate/dashboard') : go('account')}>
                 <Icon name="user" size={20} />
                 <span className="ha-txt">
-                  <small>{isAdmin ? 'Admin' : 'Account'}</small>
-                  <b>{isAdmin ? 'Go to admin' : isAuthenticated ? (user?.name?.split(' ')[0] || user?.username || 'My account') : 'Sign in'}</b>
+                  <small>{isAdmin ? 'Admin' : isAffiliate ? 'Affiliate' : 'Account'}</small>
+                  <b>{isAdmin ? 'Go to admin' : isAffiliate ? 'Go to dashboard' : isAuthenticated ? (user?.name?.split(' ')[0] || user?.username || 'My account') : 'Sign in'}</b>
                 </span>
               </button>
               {userOpen &&
@@ -526,6 +531,16 @@ export function Header() {
                           onClick={() => { setUserOpen(false); router.push('/admin'); }}
                         >
                           Go to admin
+                        </button>
+                      )}
+                      {isAffiliate && (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-block btn-sm"
+                          style={{ marginBottom: 8 }}
+                          onClick={() => { setUserOpen(false); router.push('/affiliate/dashboard'); }}
+                        >
+                          Go to dashboard
                         </button>
                       )}
                     </>
@@ -632,9 +647,10 @@ export function Footer() {
     }
   };
   const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
+  const isAffiliate = isAuthenticated && hasAffiliateAccess(user);
   const cols = [
   ['Shop', [['Phones & Tablets', () => go('shop', 'phones')], ['Computers & Accessories', () => go('shop', 'computing')], ['Electronics', () => go('shop', 'electronics')], ['Women’s Fashion', () => go('shop', 'womens')], ['All deals', () => go('shop', 'deals')]]],
-  ['Account', [['My account', () => go('account')], ['Orders', () => go('orders')], ['Wishlist', () => go('wishlist')], ['Track order', () => go('orders')], isAdmin ? ['Go to admin', () => router.push('/admin')] : isAuthenticated ? ['Sign out', async () => { await logout(); go('auth', 'signin'); }] : ['Sign in', () => go('auth', 'signin')]]],
+  ['Account', [['My account', () => go('account')], ['Orders', () => go('orders')], ['Wishlist', () => go('wishlist')], ['Track order', () => go('orders')], isAdmin ? ['Go to admin', () => router.push('/admin')] : isAffiliate ? ['Go to dashboard', () => router.push('/affiliate/dashboard')] : isAuthenticated ? ['Sign out', async () => { await logout(); go('auth', 'signin'); }] : ['Sign in', () => go('auth', 'signin')]]],
   ['Support', [['Help center', () => go('help')], ['About us', () => go('about')], ['Videos', () => go('videos')], ['Channels', () => go('channels')], ['Contact us', () => go('help', 'contact')]]],
   ['Earn from Limitra', [['Limitra MicroStores', () => go('microstores')], ['Limitra Celebrity Stores', () => go('celebrityStores')], ['Become an Affiliate', () => go('affiliate')], ['Affiliate dashboard', () => router.push('/affiliate/dashboard')], ['Careers', () => go('careers')]]]];
 

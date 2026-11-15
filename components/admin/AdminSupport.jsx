@@ -13,7 +13,7 @@ import { Icon } from '@/components/icons/Icon';
 import { adminSupportTicketsApi, supportTicketsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead, Pager, usePager } from './AdminShared';
+import { AdmHead, EmptyState, Pager, SkeletonRows, usePager } from './AdminShared';
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // Deliberately not toLocaleDateString — ICU-data divergence between server
@@ -32,14 +32,17 @@ const asList = (res) => {
 
 const TICKET_STATUSES = ['open', 'pending', 'resolved', 'closed'];
 const TICKET_STATUS_CLS = { open: 'info', pending: 'warn', resolved: 'ok', closed: 'muted' };
+const PRIORITY_CLS = { urgent: 'bad', high: 'warn', medium: 'info', low: 'muted' };
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'];
 
 function normalizeTicket(t) {
   return {
     id: t.id,
-    subject: t.subject ?? t.title ?? 'Support ticket',
-    customer: t.customer_name ?? t.customer?.name ?? t.user?.name
-      ?? ([t.user?.first_name, t.user?.last_name].filter(Boolean).join(' ') || 'Customer'),
+    subject: String(t.subject ?? t.title ?? 'Support ticket'),
+    customer: String(
+      t.customer_name ?? t.customer?.name ?? t.user?.name
+      ?? ([t.user?.first_name, t.user?.last_name].filter(Boolean).join(' ') || 'Customer')
+    ),
     status: String(t.status ?? 'open').toLowerCase(),
     priority: t.priority,
     date: t.updated_at ?? t.created_at,
@@ -74,7 +77,7 @@ function TicketThreadPanel({ ticketId, onBack, onChanged }) {
 
   const reload = useCallback(async () => {
     try {
-      const res = await supportTicketsApi.get(ticketId);
+      const res = await adminSupportTicketsApi.get(ticketId);
       setTicket(res?.data ?? res);
     } catch (error) { setTicket(null); }
   }, [ticketId]);
@@ -85,7 +88,7 @@ function TicketThreadPanel({ ticketId, onBack, onChanged }) {
     if (!reply.trim() || sending) return;
     setSending(true);
     try {
-      await supportTicketsApi.message(ticketId, { message: reply.trim() });
+      await adminSupportTicketsApi.reply(ticketId, { message: reply.trim() });
       setReply('');
       await reload();
     } catch (error) { toast(messageFrom(error)); } finally { setSending(false); }
@@ -207,7 +210,7 @@ export function AdminSupport() {
         {tabs.map(t => <button key={t} className={'adm-chip' + (status === t ? ' on' : '')} onClick={() => setStatus(t)}>{t === 'all' ? 'All' : t.replace(/_/g, ' ')}</button>)}
       </div>
       <div className="panel" style={{ padding: 0 }}>
-        {!loaded ? <div className="adm-soon"><p>Loading tickets…</p></div> : (
+        {!loaded ? <SkeletonRows rows={6} /> : (
           <div className="adm-table-wrap">
             <table className="adm-table">
               <thead><tr><th>Ticket</th><th>Subject</th><th>Customer</th><th>Date</th><th>Priority</th><th>Status</th><th></th></tr></thead>
@@ -217,7 +220,7 @@ export function AdminSupport() {
                   <td>{t.subject}</td>
                   <td className="muted">{t.customer}</td>
                   <td className="muted">{fmtDate(t.date)}</td>
-                  <td className="muted">{t.priority || '—'}</td>
+                  <td><span className={'adm-pill ' + (PRIORITY_CLS[String(t.priority || '').toLowerCase()] || 'muted')}>{t.priority || 'normal'}</span></td>
                   <td><span className={'adm-pill ' + (TICKET_STATUS_CLS[t.status] || 'muted')}>{t.status}</span></td>
                   <td><div className="adm-rowact">
                     <button title="View thread" onClick={() => setOpenTicket(t.id)}><Icon name="eye" size={15} /></button>
@@ -226,7 +229,7 @@ export function AdminSupport() {
                 </tr>
               ))}</tbody>
             </table>
-            {visible.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No tickets match your filters.</div>}
+            {visible.length === 0 && <EmptyState icon="headset" title="No tickets found" description="Try clearing your search or status filter." />}
             <Pager {...ticketPager} />
           </div>
         )}

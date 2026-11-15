@@ -38,6 +38,34 @@ export function AdmHead({ title, sub, children }) {
   return <div className="adm-h"><div><h1>{title}</h1><p>{sub}</p></div><div className="adm-h-actions">{children}</div></div>;
 }
 
+export function SkeletonRows({ rows = 5 }) {
+  return (
+    <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="row" style={{ gap: 12 }}>
+          <div className="adm-skel" style={{ width: 38, height: 38, borderRadius: 8, flex: 'none' }} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="adm-skel" style={{ width: `${55 + (i % 3) * 14}%`, height: 13 }} />
+            <div className="adm-skel" style={{ width: `${30 + (i % 2) * 15}%`, height: 10 }} />
+          </div>
+          <div className="adm-skel" style={{ width: 72, height: 22, borderRadius: 99 }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function EmptyState({ icon = 'inbox', title = 'Nothing here yet', description, action }) {
+  return (
+    <div className="adm-empty">
+      <div className="adm-empty-ic"><Icon name={icon} size={22} /></div>
+      <h4>{title}</h4>
+      {description && <p>{description}</p>}
+      {action && <div style={{ marginTop: 8 }}>{action}</div>}
+    </div>
+  );
+}
+
 export function Pager({ page, pages, onPage, perPage, onPerPage, total }) {
   // windowed page list with ellipsis: 1 … (p-1) p (p+1) … last
   const nums = [];

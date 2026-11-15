@@ -68,7 +68,21 @@ function AdminShell({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [cmdQ, setCmdQ] = useState('');
   const notifRef = useRef(null);
+  useEffect(() => {
+    const onGlobalKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCmdOpen((o) => !o);
+      } else if (e.key === 'Escape') {
+        setCmdOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onGlobalKey);
+    return () => document.removeEventListener('keydown', onGlobalKey);
+  }, []);
   useEffect(() => {
     if (!notifOpen) return;
     const onDoc = (e) => { if (notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false); };
@@ -201,6 +215,11 @@ function AdminShell({ children }) {
         <div className="adm-main">
           <div className="adm-top">
             <button className="adm-burger" onClick={() => { if (window.matchMedia('(max-width: 860px)').matches) setMobOpen(o => !o); else setCollapsed(c => !c); }} aria-label="Toggle menu"><Icon name="menu" size={20} /></button>
+            <button type="button" className="adm-cmd-btn" onClick={() => { setCmdQ(''); setCmdOpen(true); }} title="Quick jump (Ctrl+K)">
+              <Icon name="search" size={15} />
+              <span>Quick jump…</span>
+              <span className="adm-cmd-kbd">⌘K</span>
+            </button>
             <div className="adm-top-actions">
               <Link className="adm-icon-btn" href="/" title="View store"><Icon name="store" size={19} /></Link>
               <button className="adm-icon-btn" onClick={toggleTheme} title="Theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} /></button>
@@ -249,6 +268,46 @@ function AdminShell({ children }) {
           </div>
         </div>
       </div>
+      {cmdOpen && (
+        <div className="adm-cmd-scrim" onClick={() => setCmdOpen(false)}>
+          <div className="adm-cmd" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Quick jump">
+            <div className="adm-cmd-in">
+              <Icon name="search" size={17} className="muted" />
+              <input
+                autoFocus
+                placeholder="Jump to any admin screen…"
+                value={cmdQ}
+                onChange={(e) => setCmdQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const flat = navGroups.flatMap(([grp, items]) => items.map(([key, label, ic]) => ({ grp, key, label, ic })));
+                    const match = flat.find((x) => x.label.toLowerCase().includes(cmdQ.trim().toLowerCase()) || x.grp.toLowerCase().includes(cmdQ.trim().toLowerCase()));
+                    if (match) { goTo(match.key); setCmdOpen(false); }
+                  }
+                }}
+              />
+              <button type="button" className="adm-cmd-kbd" onClick={() => setCmdOpen(false)}>ESC</button>
+            </div>
+            <div className="adm-cmd-list">
+              {navGroups
+                .flatMap(([grp, items]) => items.map(([key, label, ic]) => ({ grp, key, label, ic })))
+                .filter((x) => !cmdQ.trim() || x.label.toLowerCase().includes(cmdQ.trim().toLowerCase()) || x.grp.toLowerCase().includes(cmdQ.trim().toLowerCase()))
+                .map((x) => (
+                  <button
+                    key={x.key}
+                    type="button"
+                    className={'adm-cmd-item' + (pathname === pathForKey(x.key) ? ' on' : '')}
+                    onClick={() => { goTo(x.key); setCmdOpen(false); }}
+                  >
+                    <Icon name={x.ic} size={16} />
+                    <span>{x.label}</span>
+                    <small>{x.grp}</small>
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
     </AdminToastProvider>
   );
 }

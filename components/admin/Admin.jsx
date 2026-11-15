@@ -27,6 +27,7 @@ export { AdminCustomers, AdminAffiliates, AdminReferrals } from './AdminPeople';
 export { AdminStaff } from './AdminStaff';
 export { AdminSpin, AdminVideos } from './AdminEngagement';
 export { AdminCMS, AdminRoles, AdminReports } from './AdminSystem';
+export { AdminSupport } from './AdminSupport';
 export { AdminActivity } from './AdminActivity';
 export { AdminMicrostores, AdminCelebrityStores } from './AdminStores';
 export { AdminProcurement, AdminReviews } from './AdminCommerceOps';

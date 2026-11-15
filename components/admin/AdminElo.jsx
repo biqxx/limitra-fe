@@ -259,11 +259,11 @@ export function AdminElo() {
 
       {metricCards.length > 0 && (
         <div style={{ marginBottom: 18 }}>
-          <div className="kpi-grid">
+          <div className="prc-kpis">
             {metricCards.map(([label, val]) => (
-              <div key={label} className="cat-kpis" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: '15px 17px' }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: 12.5, fontFamily: 'var(--font-display)', fontWeight: 600 }}>{label}</span>
-                <b style={{ fontSize: 21, fontFamily: 'var(--font-display)' }}>{val}</b>
+              <div key={label} className="prc-kpi">
+                <div className="prc-kpi-top"><span>{label}</span><Icon name="spark" size={14} /></div>
+                <b>{val}</b>
               </div>
             ))}
           </div>

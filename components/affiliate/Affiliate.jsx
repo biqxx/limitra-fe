@@ -2,6 +2,7 @@
 /* LIMITRA Affiliate Dashboard — wired to /api/affiliate/* endpoints via affiliateApi. */
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import QRCode from 'qrcode';
 import { Icon } from '@/components/icons/Icon';
 import { SocialMark } from '@/components/ui/SocialMark';
 import { Kpi, BarChart, Donut } from '@/components/charts/Charts';
@@ -159,22 +160,30 @@ function CopyField({ value, label }) {
 }
 
 function QR({ text, size = 120 }) {
-  const cells = [];
-  let h = 0;
-  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
-  const N = 11;
-  for (let i = 0; i < N * N; i++) {
-    h = (h * 1103515245 + 12345) >>> 0;
-    cells.push(((h >> 16) & 1) === 1);
-  }
-  const corner = (r, c) => (r < 3 && c < 3) || (r < 3 && c >= N - 3) || (r >= N - 3 && c < 3);
+  const [src, setSrc] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    if (!text) {
+      setSrc('');
+      return;
+    }
+    QRCode.toDataURL(String(text), {
+      width: size * 2,
+      margin: 1,
+      color: { dark: '#0B1324', light: '#FFFFFF' },
+    })
+      .then((url) => { if (!cancelled) setSrc(url); })
+      .catch(() => { if (!cancelled) setSrc(''); });
+    return () => { cancelled = true; };
+  }, [text, size]);
+
   return (
-    <div className="aff-qr" style={{ width: size, height: size, gridTemplateColumns: `repeat(${N},1fr)` }} aria-label="QR code">
-      {cells.map((on, i) => {
-        const r = Math.floor(i / N), c = i % N;
-        const fill = corner(r, c) ? (r % 2 === 0 || c % 2 === 0) : on;
-        return <span key={i} className={fill ? 'on' : ''} />;
-      })}
+    <div
+      className="aff-qr"
+      style={{ width: size, height: size, padding: 6, background: '#FFFFFF', display: 'grid', placeItems: 'center' }}
+      aria-label="QR code"
+    >
+      {src ? <img src={src} alt={`QR code for ${text}`} width={size - 12} height={size - 12} style={{ width: '100%', height: '100%', display: 'block', borderRadius: 4 }} /> : null}
     </div>
   );
 }

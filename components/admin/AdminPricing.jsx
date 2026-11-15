@@ -83,7 +83,7 @@ export function AdminPricing() {
   const [catDraft, setCatDraft] = useState({});
   const [catFilter, setCatFilter] = useState('');
   const [onlyOverrides, setOnlyOverrides] = useState(false);
-  const [collapsed, setCollapsed] = useState({});
+  const [expanded, setExpanded] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -320,6 +320,23 @@ export function AdminPricing() {
             </div>
 
             <div className="prc-cat-tools">
+              <button
+                type="button"
+                className="adm-btn ghost"
+                style={{ padding: '7px 12px', fontSize: 12.5 }}
+                onClick={() => {
+                  const anyOpen = filteredCategories.some(c => (c.subcategories || []).length > 0 && expanded[c.id]);
+                  if (anyOpen) {
+                    setExpanded({});
+                  } else {
+                    const next = {};
+                    filteredCategories.forEach(c => { if ((c.subcategories || []).length > 0) next[c.id] = true; });
+                    setExpanded(next);
+                  }
+                }}
+              >
+                {filteredCategories.some(c => (c.subcategories || []).length > 0 && expanded[c.id]) ? 'Collapse all' : 'Expand all'}
+              </button>
               <button type="button" className={`adm-chip${!onlyOverrides ? ' on' : ''}`} onClick={() => setOnlyOverrides(false)}>All</button>
               <button type="button" className={`adm-chip${onlyOverrides ? ' on' : ''}`} onClick={() => setOnlyOverrides(true)}>Overrides ({overrideCount})</button>
               <div className="adm-mini-search">
@@ -347,7 +364,7 @@ export function AdminPricing() {
                 if (q && !cat.name?.toLowerCase().includes(q)) return s.name?.toLowerCase().includes(q);
                 return true;
               });
-              const isOpen = !collapsed[cat.id] || q !== '';
+              const isOpen = !!expanded[cat.id] || q !== '';
 
               return (
                 <div key={cat.id} className="prc-cat-group">
@@ -358,7 +375,7 @@ export function AdminPricing() {
                           type="button"
                           className="cat-expand"
                           aria-label={isOpen ? 'Collapse subcategories' : 'Expand subcategories'}
-                          onClick={() => setCollapsed(c => ({ ...c, [cat.id]: !c[cat.id] }))}
+                          onClick={() => setExpanded(c => ({ ...c, [cat.id]: !c[cat.id] }))}
                         >
                           <Icon name={isOpen ? 'chevdown' : 'chevright'} size={15} />
                         </button>

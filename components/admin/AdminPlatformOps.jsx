@@ -14,7 +14,7 @@ import { messageFrom } from '@/lib/api/errors';
 import { useStore } from '@/components/store/StoreProvider';
 import { hasPermission } from '@/lib/auth/permissions';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead, Pager, usePager } from './AdminShared';
+import { AdmHead, EmptyState, Pager, SkeletonRows, usePager } from './AdminShared';
 
 const asList = (res) => (Array.isArray(res) ? res : res?.items || res?.data || []);
 
@@ -306,20 +306,20 @@ export function AdminSettings() {
         <button className="adm-btn ghost" onClick={load}><Icon name="refresh" size={14} /> Refresh</button>
       </AdmHead>
       {health && (
-        <div className="adm-note" style={{ marginBottom: 16 }}>
-          <Icon name="check" size={15} /> API Health: <b>{health.status || 'healthy'}</b>
+        <div className="adm-note" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="adm-live-dot" aria-hidden="true" />
+          <span>API Health: <b>{health.status || 'healthy'}</b></span>
         </div>
       )}
       <div className="panel" style={{ padding: 0 }}>
+        {!loaded ? <SkeletonRows rows={6} /> : shown.length === 0 ? (
+          <EmptyState icon="lock" title="No settings returned" description="System configuration keys will appear here when available." />
+        ) : (
         <div className="adm-table-wrap">
           <table className="adm-table">
             <thead><tr><th>Setting key</th><th>Value</th><th>Access</th></tr></thead>
             <tbody>
-              {!loaded ? (
-                <tr><td colSpan={3} className="muted" style={{ textAlign: 'center', padding: 28 }}>Loading settings…</td></tr>
-              ) : shown.length === 0 ? (
-                <tr><td colSpan={3} className="muted" style={{ textAlign: 'center', padding: 28 }}>No settings returned.</td></tr>
-              ) : shown.map((s, i) => (
+              {shown.map((s, i) => (
                 <tr key={s.key || i}>
                   <td><b>{s.key}</b></td>
                   <td className="muted">{typeof s.value === 'object' ? JSON.stringify(s.value) : String(s.value ?? '')}</td>
@@ -330,6 +330,7 @@ export function AdminSettings() {
           </table>
           <Pager {...pagerProps} />
         </div>
+        )}
       </div>
     </>
   );

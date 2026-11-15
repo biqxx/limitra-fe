@@ -33,9 +33,14 @@ export function BarChart({ data, labels, alt }) {
 }
 
 export function Donut({ segments }) {
-  const total = segments.reduce((s, x) => s + x.v, 0);
+  const list = (Array.isArray(segments) ? segments : []).map((x) => ({
+    label: x?.label ?? '',
+    v: Number(x?.v ?? x?.value ?? 0) || 0,
+    c: x?.c ?? x?.color ?? '#0438B6',
+  }));
+  const total = list.reduce((s, x) => s + x.v, 0);
   if (total === 0) return <div className="chart-empty">No data yet</div>;
-  const stops = segments.reduce((state, s) => {
+  const stops = list.reduce((state, s) => {
     const start = (state.acc / total) * 360;
     const nextAcc = state.acc + s.v;
     const end = (nextAcc / total) * 360;
@@ -47,7 +52,7 @@ export function Donut({ segments }) {
         <div className="donut-c"><b>{(total / 1000).toFixed(1)}K</b><small>visits</small></div>
       </div>
       <div className="legend">
-        {segments.map((s, i) => <div className="legend-row" key={i}><span className="legend-dot" style={{ background: s.c }} /><span>{s.label}</span><b>{s.v.toLocaleString()}</b><span className="legend-pct">{Math.round(s.v / total * 100)}%</span></div>)}
+        {list.map((s, i) => <div className="legend-row" key={i}><span className="legend-dot" style={{ background: s.c }} /><span>{s.label}</span><b>{s.v.toLocaleString()}</b><span className="legend-pct">{Math.round(s.v / total * 100)}%</span></div>)}
       </div>
     </div>);
 
