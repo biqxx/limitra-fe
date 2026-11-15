@@ -47,7 +47,7 @@ export default function AffiliateDashboardLayout({ children }) {
 function AffiliateDashboardShell({ children }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isAuthenticated, authLoading, logout } = useStore();
+  const { user, isAuthenticated, authLoading, logout, theme, toggleTheme } = useStore();
   const { dashboard, availableBalance } = useAffiliate() || {};
 
   /* route guard — real session + affiliate role check */
@@ -61,11 +61,8 @@ function AffiliateDashboardShell({ children }) {
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
-  const [theme, setTheme] = useState('light');
   const [acctOpen, setAcctOpen] = useState(false);
 
-  useEffect(() => { try { setTheme(localStorage.getItem('lim_theme') || 'light'); } catch (e) {} }, []);
-  useEffect(() => { document.documentElement.setAttribute('data-theme', theme); try { localStorage.setItem('lim_theme', theme); } catch (e) {} }, [theme]);
   useEffect(() => { setMobOpen(false); window.scrollTo(0, 0); }, [pathname]);
 
   if (authLoading || !allowedAffiliate) return null;
@@ -107,7 +104,7 @@ function AffiliateDashboardShell({ children }) {
             <div className="aff-balance-chip"><Icon name="card" size={15} /> Balance <b>{fn(availableBalance || 0)}</b><button className="aff-bal-wd" onClick={() => go('withdraw')}>Withdraw</button></div>
             <div className="adm-top-actions">
               <a className="adm-icon-btn" href="/" title="View store"><Icon name="store" size={19} /></a>
-              <button className="adm-icon-btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} title="Theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} /></button>
+              <button className="adm-icon-btn" onClick={toggleTheme} title="Theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} /></button>
               <div className="adm-acct-wrap">
                 <button className="adm-avatar" onClick={() => setAcctOpen(o => !o)}>{initials}</button>
                 {acctOpen && (<>

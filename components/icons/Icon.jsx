@@ -19,6 +19,8 @@ const I = {
   trash:    'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
   check:    'M5 12l5 5L20 6',
   close:    'M6 6l12 12M18 6L6 18',
+  maximize: 'M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7',
+  minimize: 'M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7',
   menu:     'M4 7h16M4 12h16M4 17h16',
   sun:      'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM12 2v2M12 20v2M4 12H2M22 12h-2M5 5L3.5 3.5M20.5 20.5L19 19M19 5l1.5-1.5M3.5 20.5L5 19',
   moon:     'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',

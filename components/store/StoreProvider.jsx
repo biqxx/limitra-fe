@@ -360,8 +360,8 @@ export function StoreProvider({ children }) {
 
   /* theme */
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
     if (!hydrated) return;
+    document.documentElement.setAttribute('data-theme', theme);
     try { localStorage.setItem('lim_theme', theme); } catch (e) {}
   }, [theme, hydrated]);
   const toggleTheme = () => setTheme(t => (t === 'light' ? 'dark' : 'light'));

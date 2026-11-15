@@ -31,11 +31,11 @@ function normalizeAiMessage(m) {
   };
 }
 
-const ELO_MAX_IMAGES = 5;
-const ELO_MAX_BYTES = 10 * 1024 * 1024; // 10MB
+const ELO_MAX_IMAGES = 3;
+const ELO_MAX_BYTES = 5 * 1024 * 1024; // 5MB (matches backend validation)
 const ELO_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
-/* compress an image File to a capped-size data URL (max 1024px long edge) */
+/* compress an image File to a capped-size JPEG Blob + preview data URL (max 1024px long edge) */
 function compressImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -51,16 +51,22 @@ function compressImage(file) {
       canvas.width = width; canvas.height = height;
       canvas.getContext('2d').drawImage(img, 0, 0, width, height);
       URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL('image/jpeg', 0.82));
+      const src = canvas.toDataURL('image/jpeg', 0.82);
+      canvas.toBlob((blob) => {
+        resolve({ src, blob });
+      }, 'image/jpeg', 0.82);
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')); };
     img.src = url;
   });
 }
 
+const ELO_STORAGE_KEY = 'lim_elo_chat_v1';
+
 export function EloAI() {
   const { go, addToCart, isAuthenticated } = useStore();
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [msgs, setMsgs] = useState([{ role: 'assistant', text: GREETING }]);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState([]); // staged images (data URLs) before send
@@ -71,8 +77,29 @@ export function EloAI() {
   // only ever set for signed-in users; /ai/conversations requires auth,
   // confirmed in the spec, so guests keep the local canned-reply fallback).
   const [conversationId, setConversationId] = useState(null);
+  const [hydrated, setHydrated] = useState(false);
   const bodyRef = useRef(null);
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(ELO_STORAGE_KEY) || 'null');
+      if (saved && Array.isArray(saved.msgs) && saved.msgs.length > 0) {
+        setMsgs(saved.msgs);
+      }
+      if (saved && saved.conversationId) {
+        setConversationId(saved.conversationId);
+      }
+    } catch (e) {}
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      sessionStorage.setItem(ELO_STORAGE_KEY, JSON.stringify({ conversationId, msgs }));
+    } catch (e) {}
+  }, [hydrated, conversationId, msgs]);
 
   useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; }, [msgs, open, busy, pending]);
 
@@ -87,8 +114,11 @@ export function EloAI() {
     const next = [];
     for (const f of files.slice(0, slots)) {
       if (!ELO_TYPES.includes(f.type)) { setErr('Unsupported file, use JPG, PNG or WEBP.'); continue; }
-      if (f.size > ELO_MAX_BYTES) { setErr('Image too large, max 10MB.'); continue; }
-      try { next.push({ src: await compressImage(f), name: f.name }); }
+      if (f.size > ELO_MAX_BYTES) { setErr('Image too large, max 5MB.'); continue; }
+      try {
+        const { src, blob } = await compressImage(f);
+        next.push({ src, blob, name: f.name || 'photo.jpg' });
+      }
       catch (e) { setErr('Could not read that image, please try another.'); }
     }
     if (next.length) setPending(p => [...p, ...next].slice(0, ELO_MAX_IMAGES));
@@ -117,11 +147,22 @@ export function EloAI() {
     }
     const clientMessageId = genClientMessageId();
     const priorCount = msgs.length;
-    await aiConversationsApi.sendMessage(convId, {
-      text: q || undefined,
-      client_message_id: clientMessageId,
-      images: imgs.length ? imgs.map(i => i.src) : undefined,
-    });
+    if (imgs.length > 0) {
+      const formData = new FormData();
+      formData.append('text', q || 'Find similar products in the store based on this image.');
+      formData.append('client_message_id', clientMessageId);
+      imgs.forEach((img, idx) => {
+        if (img.blob) {
+          formData.append('images[]', img.blob, img.name || `photo-${idx + 1}.jpg`);
+        }
+      });
+      await aiConversationsApi.sendMessage(convId, formData);
+    } else {
+      await aiConversationsApi.sendMessage(convId, {
+        text: q,
+        client_message_id: clientMessageId,
+      });
+    }
     // Response shape for the assistant's reply is undocumented — re-fetch
     // the full thread (same "re-fetch after mutation" pattern used for the
     // cart elsewhere in this app) and poll briefly if it hasn't landed yet.
@@ -180,6 +221,7 @@ export function EloAI() {
     setConversationId(null);
     setMsgs([{ role: 'assistant', text: GREETING }]);
     setPending([]); setErr('');
+    try { sessionStorage.removeItem(ELO_STORAGE_KEY); } catch (e) {}
   };
 
   return (
@@ -190,7 +232,7 @@ export function EloAI() {
       </button>
 
       {open && (
-        <div className="lucy-panel" role="dialog" aria-label="Elo"
+        <div className={'lucy-panel' + (expanded ? ' expanded' : '')} role="dialog" aria-label="Elo"
           onDragOver={e => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={e => { if (e.currentTarget === e.target) setDragOver(false); }}
           onPaste={onPaste}
@@ -201,8 +243,11 @@ export function EloAI() {
               <span className="lucy-avatar"><span className="lucy-av-text">Elo</span></span>
               <b>Shop with Elo</b>
             </div>
-            {conversationId && <button className="lucy-head-btn" onClick={handoff} aria-label="Talk to a human" title="Talk to a human"><Icon name="headset" size={18} /></button>}
-            <button className="lucy-head-btn" onClick={() => setOpen(false)} aria-label="Close"><Icon name="close" size={20} /></button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {conversationId && <button className="lucy-head-btn" onClick={handoff} aria-label="Talk to a human" title="Talk to a human"><Icon name="headset" size={18} /></button>}
+              <button className="lucy-head-btn lucy-expand-btn" onClick={() => setExpanded(e => !e)} aria-label={expanded ? 'Collapse Elo' : 'Expand Elo'} title={expanded ? 'Collapse' : 'Expand'}><Icon name={expanded ? 'minimize' : 'maximize'} size={17} /></button>
+              <button className="lucy-head-btn" onClick={() => setOpen(false)} aria-label="Close"><Icon name="close" size={20} /></button>
+            </div>
           </div>
 
           <div className="lucy-body" ref={bodyRef}>
@@ -237,7 +282,7 @@ export function EloAI() {
             {busy && (
               <div className="lucy-msg assistant">
                 <span className="lucy-msg-av"><span className="lucy-av-text sm">Elo</span></span>
-                <div className="lucy-bubble typing">{pending.length || msgs[msgs.length - 1]?.images ? <span className="lucy-analyzing"><span className="lucy-spin" /> Analysing image…</span> : <><i /><i /><i /></>}</div>
+                <div className="lucy-bubble typing">{pending.length || msgs[msgs.length - 1]?.images ? <span className="lucy-analyzing"><span className="lucy-spin" /> Looking at your photo…</span> : <><i /><i /><i /></>}</div>
               </div>
             )}
           </div>

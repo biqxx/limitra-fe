@@ -8,6 +8,7 @@ import { FormAlert } from '@/components/forms/Shared';
 import { authApi } from '@/lib/api/endpoints';
 import { ApiError } from '@/lib/api/client';
 import { fieldErrorsFrom, messageFrom } from '@/lib/api/errors';
+import { hasAnyAdminAccess, hasAffiliateAccess, firstPermittedAdminPath } from '@/lib/auth/permissions';
 
 function AuthField({ label, type = 'text', value, onChange, err, placeholder, icon, leading, prefix, right, onRight }) {
   return (
@@ -161,7 +162,18 @@ export function AuthPage({ mode = 'signin' }) {
         const signedIn = await refreshUser();
         setLoading(false);
         toast('Welcome back!');
-        go(signedIn?.role === 'admin' ? 'admin' : 'account');
+        if (hasAnyAdminAccess(signedIn)) {
+          const dest = firstPermittedAdminPath(signedIn);
+          if (dest && dest.startsWith('/admin')) {
+            window.location.assign(dest);
+          } else {
+            go('admin');
+          }
+        } else if (hasAffiliateAccess(signedIn)) {
+          go('affiliateDashboard');
+        } else {
+          go('account');
+        }
       } catch (err) {
         setLoading(false);
         applyErrors(err, { id: 'email', pass: 'password' });

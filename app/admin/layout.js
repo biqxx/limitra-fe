@@ -41,7 +41,7 @@ export default function AdminLayout({ children }) {
 function AdminShell({ children }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isAuthenticated, authLoading, logout } = useStore();
+  const { user, isAuthenticated, authLoading, logout, theme, toggleTheme } = useStore();
 
   /* route guard — strictly permission-based via user.permissions (authApi.me()).
      Wait for authLoading so a permitted user isn't bounced during hydration. */
@@ -66,7 +66,6 @@ function AdminShell({ children }) {
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
-  const [theme, setTheme] = useState('light');
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef(null);
   useEffect(() => {
@@ -79,15 +78,9 @@ function AdminShell({ children }) {
   }, [notifOpen]);
 
   const [acctOpen, setAcctOpen] = useState(false);
-  /* hydrate theme from localStorage once on mount (avoids SSR/client markup mismatch) */
-  useEffect(() => {
-    try { setTheme(localStorage.getItem('lim_theme') || 'light'); } catch (e) {}
-  }, []);
 
   // No notifications backend yet — starts empty rather than showing fake activity.
   const [notifs, setNotifs] = useState([]);
-
-  useEffect(() => { document.documentElement.setAttribute('data-theme', theme); try { localStorage.setItem('lim_theme', theme); } catch (e) {} }, [theme]);
 
   const adminName = user?.username || [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.email || 'Admin';
   const primaryRole = user?.roles?.[0]?.display_name || user?.roles?.[0]?.name || user?.role || 'Staff';
@@ -160,7 +153,7 @@ function AdminShell({ children }) {
             <button className="adm-burger" onClick={() => { if (window.matchMedia('(max-width: 860px)').matches) setMobOpen(o => !o); else setCollapsed(c => !c); }} aria-label="Toggle menu"><Icon name="menu" size={20} /></button>
             <div className="adm-top-actions">
               <Link className="adm-icon-btn" href="/" title="View store"><Icon name="store" size={19} /></Link>
-              <button className="adm-icon-btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} title="Theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} /></button>
+              <button className="adm-icon-btn" onClick={toggleTheme} title="Theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} /></button>
               <div className="adm-notif-wrap" ref={notifRef}>
                 <button className={'adm-icon-btn' + (notifOpen ? ' on' : '')} onClick={() => setNotifOpen(o => !o)} title="Notifications"><Icon name="bell" size={19} />{unread > 0 && <span className="adm-dot" />}</button>
                 {notifOpen && (

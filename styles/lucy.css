@@ -34,6 +34,11 @@ body:has(.scrim.on) .lucy-fab { opacity: 0; pointer-events: none; visibility: hi
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-xl);
   box-shadow: var(--shadow-pop); display: flex; flex-direction: column; overflow: hidden;
   animation: lucyIn .26s var(--ease);
+  transition: width .22s var(--ease), height .22s var(--ease);
+}
+.lucy-panel.expanded {
+  width: min(760px, calc(100vw - 48px));
+  height: min(760px, calc(100vh - 120px));
 }
 @keyframes lucyIn { from { opacity: 0; transform: translateY(20px) scale(.97); } to { opacity: 1; transform: none; } }
 
@@ -122,5 +127,7 @@ body:has(.scrim.on) .lucy-fab { opacity: 0; pointer-events: none; visibility: hi
   body:has(.search-modal-overlay) .lucy-fab,
   body:has(.scrim.on) .lucy-fab { opacity: 0; pointer-events: none; visibility: hidden; }
   .lucy-fab.open { width: 50px; padding: 0; }
-  .lucy-panel { bottom: 78px; right: 8px; left: 8px; width: auto; max-width: none; height: calc(100vh - 150px); }
+@media (max-width: 600px) {
+  .lucy-panel, .lucy-panel.expanded { bottom: 78px; right: 8px; left: 8px; width: auto; max-width: none; height: calc(100vh - 150px); }
+  .lucy-expand-btn { display: none; }
 }

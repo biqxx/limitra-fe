@@ -1,6 +1,5 @@
 'use client';
 import { Suspense } from 'react';
-import { usePathname } from 'next/navigation';
 import { StoreProvider } from '@/components/store/StoreProvider';
 import { Splash } from '@/components/store/Splash';
 import { SpinGate } from '@/components/store/SpinGate';
@@ -24,8 +23,6 @@ import '@/styles/accents.css';
 import '@/styles/lucy.css';
 
 function SiteChrome({ children }) {
-  const pathname = usePathname();
-  const isHome = pathname === '/';
   return (
     <>
       <Splash />
@@ -33,7 +30,7 @@ function SiteChrome({ children }) {
       <main className="app-main">{children}</main>
       <Footer />
       <MobileBottomNav />
-      {isHome && <EloAI />}
+      <EloAI />
       <SpinGate />
       <Toasts />
     </>
