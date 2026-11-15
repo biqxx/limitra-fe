@@ -26,6 +26,42 @@ export function AdminCareers() {
   const [jobs, setJobs] = useState([]);
   const [apps, setApps] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  const [jobDraft, setJobDraft] = useState(null);
+  const [savingJob, setSavingJob] = useState(false);
+
+  const openJob = async (job) => {
+    try {
+      const detail = await adminCareersApi.getJob(job.id);
+      const j = detail?.job || detail || job;
+      setJobDraft({ id: j.id, title: j.title || '', department: j.department || '', location: j.location || 'Remote', employment_type: j.employment_type || 'full_time', description: j.description || '', is_active: j.is_active !== false });
+    } catch {
+      setJobDraft({ id: job.id, title: job.title || '', department: job.department || '', location: job.location || 'Remote', employment_type: job.employment_type || 'full_time', description: job.description || '', is_active: job.is_active !== false });
+    }
+  };
+
+  const saveJob = async () => {
+    if (!jobDraft?.title.trim()) return;
+    setSavingJob(true);
+    try {
+      const payload = {
+        title: jobDraft.title.trim(),
+        department: jobDraft.department.trim() || 'Operations',
+        location: jobDraft.location.trim() || 'Remote',
+        employment_type: jobDraft.employment_type || 'full_time',
+        description: jobDraft.description.trim(),
+        is_active: Boolean(jobDraft.is_active),
+      };
+      if (jobDraft.id) await adminCareersApi.updateJob(jobDraft.id, payload);
+      else await adminCareersApi.createJob(payload);
+      addToast(jobDraft.id ? 'Job updated' : 'Job created');
+      setJobDraft(null);
+      await load();
+    } catch (e) {
+      addToast(messageFrom(e));
+    } finally {
+      setSavingJob(false);
+    }
+  };
 
   const load = useCallback(async () => {
     const [jRes, aRes] = await Promise.allSettled([
@@ -47,6 +83,9 @@ export function AdminCareers() {
     <>
       <AdmHead title="Careers & Applications" sub="Manage open job roles and review incoming candidates.">
         <button className="adm-btn ghost" onClick={load}><Icon name="refresh" size={14} /> Refresh</button>
+        {canManage && tab === 'jobs' && (
+          <button className="adm-btn primary" onClick={() => setJobDraft({ title: '', department: '', location: 'Remote', employment_type: 'full_time', description: '', is_active: true })}><Icon name="plus" size={15} /> New job</button>
+        )}
       </AdmHead>
       <div className="adm-filters">
         <button className={'adm-chip' + (tab === 'jobs' ? ' on' : '')} onClick={() => setTab('jobs')}>Jobs ({jobs.length})</button>
@@ -73,6 +112,7 @@ export function AdminCareers() {
                   <td><span className={'adm-pill ' + (it.is_active ? 'ok' : 'muted')}>{it.is_active ? 'Open' : 'Closed'}</span></td>
                   <td>{canManage && (
                     <div className="adm-rowact">
+                      <button title="Edit" onClick={() => openJob(it)}><Icon name="edit" size={15} /></button>
                       <button className="del" title="Delete" onClick={async () => { try { await adminCareersApi.removeJob(it.id); addToast('Job removed'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="trash" size={15} /></button>
                     </div>
                   )}</td>
@@ -85,6 +125,7 @@ export function AdminCareers() {
                   <td className="muted">{it.created_at ? String(it.created_at).slice(0, 10) : '—'}</td>
                   <td>{canManage && (
                     <div className="adm-rowact">
+                      <button title="Download CV" onClick={() => window.open(adminCareersApi.applicationCvUrl(it.id), '_blank', 'noopener')}><Icon name="download" size={15} /></button>
                       <button title="Shortlist" onClick={async () => { try { await adminCareersApi.updateApplicationStatus(it.id, { status: 'shortlisted' }); addToast('Shortlisted'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="check" size={15} /></button>
                     </div>
                   )}</td>
@@ -95,6 +136,32 @@ export function AdminCareers() {
           <Pager {...pagerProps} />
         </div>
       </div>
+      {jobDraft && (
+        <div className="role-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setJobDraft(null); }}>
+          <div className="role-modal">
+            <div className="role-modal-h">
+              <div><h3 style={{ fontSize: 18 }}>{jobDraft.id ? 'Edit job' : 'New job'}</h3></div>
+              <button className="role-modal-x" onClick={() => setJobDraft(null)} aria-label="Close"><Icon name="close" size={18} /></button>
+            </div>
+            <div className="role-modal-b">
+              <label className="adm-field"><span>Job title</span><input value={jobDraft.title} onChange={e => setJobDraft(d => ({ ...d, title: e.target.value }))} /></label>
+              <div className="adm-field-row">
+                <label className="adm-field"><span>Department</span><input value={jobDraft.department} onChange={e => setJobDraft(d => ({ ...d, department: e.target.value }))} /></label>
+                <label className="adm-field"><span>Location</span><input value={jobDraft.location} onChange={e => setJobDraft(d => ({ ...d, location: e.target.value }))} /></label>
+              </div>
+              <label className="adm-field"><span>Description</span><textarea rows={4} value={jobDraft.description} onChange={e => setJobDraft(d => ({ ...d, description: e.target.value }))} /></label>
+              <label className="row" style={{ gap: 8, marginTop: 8 }}>
+                <input type="checkbox" checked={jobDraft.is_active} onChange={e => setJobDraft(d => ({ ...d, is_active: e.target.checked }))} />
+                <span>Open for applications</span>
+              </label>
+            </div>
+            <div className="role-modal-f">
+              <button className="adm-btn ghost" onClick={() => setJobDraft(null)} disabled={savingJob}>Cancel</button>
+              <button className="adm-btn primary" onClick={saveJob} disabled={savingJob || !jobDraft.title.trim()}>{savingJob ? 'Saving…' : 'Save job'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -283,6 +350,17 @@ export function AdminSettings() {
   const [health, setHealth] = useState(null);
   const [settings, setSettings] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  const [historyModal, setHistoryModal] = useState(null);
+
+  const openHistory = async (s) => {
+    if (!s.id) { addToast('Setting history requires a setting ID'); return; }
+    try {
+      const res = await businessSettingsApi.history(s.id);
+      setHistoryModal({ setting: s, list: asList(res) });
+    } catch (e) {
+      addToast(messageFrom(e));
+    }
+  };
 
   const load = useCallback(async () => {
     const [hRes, sRes] = await Promise.allSettled([adminSystemApi.health(), businessSettingsApi.list()]);
@@ -317,13 +395,14 @@ export function AdminSettings() {
         ) : (
         <div className="adm-table-wrap">
           <table className="adm-table">
-            <thead><tr><th>Setting key</th><th>Value</th><th>Access</th></tr></thead>
+            <thead><tr><th>Setting key</th><th>Value</th><th>Access</th><th></th></tr></thead>
             <tbody>
               {shown.map((s, i) => (
                 <tr key={s.key || i}>
                   <td><b>{s.key}</b></td>
                   <td className="muted">{typeof s.value === 'object' ? JSON.stringify(s.value) : String(s.value ?? '')}</td>
                   <td><span className="adm-pill muted">{canManage ? 'Editable' : 'Read-only'}</span></td>
+                  <td>{s.id && <div className="adm-rowact"><button title="History" onClick={() => openHistory(s)}><Icon name="clock" size={15} /></button></div>}</td>
                 </tr>
               ))}
             </tbody>
@@ -332,6 +411,31 @@ export function AdminSettings() {
         </div>
         )}
       </div>
+      {historyModal && (
+        <div className="role-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setHistoryModal(null); }}>
+          <div className="role-modal">
+            <div className="role-modal-h">
+              <div><h3 style={{ fontSize: 18 }}>Setting history</h3><small className="muted">{historyModal.setting.key}</small></div>
+              <button className="role-modal-x" onClick={() => setHistoryModal(null)} aria-label="Close"><Icon name="close" size={18} /></button>
+            </div>
+            <div className="role-modal-b" style={{ maxHeight: 380, overflowY: 'auto' }}>
+              {historyModal.list.length === 0 ? <p className="muted">No change history recorded.</p> : (
+                <div className="adm-list">
+                  {historyModal.list.map((h, idx) => (
+                    <div className="adm-li" key={h.id || idx}>
+                      <div className="adm-li-main">
+                        <b>{String(h.new_value ?? h.value ?? '—')}</b>
+                        <small className="muted">{h.created_at ? String(h.created_at).slice(0, 16).replace('T', ' ') : ''}</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="role-modal-f"><button className="adm-btn ghost" onClick={() => setHistoryModal(null)}>Close</button></div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

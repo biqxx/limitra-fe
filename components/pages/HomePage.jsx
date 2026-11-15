@@ -8,6 +8,7 @@ import { SectionHead, ProductCard, Thumb, REAL_IMG, Placeholder, useReveal } fro
 import { SocialMark } from '@/components/ui/SocialMark';
 import { CAT_ICON } from '@/components/chrome/Chrome';
 import { FeaturedVideo } from '@/components/video/Video';
+import { contentApi } from '@/lib/api/endpoints';
 import { PRODUCTS, CATEGORIES, naira } from '@/lib/data';
 
 export function Countdown({ hours = 8 }) {
@@ -495,13 +496,10 @@ function WhyLimitra() {
 
 export function HomePage() {
   useReveal();
-  // Subscribes to StoreProvider's context so this re-renders once the async
-  // catalog load populates PRODUCTS — see ShopPage's identical useStore() call
-  // for why: a component that reads PRODUCTS directly in its own body (not via
-  // a memo, not via a prop from somewhere else) only sees fresh data on a
-  // render it actually runs itself, and nothing else here was making this one
-  // run again after the catalog finished loading.
   useStore();
+  useEffect(() => {
+    contentApi.home().catch(() => {});
+  }, []);
   const trending = PRODUCTS.filter((p) => p.bestseller).slice(0, 5);
   const arrivals = PRODUCTS.filter((p) => p.badges.includes('new')).concat(PRODUCTS.slice(0, 5)).slice(0, 5);
   return (

@@ -58,7 +58,33 @@ export function AdminSourcing() {
   const [jobs, setJobs] = useState([]);
   const [searching, setSearching] = useState(false);
   const [queueing, setQueueing] = useState(false);
+  const [enhancingKey, setEnhancingKey] = useState(null);
   const [reviewing, setReviewing] = useState(null); // product draft being reviewed in-place
+
+  const enhanceItem = async (product) => {
+    const key = productKey(product);
+    setEnhancingKey(key);
+    try {
+      const enhanced = await sourcingApi.enhance({
+        source: productSource(product),
+        external_product_id: productId(product),
+        title: productTitle(product),
+        description: product.description || '',
+      });
+      setResults((cur) =>
+        cur.map((item) =>
+          productKey(item) === key
+            ? { ...item, title: enhanced?.title || item.title, description: enhanced?.description || item.description, _enhanced: true }
+            : item
+        )
+      );
+      toast('Product copy enhanced with AI.');
+    } catch (error) {
+      toast(messageFrom(error));
+    } finally {
+      setEnhancingKey(null);
+    }
+  };
 
   const openReview = async (id) => {
     if (id == null) return;
@@ -198,7 +224,14 @@ export function AdminSourcing() {
           <button className="src-card-pick" onClick={() => toggleProduct(product)} disabled={product.imported || queued} aria-label={checked ? 'Deselect product' : 'Select product'}>{checked && <Icon name="check" size={15} stroke={3} />}</button>
           <ProductImage className="src-card-image" product={product} />
           <div className="src-card-body"><span className="src-source-badge">{sourceLabel(productSource(product))}</span><h3>{productTitle(product)}</h3><p className="src-card-price">{money(product.price, product.currency || 'USD')}</p>
-            {product.imported ? <button type="button" className="src-imported-link" onClick={() => openReview(product.product_id)}>Already added · View product</button> : queued ? <small>Queued for AI rewrite</small> : <small>ID: {productId(product)}</small>}
+            {product.imported ? <button type="button" className="src-imported-link" onClick={() => openReview(product.product_id)}>Already added · View product</button> : queued ? <small>Queued for AI rewrite</small> : (
+              <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 4 }}>
+                <small>ID: {productId(product)}</small>
+                <button type="button" className="adm-btn ghost" style={{ padding: '4px 8px', fontSize: 11.5 }} disabled={enhancingKey === key} onClick={() => enhanceItem(product)}>
+                  <Icon name="spark" size={12} /> {enhancingKey === key ? 'Enhancing…' : product._enhanced ? 'Enhanced' : 'AI Enhance'}
+                </button>
+              </div>
+            )}
           </div>
         </article>;
       })}</div> : <div className="src-empty"><Icon name="search" size={28} /><b>No supplier products found</b><span>Try a broader search phrase or another supplier.</span></div>}

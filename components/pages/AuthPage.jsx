@@ -242,6 +242,20 @@ export function AuthPage({ mode = 'signin' }) {
       return;
     }
 
+    if (m === 'otp' && otpFrom === 'login') {
+      try {
+        await authApi.otpVerify({ email: pendingEmail, otp });
+        const loggedIn = await refreshUser();
+        setLoading(false);
+        toast('Welcome back!');
+        go(loggedIn?.role === 'admin' ? 'admin' : 'account');
+      } catch (err) {
+        setLoading(false);
+        applyErrors(err, { otp: 'otp' });
+      }
+      return;
+    }
+
     if (m === 'reset') {
       try {
         // password_confirmation isn't in the documented request schema, but
@@ -269,8 +283,48 @@ export function AuthPage({ mode = 'signin' }) {
       return;
     }
 
+    if (isSocial) {
+      try {
+        const provider = idm.toLowerCase();
+        const res = await authApi.socialRedirect(provider, { redirect_uri: `${window.location.origin}/auth/callback?provider=${provider}` });
+        const url = res?.url || res?.redirect_url;
+        if (url) {
+          window.location.href = url;
+          return;
+        }
+        toast('Social sign-in URL was not returned by the server.', 'error');
+      } catch (err) {
+        toast(messageFrom(err, 'Social sign-in is unavailable right now.'), 'error');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     setLoading(false);
-    toast('Social sign-in is not available yet — please sign in with your email.', 'error');
+    toast('Unsupported authentication state.', 'error');
+  };
+
+  const startOtpLogin = async () => {
+    const email = f.id.trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      setErrs({ id: 'Enter your email address first' });
+      return;
+    }
+    setLoading(true);
+    try {
+      await authApi.otpRequest({ email });
+      setPendingEmail(email);
+      setOtpFrom('login');
+      setOtp('');
+      setM('otp');
+      setResend(28);
+      toast('One-time login code sent');
+    } catch (err) {
+      toast(messageFrom(err), 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resendCode = async () => {
@@ -278,8 +332,12 @@ export function AuthPage({ mode = 'signin' }) {
     if (otpFrom === 'forgot') {
       try { await authApi.forgotPassword({ email: pendingEmail }); toast('Code resent'); }
       catch (err) { toast(messageFrom(err), 'error'); }
+    } else if (otpFrom === 'login') {
+      try { await authApi.otpRequest({ email: pendingEmail }); toast('Code resent'); }
+      catch (err) { toast(messageFrom(err), 'error'); }
     } else {
-      toast('Code resent');
+      try { await authApi.resendVerification({ email: pendingEmail }); toast('Verification code resent'); }
+      catch (err) { toast(messageFrom(err), 'error'); }
     }
   };
 
@@ -397,7 +455,7 @@ export function AuthPage({ mode = 'signin' }) {
 
               {!isSocial && m === 'signin' &&
             <div className="row between" style={{ margin: '2px 0 4px' }}>
-                  <label className="check" style={{ fontSize: 13 }}><input type="checkbox" /><span className="cbox"><Icon name="check" size={12} stroke={3} /></span>Remember me</label>
+                  <a className="link-btn" style={{ fontSize: 13 }} onClick={startOtpLogin}>Sign in with email code</a>
                   <a className="link-btn" onClick={() => setM('forgot')}>Forgot password?</a>
                 </div>
             }

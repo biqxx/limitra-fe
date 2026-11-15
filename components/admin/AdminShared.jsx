@@ -200,7 +200,12 @@ export function AdmSelect({ value, options, onChange, creatable, onCreate, compa
       const r = ref.current.getBoundingClientRect();
       const popH = popRef.current?.offsetHeight || 220;
       const up = window.innerHeight - r.bottom < popH + 16 && r.top > popH + 16;
-      setPos({ left: r.left, width: r.width, top: up ? r.top - 6 : r.bottom + 6, up });
+      if (compact) {
+        const w = 208;
+        setCoords({ left: Math.max(8, r.right - w), width: w, top: up ? Math.max(8, r.top - popH - 5) : r.bottom + 5 });
+      } else {
+        setCoords({ left: r.left, width: r.width, top: up ? Math.max(8, r.top - popH - 5) : r.bottom + 5 });
+      }
     };
     onScroll();
     const onDoc = (e) => {

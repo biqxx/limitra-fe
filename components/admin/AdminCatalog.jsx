@@ -140,6 +140,12 @@ const pricingIssueMessage = (source) => {
 // field and the localStorage fallback are written). Returns the product id
 // on success, or null if blocked (pricing issue) — caller decides what to
 // do next (close a drawer, reload a list, etc.), this never does either.
+function invalidateStorefrontCatalogCache() {
+  if (typeof window === 'undefined') return;
+  try { sessionStorage.removeItem('lim_catalog_cache_v1'); } catch (e) {}
+  window.dispatchEvent(new Event('lim:catalog-dirty'));
+}
+
 export async function saveAdminProduct(d, toast) {
   const catObj = [...CATEGORIES, ...ADMIN_EXTRA_CATS].find(c => c.slug === d.category);
   const sources = d._raw?.sources || [];
@@ -175,6 +181,7 @@ export async function saveAdminProduct(d, toast) {
     toast(body.status === 'active' ? 'Price approved and product published' : 'Changes saved');
   }
   if (productId != null) setVariants(productId, d.variants || []);
+  invalidateStorefrontCatalogCache();
   return productId;
 }
 
@@ -310,7 +317,7 @@ export function AdminProducts({ editId }) {
           ))}</tbody>
         </table>{loaded && list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager {...pPager} /></div>
       </div>
-      {editing && <ProductEditDrawer key={`${editing.id}:${(editing._raw?.sources || []).map(source => source.id).join(',')}`} draft={editing} onClose={closeEditing} onSave={async (d) => {
+      {editing && <ProductEditDrawer key={`${editing.id}:${(editing._raw?.sources || []).map(source => source.id).join(',')}`} draft={editing} onClose={closeEditing} onMutated={loadProducts} onSave={async (d) => {
         try {
           const productId = await saveAdminProduct(d, t);
           if (productId == null) return; // blocked (pricing issue) — leave the drawer open
@@ -320,13 +327,50 @@ export function AdminProducts({ editId }) {
           t(messageFrom(e));
         }
       }} />}
-      {bulk && <BulkUploadModal onClose={() => setBulk(false)} onDone={() => { addToast('Import isn’t connected yet'); setBulk(false); }} />}
+      {bulk && <BulkUploadModal onClose={() => setBulk(false)} onDone={() => { loadProducts(); setBulk(false); }} />}
     </>
   );
 }
 
 function BulkUploadModal({ onClose, onDone }) {
+  const addToast = useAdminToast();
   const [file, setFile] = useState(null);
+  const [job, setJob] = useState(null);
+  const [errors, setErrors] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!job?.id || !['pending', 'queued', 'processing'].includes(String(job.status || '').toLowerCase())) return undefined;
+    const t = setInterval(async () => {
+      try {
+        const next = await adminProductsApi.getImport(job.id);
+        setJob(next);
+        if (['completed', 'failed', 'cancelled'].includes(String(next?.status || '').toLowerCase())) {
+          const errRes = await adminProductsApi.importErrors(job.id).catch(() => null);
+          setErrors(Array.isArray(errRes?.items) ? errRes.items : Array.isArray(errRes) ? errRes : []);
+          if (String(next?.status).toLowerCase() === 'completed') onDone();
+        }
+      } catch {}
+    }, 2500);
+    return () => clearInterval(t);
+  }, [job, onDone]);
+
+  const startUpload = async () => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await adminProductsApi.startImport(fd);
+      setJob(res);
+      addToast('Product import queued');
+    } catch (e) {
+      addToast(messageFrom(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <div className="adm-drawer-scrim" onClick={onClose} />
@@ -335,15 +379,39 @@ function BulkUploadModal({ onClose, onDone }) {
         <div className="adm-drawer-body">
           <label className="adm-img-drop" style={{ height: 150 }}>
             {file
-              ? <span className="adm-img-empty"><Icon name="check" size={26} stroke={3} /><b>{file}</b><small>Ready to import</small></span>
+              ? <span className="adm-img-empty"><Icon name="check" size={26} stroke={3} /><b>{file.name}</b><small>Ready to import</small></span>
               : <span className="adm-img-empty"><Icon name="download" size={26} /><b>Drop CSV / Excel file</b><small>or click to browse · .csv, .xlsx</small></span>}
-            <input type="file" accept=".csv,.xlsx,.xls" hidden onChange={e => { const fl = e.target.files && e.target.files[0]; if (fl) setFile(fl.name); }} />
+            <input type="file" accept=".csv,.xlsx,.xls" hidden onChange={e => { const fl = e.target.files && e.target.files[0]; if (fl) setFile(fl); }} />
           </label>
-          <div className="adm-note"><Icon name="info" size={15} /> Columns: name, brand, category, price, stock, description, image URL. <a>Download template</a></div>
+          <div className="adm-note">
+            <Icon name="info" size={15} /> Columns: name, brand, category, price, stock, description, image URL.{' '}
+            <a href={adminProductsApi.importTemplateUrl()} target="_blank" rel="noopener noreferrer">Download template</a>
+          </div>
+          {job && (
+            <div className="panel" style={{ marginTop: 12, padding: 12 }}>
+              <div className="row between">
+                <b>Import #{job.id}</b>
+                <span className="adm-pill info">{job.status || 'queued'}</span>
+              </div>
+              {errors.length > 0 && (
+                <ul style={{ marginTop: 8, fontSize: 12, color: 'var(--red)', paddingLeft: 18 }}>
+                  {errors.slice(0, 5).map((err, i) => <li key={i}>{err.message || err.error || JSON.stringify(err)}</li>)}
+                </ul>
+              )}
+              <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                {['pending', 'queued', 'processing'].includes(String(job.status || '').toLowerCase()) && (
+                  <button className="adm-btn ghost" onClick={async () => { await adminProductsApi.cancelImport(job.id).catch(() => {}); setJob(await adminProductsApi.getImport(job.id).catch(() => job)); }}>Cancel job</button>
+                )}
+                {String(job.status || '').toLowerCase() === 'failed' && (
+                  <button className="adm-btn ghost" onClick={async () => { await adminProductsApi.retryImport(job.id).catch(() => {}); setJob(await adminProductsApi.getImport(job.id).catch(() => job)); }}>Retry job</button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <div className="adm-drawer-f">
-          <button className="adm-btn ghost" onClick={onClose}>Cancel</button>
-          <button className="adm-btn primary" disabled={!file} onClick={() => onDone()}>Import products</button>
+          <button className="adm-btn ghost" onClick={onClose}>Close</button>
+          <button className="adm-btn primary" disabled={!file || busy} onClick={startUpload}>{busy ? 'Uploading…' : 'Import products'}</button>
         </div>
       </div>
     </>
@@ -428,7 +496,7 @@ function VariantsEditor({ variants, onChange }) {
   );
 }
 
-export function ProductEditDrawer({ draft, onClose, onSave }) {
+export function ProductEditDrawer({ draft, onClose, onSave, onMutated }) {
   const addToast = useAdminToast();
   const [f, setF] = useState({ ...draft, variants: draft.variants || [], variantStock: draft.variantStock || {} });
   const [pricingBusy, setPricingBusy] = useState(false);
@@ -620,6 +688,8 @@ export function ProductEditDrawer({ draft, onClose, onSave }) {
                             price: Number(updated?.price ?? curr.price),
                             _raw: updated ? { ...curr._raw, ...updated, sources: updated.sources ?? curr._raw?.sources } : curr._raw,
                           }));
+                          invalidateStorefrontCatalogCache();
+                          onMutated?.();
                           addToast('Discount applied');
                         } catch (err) {
                           addToast(messageFrom(err));
@@ -649,6 +719,8 @@ export function ProductEditDrawer({ draft, onClose, onSave }) {
                               price: Number(updated?.price ?? curr.price),
                               _raw: updated ? { ...curr._raw, ...updated, sources: updated.sources ?? curr._raw?.sources } : curr._raw,
                             }));
+                            invalidateStorefrontCatalogCache();
+                            onMutated?.();
                             addToast('Discount removed');
                           } catch (err) {
                             addToast(messageFrom(err));
@@ -1069,6 +1141,15 @@ export function AdminCoupons() {
                 <td><span className={'adm-pill ' + (c.active ? 'ok' : 'muted')}>{c.active ? 'Active' : 'Inactive'}</span></td>
                 <td>{canManage && (
                   <div className="adm-rowact">
+                    <button title="Redemptions" onClick={async () => {
+                      try {
+                        const res = await adminPromotionsApi.redemptions(c.id);
+                        const list = Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : [];
+                        addToast(`${c.code}: ${list.length} redemption(s) recorded`);
+                      } catch (err) {
+                        addToast(messageFrom(err));
+                      }
+                    }}><Icon name="eye" size={15} /></button>
                     <button title="Edit" onClick={() => setEdit({ id: c.id, code: c.code, name: c.name || '', type: promoTypeLabel(c.type), value: c.value ?? '', minimum_spend: c.minimum_spend ?? '', active: c.active !== false, expires: c.ends_at ? String(c.ends_at).slice(0, 10) : '' })}><Icon name="edit" size={15} /></button>
                     <button className="del" title="Deactivate" onClick={() => remove(c)}><Icon name="trash" size={15} /></button>
                   </div>
@@ -1120,6 +1201,32 @@ export function AdminInventory() {
   const [stat, setStat] = useState('All');
   const [sort, setSort] = useState('stock-low');
   const [invItems, setInvItems] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [adjustments, setAdjustments] = useState([]);
+
+  const loadAdjustments = async () => {
+    try {
+      const res = await adminInventoryApi.adjustments({ per_page: 50 });
+      setAdjustments(Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []);
+      setHistoryOpen(true);
+    } catch (err) {
+      addToast(messageFrom(err));
+    }
+  };
+
+  const setThreshold = async (p) => {
+    const raw = window.prompt(`Low-stock threshold for ${p.name}:`, String(p.threshold ?? 6));
+    if (raw == null) return;
+    const threshold = parseInt(raw, 10);
+    if (Number.isNaN(threshold) || threshold < 0) { addToast('Enter a valid non-negative integer'); return; }
+    try {
+      await adminInventoryApi.updateThreshold(p.id, { low_stock_threshold: threshold });
+      addToast(`Low-stock threshold updated to ${threshold}`);
+      await loadInventory();
+    } catch (err) {
+      addToast(messageFrom(err));
+    }
+  };
 
   const loadInventory = useCallback(async () => {
     try {
@@ -1173,6 +1280,7 @@ export function AdminInventory() {
   return (
     <>
       <AdmHead title="Inventory" sub="Stock levels & alerts">
+        <button className="adm-btn ghost" onClick={loadAdjustments}><Icon name="clock" size={14} /> Adjustment history</button>
         <button className="adm-btn ghost" onClick={loadInventory}><Icon name="refresh" size={14} /> Refresh</button>
       </AdmHead>
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
@@ -1195,10 +1303,37 @@ export function AdminInventory() {
             <tr key={p.id} data-hlkey={p.name}><td><div className="adm-prod"><span className="adm-prod-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></span><div><b>{p.name.split(',')[0]}</b></div></div></td>
               <td className="muted">{String(p.slug || '').slice(0, 12).toUpperCase()}</td><td>{s}</td>
               <td><span className={'adm-pill ' + (s === 0 ? 'bad' : st === 'Low stock' ? 'warn' : 'ok')}>{st}</span></td>
-              <td><div className="adm-rowact"><button title="Adjust stock" onClick={() => adjustStock(p)}><Icon name="plus" size={15} /></button></div></td></tr>
+              <td><div className="adm-rowact">
+                <button title="Set low-stock threshold" onClick={() => setThreshold(p)}><Icon name="edit" size={15} /></button>
+                <button title="Adjust stock" onClick={() => adjustStock(p)}><Icon name="plus" size={15} /></button>
+              </div></td></tr>
           ); })}</tbody>
         </table>{low.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager {...invPager} /></div>
       </div>
+      {historyOpen && (
+        <>
+          <div className="adm-drawer-scrim" onClick={() => setHistoryOpen(false)} />
+          <div className="adm-modal" role="dialog" aria-label="Inventory adjustment history">
+            <div className="adm-drawer-h"><h3>Inventory adjustment history</h3><button className="adm-icon-btn" onClick={() => setHistoryOpen(false)} aria-label="Close"><Icon name="close" size={20} /></button></div>
+            <div className="adm-drawer-body" style={{ maxHeight: 420, overflowY: 'auto' }}>
+              {adjustments.length === 0 ? <p className="muted">No adjustments recorded yet.</p> : (
+                <div className="adm-list">
+                  {adjustments.map((a, idx) => (
+                    <div className="adm-li" key={a.id || idx}>
+                      <div className="adm-li-main">
+                        <b>{a.product?.name || `Product #${a.product_id}`}</b>
+                        <small className="muted">{a.reason || 'Adjustment'} · {a.created_at ? String(a.created_at).slice(0, 10) : ''}</small>
+                      </div>
+                      <span className={'adm-pill ' + (Number(a.quantity_delta) >= 0 ? 'ok' : 'bad')}>{Number(a.quantity_delta) >= 0 ? `+${a.quantity_delta}` : a.quantity_delta}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="adm-drawer-f"><button className="adm-btn ghost" onClick={() => setHistoryOpen(false)}>Close</button></div>
+          </div>
+        </>
+      )}
     </>
   );
 }

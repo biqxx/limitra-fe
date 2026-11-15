@@ -56,7 +56,8 @@ function InviteStaffDrawer({ roles, onInvited, onClose }) {
   const addToast = useAdminToast();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [roleId, setRoleId] = useState(() => (roles[0]?.id ? String(roles[0].id) : ''));
+  const customRoles = useMemo(() => roles.filter((r) => !r.is_system && !r.is_super_admin), [roles]);
+  const [roleId, setRoleId] = useState(() => (customRoles[0]?.id ? String(customRoles[0].id) : ''));
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -66,12 +67,14 @@ function InviteStaffDrawer({ roles, onInvited, onClose }) {
   }, [roleId, roles]);
 
   const roleOptions = useMemo(
-    () =>
-      roles.map((r) => ({
+    () => [
+      { value: '', label: 'Default staff (no custom role)' },
+      ...customRoles.map((r) => ({
         value: String(r.id),
-        label: r.name || r.slug || `Role #${r.id}`,
+        label: r.display_name || r.name || r.slug || `Role #${r.id}`,
       })),
-    [roles]
+    ],
+    [customRoles]
   );
 
   const submit = async (e) => {
@@ -176,10 +179,16 @@ function InviteStaffDrawer({ roles, onInvited, onClose }) {
   );
 }
 
-function StaffManageDrawer({ user, onAction, onClose }) {
+function StaffManageDrawer({ user, roles = [], onAction, onClose }) {
   const addToast = useAdminToast();
   const [detail, setDetail] = useState(user);
   const [selectedRole, setSelectedRole] = useState(() => String(user?.role || 'staff').toLowerCase());
+  const customRoles = useMemo(() => roles.filter((r) => !r.is_system && !r.is_super_admin), [roles]);
+  const currentCustomRoleId = useMemo(() => {
+    const found = (detail?.roles || []).find((r) => !r.is_system && !r.is_super_admin);
+    return found?.id ? String(found.id) : '';
+  }, [detail]);
+  const [customRoleId, setCustomRoleId] = useState(currentCustomRoleId);
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
@@ -192,6 +201,8 @@ function StaffManageDrawer({ user, onAction, onClose }) {
         const next = { ...user, ...(res?.user || res) };
         setDetail(next);
         if (next.role) setSelectedRole(String(next.role).toLowerCase());
+        const found = (next.roles || []).find((r) => !r.is_system && !r.is_super_admin);
+        if (found?.id) setCustomRoleId(String(found.id));
       })
       .catch(() => {});
     return () => {
@@ -306,6 +317,41 @@ function StaffManageDrawer({ user, onAction, onClose }) {
               </button>
             </div>
           </div>
+
+          {String(detail.role || '').toLowerCase() === 'staff' && customRoles.length > 0 && (
+            <div className="adm-field" style={{ marginTop: 14 }}>
+              <label>Operational role</label>
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <AdmSelect
+                    value={customRoleId}
+                    options={[
+                      { value: '', label: 'Select custom role…' },
+                      ...customRoles.map((r) => ({
+                        value: String(r.id),
+                        label: r.display_name || r.name || `Role #${r.id}`,
+                      })),
+                    ]}
+                    onChange={(val) => setCustomRoleId(val)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="adm-btn ghost"
+                  disabled={busy || !customRoleId || customRoleId === currentCustomRoleId}
+                  onClick={() =>
+                    run(
+                      () => adminRolesApi.assignStaffRole(detail.id, { role_id: Number(customRoleId) }),
+                      `Updated ${detail.name || detail.email} operational role`,
+                      false
+                    )
+                  }
+                >
+                  Save custom role
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="adm-drawer-foot" style={{ marginTop: 20, flexWrap: 'wrap' }}>
             <button
@@ -726,6 +772,7 @@ export function AdminStaff() {
       {managing && (
         <StaffManageDrawer
           user={managing}
+          roles={roles}
           onAction={load}
           onClose={() => setManaging(null)}
         />

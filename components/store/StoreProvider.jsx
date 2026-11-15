@@ -7,7 +7,7 @@ import { naira, byId, REAL_IMG, slugify, setCategories, setSubcats, setProducts,
 import { applyStoredVariants } from '@/lib/variantsStore';
 import { routeFor, parseRoute } from '@/lib/routes';
 import { getToken, clearTokens } from '@/lib/auth';
-import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi, referralsApi } from '@/lib/api/endpoints';
+import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi, referralsApi, publicSettingsApi, analyticsApi, savedCardsApi } from '@/lib/api/endpoints';
 import { hasAnyAdminAccess } from '@/lib/auth/permissions';
 import { messageFrom } from '@/lib/api/errors';
 
@@ -118,8 +118,29 @@ export function StoreProvider({ children }) {
   const refreshRemoteCart = useCallback(async () => {
     try { setRemoteCart(await cartApi.getActive()); } catch (e) { /* leave stale cart on a transient failure */ }
   }, []);
+  const [publicSettings, setPublicSettings] = useState(null);
+
+  const trackEvent = useCallback((event, payload = {}) => {
+    analyticsApi.track({ events: [{ type: event, page: pathname || '/', properties: payload }] }).catch(() => {});
+  }, [pathname]);
+
+  useEffect(() => {
+    publicSettingsApi.get().then(setPublicSettings).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (pathname) analyticsApi.track({ events: [{ type: 'page_view', page: pathname }] }).catch(() => {});
+  }, [pathname]);
+
   const loadCartAndFavorites = useCallback(async () => {
     try {
+      const guestToken = typeof window !== 'undefined' ? localStorage.getItem('lim_guest_cart_token') : null;
+      if (guestToken) {
+        try {
+          await cartApi.merge(guestToken);
+          localStorage.removeItem('lim_guest_cart_token');
+        } catch {}
+      }
       let pendingLocal = localCartRef.current || [];
       if (pendingLocal.length === 0 && typeof window !== 'undefined') {
         try { pendingLocal = JSON.parse(localStorage.getItem('lim_cart') || '[]'); } catch (e) {}
@@ -381,9 +402,18 @@ export function StoreProvider({ children }) {
 
   useEffect(() => {
     const onSignup = () => setSpinUsed(false);
+    const onCatalogDirty = () => {
+      _catalogFetchedAt = 0;
+      try { sessionStorage.removeItem(CATALOG_CACHE_KEY); } catch (e) {}
+      if (needsCatalogOnRoute(pathname)) loadCatalog(true);
+    };
     window.addEventListener('lim:signup', onSignup);
-    return () => window.removeEventListener('lim:signup', onSignup);
-  }, []);
+    window.addEventListener('lim:catalog-dirty', onCatalogDirty);
+    return () => {
+      window.removeEventListener('lim:signup', onSignup);
+      window.removeEventListener('lim:catalog-dirty', onCatalogDirty);
+    };
+  }, [loadCatalog, pathname]);
 
   /* theme */
   useEffect(() => {
@@ -750,6 +780,7 @@ export function StoreProvider({ children }) {
     referral, REFERRAL_REWARD, redeemCredit,
     rewards, spinUsed, claimSpin, redeemReward,
     promo, setPromo,
+    publicSettings, trackEvent,
   }), [
     theme, toggleTheme, route, go,
     user, isAuthenticated, authLoading, logout, refreshUser,
@@ -765,6 +796,7 @@ export function StoreProvider({ children }) {
     referral, redeemCredit,
     rewards, spinUsed, claimSpin, redeemReward,
     promo,
+    publicSettings, trackEvent,
   ]);
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;
 }

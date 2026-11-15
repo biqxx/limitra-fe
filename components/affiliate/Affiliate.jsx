@@ -8,7 +8,7 @@ import { SocialMark } from '@/components/ui/SocialMark';
 import { Kpi, BarChart, Donut } from '@/components/charts/Charts';
 import { useStore } from '@/components/store/StoreProvider';
 import { naira } from '@/lib/data';
-import { affiliateApi } from '@/lib/api/endpoints';
+import { affiliateApi, myMicrostoreApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { hasAffiliateAccess } from '@/lib/auth/permissions';
 import { useAffiliateToast } from './AffiliateToastContext';
@@ -18,7 +18,7 @@ const fn = naira;
 
 const FAFF_NAV = [
   ['Overview', [['dashboard', 'Dashboard', 'grid'], ['analytics', 'Performance', 'spark']]],
-  ['Promote', [['promote', 'Promotion Center', 'bag'], ['links', 'My Links', 'share'], ['resources', 'Marketing', 'gift']]],
+  ['Promote', [['promote', 'Promotion Center', 'bag'], ['links', 'My Links', 'share'], ['microstore', 'My MicroStore', 'store'], ['resources', 'Marketing', 'gift']]],
   ['Earnings', [['earnings', 'Earnings', 'dollar'], ['withdraw', 'Withdrawals', 'card'], ['referrals', 'Referrals', 'user'], ['promocodes', 'Promo Codes', 'tag']]],
   ['Community', [['leaderboard', 'Tier & Ranking', 'flame']]],
   ['Account', [['settings', 'Profile & Settings', 'lock']]],
@@ -458,9 +458,9 @@ function AffPerformance() {
   const topProducts = Array.from(byProdMap.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 8);
 
   return (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <FHead title="Performance" sub="Track clicks, conversions and revenue you’ve driven." />
-      <div className="kpi-grid">
+      <div className="kpi-grid" style={{ marginBottom: 0 }}>
         <Kpi ic="dollar" tint="#1F8A5B" label="Revenue generated" val={loading ? '…' : fn(totalRevenue)} delta="" up />
         <Kpi ic="eye" tint="#7A5AE0" label="Link clicks" val={loading ? '…' : String(totalClicks)} delta="" up />
         <Kpi ic="bag" tint="#0438B6" label="Orders" val={loading ? '…' : String(totalSales)} delta="" up />
@@ -480,7 +480,7 @@ function AffPerformance() {
           : <p className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>No earnings data for this range yet.</p>}
       </div>
       {dashboard?.tier_progress && (
-        <div className="panel" style={{ marginBottom: 14 }}>
+        <div className="panel">
           <div className="panel-h"><h3>Tier progression</h3><span className="adm-pill info">{dashboard.current_tier || 'Bronze'}</span></div>
           <p className="muted" style={{ fontSize: 13 }}>
             {dashboard.tier_progress.next_tier
@@ -489,8 +489,8 @@ function AffPerformance() {
           </p>
         </div>
       )}
-      <div className="panel" style={{ padding: 0 }}>
-        <div className="panel-h" style={{ padding: '18px 20px 0' }}><h3>Top performing products</h3></div>
+      <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="panel-h" style={{ padding: '18px 20px 12px', marginBottom: 0 }}><h3>Top performing products</h3></div>
         <div className="adm-table-wrap">
           <table className="adm-table">
             <thead><tr><th>Product</th><th>Orders</th><th>Revenue</th><th>Commission</th></tr></thead>
@@ -510,7 +510,7 @@ function AffPerformance() {
           </table>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -522,12 +522,14 @@ function AffPromote() {
   const [pages, setPages] = useState(1);
   const [rate, setRate] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [sel, setSel] = useState(null);
 
   useEffect(() => {
     let active = true;
     const timer = setTimeout(() => {
       setLoading(true);
+      setError('');
       affiliateApi.promotableProducts({ search: q || undefined, page, per_page: 12 })
         .then((res) => {
           if (!active) return;
@@ -998,7 +1000,7 @@ function AffWithdraw() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const submit = async () => {
-    const v = Number(amt);
+    const v = Number(String(amt).replace(/,/g, ''));
     if (!v || v <= 0) { affToast('Enter a valid withdrawal amount'); return; }
     if (v > availableBalance) { affToast('Amount exceeds available balance'); return; }
     if (!selectedId) { affToast('Please add a payout method in Settings first'); return; }
@@ -1025,7 +1027,16 @@ function AffWithdraw() {
           <div className="aff-wd-bal">{fn(availableBalance)}</div>
           <label className="adm-field">
             <span>Amount to withdraw</span>
-            <input type="number" min="1" value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="Enter amount in NGN" />
+            <input
+              type="text"
+              inputMode="numeric"
+              value={amt}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, '');
+                setAmt(digits ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '');
+              }}
+              placeholder="Enter amount in NGN"
+            />
           </label>
           <div className="adm-field">
             <span>Payout method</span>
@@ -1522,10 +1533,139 @@ function AffSettings() {
   );
 }
 
+/* ============ MY MICROSTORE ============ */
+function AffMicrostore() {
+  const affToast = useAffiliateToast();
+  const [store, setStore] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [title, setTitle] = useState('');
+  const [tagline, setTagline] = useState('');
+  const [newProdId, setNewProdId] = useState('');
+  const [newNote, setNewNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const loadStore = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await myMicrostoreApi.get();
+      const s = res?.microstore || res;
+      setStore(s);
+      setTitle(s?.name || s?.title || '');
+      setTagline(s?.tagline || s?.bio || '');
+      setProducts(Array.isArray(s?.products) ? s.products : Array.isArray(res?.products) ? res.products : []);
+    } catch (e) {
+      affToast(messageFrom(e, 'Could not load your MicroStore'));
+    } finally {
+      setLoading(false);
+    }
+  }, [affToast]);
+
+  useEffect(() => { loadStore(); }, [loadStore]);
+
+  const saveProfile = async () => {
+    setSaving(true);
+    try {
+      await myMicrostoreApi.update({ name: title.trim(), tagline: tagline.trim() });
+      affToast('MicroStore updated');
+      await loadStore();
+    } catch (e) {
+      affToast(messageFrom(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addProduct = async (e) => {
+    e.preventDefault();
+    if (!newProdId.trim()) return;
+    setSaving(true);
+    try {
+      await myMicrostoreApi.addProduct({ product_id: Number(newProdId), curator_note: newNote.trim() || undefined });
+      affToast('Product added to MicroStore');
+      setNewProdId('');
+      setNewNote('');
+      await loadStore();
+    } catch (err) {
+      affToast(messageFrom(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleFeatured = async (p) => {
+    try {
+      await myMicrostoreApi.updateProduct(p.product_id || p.id, { is_featured: !p.is_featured });
+      affToast('Updated product');
+      await loadStore();
+    } catch (e) {
+      affToast(messageFrom(e));
+    }
+  };
+
+  const removeProd = async (p) => {
+    try {
+      await myMicrostoreApi.removeProduct(p.product_id || p.id);
+      affToast('Removed from MicroStore');
+      await loadStore();
+    } catch (e) {
+      affToast(messageFrom(e));
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <FHead title="My MicroStore" sub="Curate your storefront profile and featured catalog products." />
+      {loading ? <p className="muted">Loading MicroStore…</p> : !store ? (
+        <div className="panel"><p className="muted">No MicroStore profile is active for this account yet.</p></div>
+      ) : (
+        <>
+          <div className="panel">
+            <div className="panel-h"><h3>Storefront Details</h3>{store.slug && <small className="muted">/microstores/{store.slug}</small>}</div>
+            <div className="adm-field-row">
+              <label className="adm-field"><span>Store name</span><input value={title} onChange={e => setTitle(e.target.value)} /></label>
+              <label className="adm-field"><span>Tagline</span><input value={tagline} onChange={e => setTagline(e.target.value)} /></label>
+            </div>
+            <button className="adm-btn primary" style={{ marginTop: 12 }} disabled={saving} onClick={saveProfile}>{saving ? 'Saving…' : 'Save store details'}</button>
+          </div>
+          <div className="panel">
+            <div className="panel-h"><h3>Add Product to MicroStore</h3></div>
+            <form className="adm-field-row" onSubmit={addProduct} style={{ alignItems: 'flex-end' }}>
+              <label className="adm-field"><span>Product ID</span><input type="number" min="1" value={newProdId} onChange={e => setNewProdId(e.target.value)} placeholder="e.g. 12" /></label>
+              <label className="adm-field"><span>Curator note (optional)</span><input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Why you recommend it" /></label>
+              <button className="adm-btn primary" type="submit" disabled={saving || !newProdId.trim()}>Add product</button>
+            </form>
+          </div>
+          <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="panel-h" style={{ padding: '18px 20px 12px', marginBottom: 0 }}><h3>Curated Products ({products.length})</h3></div>
+            <div className="adm-table-wrap">
+              <table className="adm-table">
+                <thead><tr><th>Product</th><th>Price</th><th>Featured</th><th></th></tr></thead>
+                <tbody>
+                  {products.length === 0 ? (
+                    <tr><td colSpan={4} className="muted" style={{ textAlign: 'center', padding: 24 }}>No curated products yet.</td></tr>
+                  ) : products.map((p) => (
+                    <tr key={p.id || p.product_id}>
+                      <td><b>{p.product?.name || p.name || `Product #${p.product_id || p.id}`}</b></td>
+                      <td>{fn(Number(p.product?.price || p.price || 0))}</td>
+                      <td><button className={'adm-pill ' + (p.is_featured ? 'ok' : 'muted')} onClick={() => toggleFeatured(p)}>{p.is_featured ? 'Featured' : 'Standard'}</button></td>
+                      <td><div className="adm-rowact"><button className="del" title="Remove" onClick={() => removeProd(p)}><FIcon name="trash" size={15} /></button></div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export {
   FAFF_NAV, FSTATUS, initialsOf,
   Pill, CopyField, QR, ShareRow, FSelect, FPager, fn, affPath, useAffGo,
   GenLinkModal, LinkModal,
   AffOverview, AffPerformance, AffPromote, AffLinks, AffResources, AffEarnings,
-  AffWithdraw, AffReferrals, AffPromoCodes, AffLeaderboard, AffSettings,
+  AffWithdraw, AffReferrals, AffPromoCodes, AffLeaderboard, AffSettings, AffMicrostore,
 };

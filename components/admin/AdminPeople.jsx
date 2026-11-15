@@ -151,7 +151,7 @@ export function AdminCustomers() {
 
   const load = useCallback(async () => {
     try {
-      const res = await adminUsersApi.list({ role: 'customer', per_page: 100 });
+      const res = await adminUsersApi.list({ role: 'user', per_page: 100 });
       setUsers(asList(res));
     } catch (error) {
       addToast(messageFrom(error));
@@ -302,9 +302,18 @@ export function AdminCustomers() {
 function AffiliateDrawer({ aff, onAction, onClose }) {
   const addToast = useAdminToast();
   const [busy, setBusy] = useState(false);
+  const [commissions, setCommissions] = useState([]);
   const name = aff.user?.name || aff.name || aff.code || `Affiliate #${aff.id}`;
   const email = aff.user?.email || aff.email || aff.channel || '—';
   const status = String(aff.status || 'active').toLowerCase();
+
+  useEffect(() => {
+    let active = true;
+    adminAffiliatesApi.affiliateCommissions(aff.id, { per_page: 20 })
+      .then((res) => { if (active) setCommissions(asList(res)); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [aff.id]);
 
   const updateStatus = async (nextStatus) => {
     setBusy(true);
@@ -344,6 +353,25 @@ function AffiliateDrawer({ aff, onAction, onClose }) {
             <div><span className="muted">Referrals / Sales</span><b>{aff.conversions_count ?? aff.sales_count ?? 0}</b></div>
             <div><span className="muted">Total earned</span><b>{naira(aff.total_earnings ?? aff.earnings ?? 0)}</b></div>
             <div><span className="muted">Commission</span><b>{aff.commission_rate != null ? `${aff.commission_rate}%` : 'Default'}</b></div>
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <b style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>Recent commissions ({commissions.length})</b>
+            {commissions.length === 0 ? (
+              <small className="muted">No commissions recorded for this partner yet.</small>
+            ) : (
+              <div className="adm-list">
+                {commissions.slice(0, 8).map((c) => (
+                  <div className="adm-li" key={c.id}>
+                    <div className="adm-li-main">
+                      <b>{naira(c.commission_amount ?? c.amount ?? 0)}</b>
+                      <small className="muted">Order #{c.order_id || '—'} · {formatDate(c.created_at)}</small>
+                    </div>
+                    <span className={'adm-pill ' + (c.status === 'paid' || c.status === 'approved' ? 'ok' : c.status === 'rejected' ? 'bad' : 'warn')}>{c.status || 'pending'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="adm-drawer-foot">
@@ -420,6 +448,13 @@ export function AdminAffiliates() {
   const [affiliates, setAffiliates] = useState([]);
   const [applications, setApplications] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
+  const [commissions, setCommissions] = useState([]);
+  const [resources, setResources] = useState([]);
+  const [rules, setRules] = useState(null);
+  const [rulesDraft, setRulesDraft] = useState('');
+  const [selComms, setSelComms] = useState([]);
+  const [appDetail, setAppDetail] = useState(null);
+  const [newRes, setNewRes] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState(null);
   const [invite, setInvite] = useState(false);
@@ -428,14 +463,23 @@ export function AdminAffiliates() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [affRes, appRes, wdRes] = await Promise.all([
+      const [affRes, appRes, wdRes, commRes, resList, rulesRes] = await Promise.all([
         adminAffiliatesApi.list({ per_page: 100 }).catch(() => []),
         adminAffiliatesApi.applications({ per_page: 100 }).catch(() => []),
         adminAffiliatesApi.withdrawals({ per_page: 100 }).catch(() => []),
+        adminAffiliatesApi.commissions({ per_page: 100 }).catch(() => []),
+        adminAffiliatesApi.resources({ per_page: 100 }).catch(() => []),
+        adminAffiliatesApi.rules().catch(() => null),
       ]);
       setAffiliates(asList(affRes));
       setApplications(asList(appRes));
       setWithdrawals(asList(wdRes));
+      setCommissions(asList(commRes));
+      setResources(asList(resList));
+      if (rulesRes) {
+        setRules(rulesRes);
+        setRulesDraft(JSON.stringify(rulesRes, null, 2));
+      }
     } catch (error) {
       addToast(messageFrom(error));
     } finally {
@@ -446,7 +490,17 @@ export function AdminAffiliates() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  const activeRows = section === 'partners' ? affiliates : section === 'applications' ? applications : withdrawals;
+  const activeRows = section === 'partners'
+    ? affiliates
+    : section === 'applications'
+      ? applications
+      : section === 'withdrawals'
+        ? withdrawals
+        : section === 'commissions'
+          ? commissions
+          : section === 'resources'
+            ? resources
+            : [];
   const filteredRows = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return activeRows.filter(item => {
@@ -492,11 +546,14 @@ export function AdminAffiliates() {
         <Kpi ic="truck" tint="#7A5AE0" label="Pending withdrawals" val={loaded ? pendingWd : '—'} delta="" up />
       </div>
 
-      <div className="adm-filters">
+      <div className="adm-filters" style={{ flexWrap: 'wrap', gap: 8 }}>
         {[
           ['partners', `Partners (${affiliates.length})`],
           ['applications', `Applications (${applications.length})`],
           ['withdrawals', `Withdrawals (${withdrawals.length})`],
+          ['commissions', `Commissions (${commissions.length})`],
+          ['resources', `Resources (${resources.length})`],
+          ['rules', 'Program rules'],
         ].map(([k, lbl]) => (
           <button key={k} className={'adm-chip' + (section === k ? ' on' : '')} onClick={() => { setSection(k); setTab('all'); }}>{lbl}</button>
         ))}
@@ -555,12 +612,18 @@ export function AdminAffiliates() {
                       <td data-label="Submitted" className="muted">{formatDate(app.created_at)}</td>
                       <td data-label="Status"><span className={'adm-pill ' + (st === 'approved' ? 'ok' : st === 'pending' ? 'warn' : 'bad')} style={{ textTransform: 'capitalize' }}>{st}</span></td>
                       <td data-label="Actions">
-                        {st === 'pending' && (
-                          <div className="adm-rowact">
-                            <button title="Approve" onClick={() => act(() => adminAffiliatesApi.approveApplication(app.id), `${name} approved`)}><Icon name="check" size={15} /></button>
-                            <button className="del" title="Reject" onClick={() => act(() => adminAffiliatesApi.rejectApplication(app.id), `${name} rejected`)}><Icon name="close" size={15} /></button>
-                          </div>
-                        )}
+                        <div className="adm-rowact">
+                          <button title="View details" onClick={async () => {
+                            try { setAppDetail(await adminAffiliatesApi.getApplication(app.id)); }
+                            catch { setAppDetail(app); }
+                          }}><Icon name="eye" size={15} /></button>
+                          {st === 'pending' && (
+                            <>
+                              <button title="Approve" onClick={() => act(() => adminAffiliatesApi.approveApplication(app.id), `${name} approved`)}><Icon name="check" size={15} /></button>
+                              <button className="del" title="Reject" onClick={() => act(() => adminAffiliatesApi.rejectApplication(app.id), `${name} rejected`)}><Icon name="close" size={15} /></button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -591,6 +654,12 @@ export function AdminAffiliates() {
                             </>
                           )}
                           {st === 'approved' && (
+                            <>
+                              <button title="Start processing" onClick={() => act(() => adminAffiliatesApi.startProcessingWithdrawal(wd.id), 'Withdrawal processing started')}><Icon name="refresh" size={15} /></button>
+                              <button title="Mark paid" onClick={() => act(() => adminAffiliatesApi.markPaidWithdrawal(wd.id), 'Marked as paid')}><Icon name="dollar" size={15} /></button>
+                            </>
+                          )}
+                          {st === 'processing' && (
                             <button title="Mark paid" onClick={() => act(() => adminAffiliatesApi.markPaidWithdrawal(wd.id), 'Marked as paid')}><Icon name="dollar" size={15} /></button>
                           )}
                         </div>
@@ -602,14 +671,125 @@ export function AdminAffiliates() {
             </table>
           )}
 
-          {!loaded ? <div className="adm-soon"><p>Loading affiliate data…</p></div>
-            : filteredRows.length === 0 ? <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No records match your filter.</div> : null}
-          <Pager {...pagerProps} />
+          {section === 'commissions' && (
+            <>
+              {selComms.length > 0 && (
+                <div className="row between" style={{ padding: '10px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+                  <small><b>{selComms.length}</b> commission(s) selected</small>
+                  <div className="row" style={{ gap: 8 }}>
+                    <button className="adm-btn primary" onClick={() => act(async () => { await adminAffiliatesApi.bulkUpdateCommissions({ commission_ids: selComms, status: 'approved' }); setSelComms([]); }, 'Commissions approved')}>Approve selected</button>
+                    <button className="adm-btn ghost" onClick={() => act(async () => { await adminAffiliatesApi.bulkUpdateCommissions({ commission_ids: selComms, status: 'paid' }); setSelComms([]); }, 'Commissions marked paid')}>Mark paid</button>
+                  </div>
+                </div>
+              )}
+              <table className="adm-table">
+                <thead><tr><th></th><th>Affiliate</th><th>Order</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                  {shown.map(c => (
+                    <tr key={c.id}>
+                      <td><input type="checkbox" checked={selComms.includes(c.id)} onChange={(e) => setSelComms(s => e.target.checked ? [...s, c.id] : s.filter(id => id !== c.id))} /></td>
+                      <td><b>{c.affiliate?.user?.name || c.affiliate?.code || `Affiliate #${c.affiliate_id}`}</b></td>
+                      <td className="muted">#{c.order_id || '—'}</td>
+                      <td><b>{naira(c.commission_amount ?? c.amount ?? 0)}</b></td>
+                      <td><span className={'adm-pill ' + (c.status === 'paid' || c.status === 'approved' ? 'ok' : c.status === 'rejected' ? 'bad' : 'warn')}>{c.status || 'pending'}</span></td>
+                      <td>
+                        <div className="adm-rowact">
+                          <button title="Inspect" onClick={async () => {
+                            try { const d = await adminAffiliatesApi.getCommission(c.id); addToast(`Commission #${d.id}: ${d.status} (${naira(d.commission_amount ?? 0)})`); }
+                            catch (err) { addToast(messageFrom(err)); }
+                          }}><Icon name="eye" size={15} /></button>
+                          {c.status !== 'approved' && <button title="Approve" onClick={() => act(() => adminAffiliatesApi.updateCommission(c.id, { status: 'approved' }), 'Commission approved')}><Icon name="check" size={15} /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {section === 'resources' && (
+            <>
+              <div className="row between" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+                <b>Marketing resources</b>
+                <button className="adm-btn primary" onClick={() => setNewRes({ title: '', category: 'banner', url: '', description: '' })}><Icon name="plus" size={14} /> Add resource</button>
+              </div>
+              <table className="adm-table">
+                <thead><tr><th>Title</th><th>Category</th><th>URL</th><th></th></tr></thead>
+                <tbody>
+                  {shown.map(r => (
+                    <tr key={r.id}>
+                      <td><b>{r.title || r.name}</b></td>
+                      <td className="muted">{r.category || 'general'}</td>
+                      <td className="muted" style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url || r.file_url || '—'}</td>
+                      <td><div className="adm-rowact"><button className="del" title="Delete" onClick={() => act(() => adminAffiliatesApi.deleteResource(r.id), 'Resource deleted')}><Icon name="trash" size={15} /></button></div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {section === 'rules' && (
+            <div style={{ padding: 20 }}>
+              <label className="adm-field">
+                <span>Affiliate program rules (JSON)</span>
+                <textarea rows={10} style={{ fontFamily: 'monospace', fontSize: 12 }} value={rulesDraft} onChange={e => setRulesDraft(e.target.value)} />
+              </label>
+              <div style={{ marginTop: 12 }}>
+                <button className="adm-btn primary" onClick={() => act(async () => {
+                  const parsed = JSON.parse(rulesDraft || '{}');
+                  await adminAffiliatesApi.updateRules(parsed);
+                }, 'Affiliate rules updated')}>Save rules</button>
+              </div>
+            </div>
+          )}
+
+          {section !== 'rules' && (!loaded ? <div className="adm-soon"><p>Loading affiliate data…</p></div>
+            : filteredRows.length === 0 ? <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No records match your filter.</div> : null)}
+          {section !== 'rules' && <Pager {...pagerProps} />}
         </div>
       </div>
 
       {view && <AffiliateDrawer aff={view} onAction={loadAll} onClose={() => setView(null)} />}
       {invite && <InviteAffiliateDrawer onCreated={loadAll} onClose={() => setInvite(false)} />}
+      {appDetail && (
+        <div className="role-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setAppDetail(null); }}>
+          <div className="role-modal">
+            <div className="role-modal-h">
+              <div><h3 style={{ fontSize: 18 }}>Affiliate application</h3><small className="muted">#{appDetail.id}</small></div>
+              <button className="role-modal-x" onClick={() => setAppDetail(null)}><Icon name="close" size={18} /></button>
+            </div>
+            <div className="role-modal-b">
+              <p><b>Applicant:</b> {appDetail.user?.name || appDetail.name || '—'} ({appDetail.user?.email || appDetail.email || '—'})</p>
+              <p><b>Channel:</b> {appDetail.channel || appDetail.website || appDetail.social_handle || '—'}</p>
+              <p><b>Status:</b> {appDetail.status || 'pending'}</p>
+              {appDetail.notes && <p><b>Notes:</b> {appDetail.notes}</p>}
+            </div>
+            <div className="role-modal-f"><button className="adm-btn ghost" onClick={() => setAppDetail(null)}>Close</button></div>
+          </div>
+        </div>
+      )}
+      {newRes && (
+        <div className="role-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setNewRes(null); }}>
+          <div className="role-modal">
+            <div className="role-modal-h">
+              <div><h3 style={{ fontSize: 18 }}>Add affiliate resource</h3></div>
+              <button className="role-modal-x" onClick={() => setNewRes(null)}><Icon name="close" size={18} /></button>
+            </div>
+            <div className="role-modal-b">
+              <label className="adm-field"><span>Title</span><input value={newRes.title} onChange={e => setNewRes(s => ({ ...s, title: e.target.value }))} /></label>
+              <label className="adm-field"><span>Category</span><input value={newRes.category} onChange={e => setNewRes(s => ({ ...s, category: e.target.value }))} /></label>
+              <label className="adm-field"><span>URL</span><input value={newRes.url} onChange={e => setNewRes(s => ({ ...s, url: e.target.value }))} /></label>
+              <label className="adm-field"><span>Description</span><textarea rows={3} value={newRes.description} onChange={e => setNewRes(s => ({ ...s, description: e.target.value }))} /></label>
+            </div>
+            <div className="role-modal-f">
+              <button className="adm-btn ghost" onClick={() => setNewRes(null)}>Cancel</button>
+              <button className="adm-btn primary" disabled={!newRes.title.trim()} onClick={() => act(async () => { await adminAffiliatesApi.createResource(newRes); setNewRes(null); }, 'Resource added')}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

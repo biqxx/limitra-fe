@@ -30,6 +30,31 @@ export function AdminCMS() {
   const [q, setQ] = useState('');
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [revisions, setRevisions] = useState(null);
+
+  const openRevisions = async (kind, item) => {
+    try {
+      const res = kind === 'blog'
+        ? await adminContentApi.blogRevisions(item.id)
+        : await adminContentApi.contentRevisions(item.id);
+      setRevisions({ kind, item, list: asList(res) });
+    } catch (e) {
+      addToast(messageFrom(e));
+    }
+  };
+
+  const restoreRevision = async (revId) => {
+    if (!revisions) return;
+    try {
+      if (revisions.kind === 'blog') await adminContentApi.restoreBlogRevision(revisions.item.id, revId);
+      else await adminContentApi.restoreContentRevision(revisions.item.id, revId);
+      addToast('Revision restored');
+      setRevisions(null);
+      await load();
+    } catch (e) {
+      addToast(messageFrom(e));
+    }
+  };
 
   const load = useCallback(async () => {
     const [cRes, bRes, mRes, nRes] = await Promise.allSettled([
@@ -127,6 +152,7 @@ export function AdminCMS() {
                       <td><span className={'adm-pill ' + (it.status === 'published' || it.published_at ? 'ok' : 'muted')}>{it.status || (it.published_at ? 'published' : 'draft')}</span></td>
                       <td>{canManageCms && (
                         <div className="adm-rowact">
+                          <button title="Revisions" onClick={() => openRevisions('content', it)}><Icon name="clock" size={15} /></button>
                           <button title="Publish" onClick={async () => { try { await adminContentApi.publish(it.id); addToast('Published'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="check" size={15} /></button>
                           <button title="Edit" onClick={() => setDraft({ kind: 'content', id: it.id, key: it.key || '', title: it.title || '', type: it.type || 'page', body: typeof it.body === 'string' ? it.body : JSON.stringify(it.body || '', null, 2) })}><Icon name="edit" size={15} /></button>
                         </div>
@@ -142,6 +168,7 @@ export function AdminCMS() {
                       <td><span className={'adm-pill ' + (it.status === 'published' || it.published_at ? 'ok' : 'muted')}>{it.status || (it.published_at ? 'published' : 'draft')}</span></td>
                       <td>{canManageCms && (
                         <div className="adm-rowact">
+                          <button title="Revisions" onClick={() => openRevisions('blog', it)}><Icon name="clock" size={15} /></button>
                           <button title="Publish" onClick={async () => { try { await adminContentApi.publishBlogPost(it.id); addToast('Published'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="check" size={15} /></button>
                           <button title="Edit" onClick={() => setDraft({ kind: 'blog', id: it.id, title: it.title || '', slug: it.slug || '', excerpt: it.excerpt || '', body: it.content || it.body || '' })}><Icon name="edit" size={15} /></button>
                           <button className="del" title="Delete" onClick={async () => { if (!window.confirm('Delete post?')) return; try { await adminContentApi.removeBlogPost(it.id); addToast('Deleted'); load(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="trash" size={15} /></button>
@@ -209,6 +236,32 @@ export function AdminCMS() {
               <button className="adm-btn ghost" onClick={() => setDraft(null)} disabled={saving}>Cancel</button>
               <button className="adm-btn primary" onClick={saveDraft} disabled={saving || !draft.title.trim()}>{saving ? 'Saving…' : 'Save'}</button>
             </div>
+          </div>
+        </div>
+      )}
+      {revisions && (
+        <div className="role-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setRevisions(null); }}>
+          <div className="role-modal">
+            <div className="role-modal-h">
+              <div><h3 style={{ fontSize: 18 }}>Revision history</h3><small className="muted">{revisions.item?.title || revisions.item?.key}</small></div>
+              <button className="role-modal-x" onClick={() => setRevisions(null)} aria-label="Close"><Icon name="close" size={18} /></button>
+            </div>
+            <div className="role-modal-b" style={{ maxHeight: 380, overflowY: 'auto' }}>
+              {revisions.list.length === 0 ? <p className="muted">No saved revisions yet.</p> : (
+                <div className="adm-list">
+                  {revisions.list.map((rev) => (
+                    <div className="adm-li" key={rev.id}>
+                      <div className="adm-li-main">
+                        <b>Version #{rev.version || rev.id}</b>
+                        <small className="muted">{rev.created_at ? String(rev.created_at).slice(0, 16).replace('T', ' ') : ''}</small>
+                      </div>
+                      <button className="adm-btn ghost" onClick={() => restoreRevision(rev.id)}>Restore</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="role-modal-f"><button className="adm-btn ghost" onClick={() => setRevisions(null)}>Close</button></div>
           </div>
         </div>
       )}
@@ -378,9 +431,10 @@ function RoleDrawer({ role, permissionsList, onSaved, onClose }) {
 
 function InviteStaffDrawer({ roles, onInvited, onClose }) {
   const addToast = useAdminToast();
+  const customRoles = useMemo(() => roles.filter((r) => !r.is_system && !r.is_super_admin), [roles]);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [roleId, setRoleId] = useState(roles[0]?.id || '');
+  const [roleId, setRoleId] = useState(() => (customRoles[0]?.id ? String(customRoles[0].id) : ''));
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
@@ -417,10 +471,12 @@ function InviteStaffDrawer({ roles, onInvited, onClose }) {
           <label className="adm-field"><span>Full name</span><input value={name} onChange={e => setName(e.target.value)} placeholder="Jane Doe" /></label>
           <label className="adm-field"><span>Work email</span><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="jane@limitra.com.ng" /></label>
           <label className="adm-field">
-            <span>Assign role</span>
+            <span>Assign custom role</span>
             <select value={roleId} onChange={e => setRoleId(e.target.value)}>
-              {roles.map(r => <option key={r.id} value={r.id}>{formatRoleName(r.display_name || r.name)}</option>)}
+              <option value="">Default staff (no custom role)</option>
+              {customRoles.map(r => <option key={r.id} value={r.id}>{formatRoleName(r.display_name || r.name)}</option>)}
             </select>
+            <small className="muted">Invitations can only assign custom operational roles. System roles are managed after onboarding.</small>
           </label>
         </div>
         <div className="adm-drawer-f">

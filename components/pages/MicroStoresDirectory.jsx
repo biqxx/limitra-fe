@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { Breadcrumbs } from '@/components/ui/Shared';
+import { microstoresApi } from '@/lib/api/endpoints';
 import { MICROSTORES } from '@/lib/microstoresData';
 
 const DIR_CATS = ['All stores', 'Gaming', 'Beauty', 'Phones', 'Home & Living', "Men's Fashion", 'Bags'];
@@ -11,12 +12,16 @@ const SORTS = [['popular', 'Most popular'], ['rating', 'Top rated'], ['az', 'Nam
 
 function StoreCard({ store }) {
   const { go, toast } = useStore();
+  const openStore = () => {
+    microstoresApi.trackClick(store.slug, { source: 'directory' }).catch(() => {});
+    go('microstore', store.slug);
+  };
   return (
     <div className="ms-dir-card card">
-      <div className="ms-dir-cover" style={{ background: `linear-gradient(135deg, ${store.color}, ${store.color}99)` }} onClick={() => go('microstore', store.slug)} />
+      <div className="ms-dir-cover" style={{ background: `linear-gradient(135deg, ${store.color}, ${store.color}99)` }} onClick={openStore} />
       <div className="ms-dir-body">
         <span className="ms-dir-avatar" style={{ background: store.color }}><Icon name="store" size={18} /></span>
-        <b onClick={() => go('microstore', store.slug)}>{store.name}</b>
+        <b onClick={openStore}>{store.name}</b>
         <p className="muted">{store.tagline}</p>
         <div className="ms-dir-meta">
           <span><Icon name="star" size={13} fill="var(--gold)" /> {store.rating} <small>({store.reviews})</small></span>

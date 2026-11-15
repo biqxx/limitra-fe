@@ -5,10 +5,12 @@
    commission-rate table, the "which orders count" block, and the apply
    form + FAQ section. Keeping these in one place means the three pages stay
    visually and numerically consistent instead of drifting copies. */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Icon, Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
+import { affiliateApi } from '@/lib/api/endpoints';
+import { messageFrom } from '@/lib/api/errors';
 import { CREATOR_PROGRAMS } from '@/lib/creatorPrograms';
 
 const CP_PHOTO = '/assets/img/a09d96b52fb7936342b34355ffca656885ce52ff.png';
@@ -139,13 +141,24 @@ function CreatorField({ label, value, onChange, err, placeholder, type = 'text',
 }
 
 export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions on a rolling 90-day basis.', codePrefix = 'LIM', termsLabel = 'Affiliate', successBody }) {
-  const { toast } = useStore();
+  const { toast, isAuthenticated } = useStore();
   const [f, setF] = useState({ name: '', email: '', channel: 'instagram', handle: '', audience: '10k-50k', about: '' });
   const [errs, setErrs] = useState({});
   const [done, setDone] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [appStatus, setAppStatus] = useState(null);
   const [code] = useState(() => codePrefix + Math.floor(100 + Math.random() * 900));
 
-  const submit = e => {
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let active = true;
+    affiliateApi.applicationStatus()
+      .then((res) => { if (active && res && (res.status || res.application)) setAppStatus(res.application || res); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [isAuthenticated]);
+
+  const submit = async (e) => {
     e.preventDefault();
     const er = {};
     if (!f.name.trim()) er.name = 'Enter your full name';
@@ -153,9 +166,42 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
     if (!f.handle.trim()) er.handle = 'Add your channel / page link';
     setErrs(er);
     if (Object.keys(er).length) return;
-    setDone(true);
-    toast('Application submitted!');
+    setSubmitting(true);
+    try {
+      if (isAuthenticated) {
+        const res = await affiliateApi.apply({
+          channel: f.channel,
+          social_handle: f.handle.trim(),
+          audience_size: f.audience,
+          notes: f.about.trim() || undefined,
+        });
+        setAppStatus(res?.application || res);
+      }
+      setDone(true);
+      toast('Application submitted!');
+    } catch (err) {
+      toast(messageFrom(err, 'Could not submit application'));
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  if (appStatus && !done) {
+    return (
+      <div className="aff-success card">
+        <div className="success-check" style={{ width: 64, height: 64, marginBottom: 16 }}><Icon name="clock" size={30} /></div>
+        <h3 style={{ fontSize: 22 }}>Application {appStatus.status || 'received'}</h3>
+        <p className="muted" style={{ marginTop: 8 }}>
+          {appStatus.status === 'approved'
+            ? 'Your creator application has been approved. Head to your Affiliate Dashboard to start sharing links.'
+            : 'We have your application on file and our team is reviewing it.'}
+        </p>
+        {appStatus.status === 'approved' && (
+          <Link href="/affiliate/dashboard" className="btn btn-primary" style={{ marginTop: 14 }}>Open Affiliate Dashboard</Link>
+        )}
+      </div>
+    );
+  }
 
   if (done) {
     const link = 'limitra.com.ng/r/' + code;

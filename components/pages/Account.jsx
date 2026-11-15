@@ -7,7 +7,10 @@ import { SocialMark } from '@/components/ui/SocialMark';
 import { Breadcrumbs, EmptyState, ProductCard } from '@/components/ui/Shared';
 import { Modal, AddressForm, CardForm, CardBrandMark, Field } from '@/components/forms/Shared';
 import { naira, SOCIAL_GLYPHS, byId } from '@/lib/data';
-import { profileApi, ordersApi, favoritesApi, sharedWishlistsApi, supportTicketsApi, privacyApi } from '@/lib/api/endpoints';
+import {
+  authApi, profileApi, ordersApi, favoritesApi, sharedWishlistsApi, supportTicketsApi,
+  privacyApi, walletApi, returnsApi, notificationsApi, userPreferencesApi, referralsApi,
+} from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
 // GET /orders and /orders/{id} have no documented response shape (generic
@@ -78,13 +81,17 @@ function initialsFor(user) {
 const ACCT_TABS = [
   ['dashboard', 'Dashboard', 'grid'],
   ['orders', 'My orders', 'package'],
+  ['returns', 'Returns', 'refresh'],
   ['tracking', 'Track order', 'truck'],
+  ['wallet', 'Wallet & deposits', 'dollar'],
+  ['notifications', 'Notifications', 'bell'],
   ['support', 'Support tickets', 'headset'],
   ['wishlist', 'Wishlist', 'heart'],
   ['referrals', 'Refer & earn', 'spark'],
   ['rewards', 'My rewards', 'gift'],
   ['addresses', 'Addresses', 'location'],
   ['payments', 'Payment methods', 'card'],
+  ['security', 'Security & sessions', 'lock'],
   ['profile', 'Profile settings', 'user'],
 ];
 
@@ -235,7 +242,22 @@ function OrderList({ orders }) {
           <div className="or-actions">
             {o.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => go('tracking', o.id)}><Icon name="truck" size={15} /> Track</button>}
             {o.status === 'delivered' && <button className="btn btn-ghost btn-sm" onClick={() => setReturning(o)}><Icon name="refresh" size={15} /> Request return</button>}
-            <button className="btn btn-ghost btn-sm" onClick={() => go('shop', 'all')}>Buy again</button>
+            {['pending_payment', 'confirmed'].includes(o.status) && (
+              <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={async () => {
+                if (!window.confirm('Cancel this order?')) return;
+                try { await ordersApi.cancel(o.id, { reason: 'Customer cancelled' }); toast('Order cancelled'); }
+                catch (e) { toast(messageFrom(e)); }
+              }}>Cancel</button>
+            )}
+            <button className="btn btn-ghost btn-sm" onClick={async () => {
+              try {
+                await ordersApi.buyAgain(o.id);
+                toast('Items added to your cart');
+                go('cart');
+              } catch {
+                go('shop', 'all');
+              }
+            }}>Buy again</button>
           </div>
         </div>
       ))}
@@ -621,15 +643,58 @@ function Profile() {
             className="btn btn-outline btn-sm"
             onClick={async () => {
               try {
+                await privacyApi.updateConsents({ marketing_emails: true, analytics: true });
+                toast('Privacy consents saved.');
+              } catch (err) {
+                toast(messageFrom(err));
+              }
+            }}
+          >
+            Save privacy consents
+          </button>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={async () => {
+              try {
+                await userPreferencesApi.update({ currency: 'NGN', language: 'en' });
+                toast('Preferences saved.');
+              } catch (err) {
+                toast(messageFrom(err));
+              }
+            }}
+          >
+            Sync preferences
+          </button>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={async () => {
+              try {
                 const res = await privacyApi.exportData();
                 const expId = res?.id ?? res?.data?.id;
-                toast(expId ? `Data export #${expId} queued — check your email.` : 'Data export requested.');
+                if (expId) {
+                  await privacyApi.getExport(expId).catch(() => {});
+                  window.open(privacyApi.downloadExportUrl(expId), '_blank', 'noopener');
+                }
+                toast(expId ? `Data export #${expId} queued.` : 'Data export requested.');
               } catch (err) {
                 toast(messageFrom(err));
               }
             }}
           >
             Export my data
+          </button>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={async () => {
+              try {
+                await privacyApi.cancelDeletion();
+                toast('Account deletion request cancelled.');
+              } catch (err) {
+                toast(messageFrom(err));
+              }
+            }}
+          >
+            Cancel deletion
           </button>
           <button
             className="btn btn-outline btn-sm"
@@ -658,7 +723,10 @@ function Referrals() {
   const completed = referral.referrals.filter(r => r.status === 'Completed').length;
   const enc = encodeURIComponent;
   const msg = `Shop premium tech, fashion & beauty on Limitra! Use my link and we both win: ${link}`;
-  const share = (href, src) => { window.open(href, '_blank', 'noopener'); window.trackShare && window.trackShare('referral', src, 'referral-share'); };
+  const share = (href, src) => {
+    window.open(href, '_blank', 'noopener');
+    referralsApi.shareEvent({ channel: src, source: 'referral-share' }).catch(() => {});
+  };
   const channels = [
     ['whatsapp', 'WhatsApp', `https://wa.me/?text=${enc(msg)}`],
     ['facebook', 'Facebook', `https://www.facebook.com/sharer/sharer.php?u=${enc(link)}`],
@@ -761,9 +829,233 @@ function MyRewards() {
   );
 }
 
+function AccountWallet() {
+  const { walletBalance, loadWallet, toast } = useStore();
+  const [txs, setTxs] = useState([]);
+  const [amount, setAmount] = useState('5000');
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try {
+      const res = await walletApi.transactions({ per_page: 25 });
+      setTxs(Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []);
+    } catch {}
+  };
+  useEffect(() => { load(); loadWallet?.(); }, [loadWallet]);
+
+  const deposit = async (e) => {
+    e.preventDefault();
+    const val = Number(amount);
+    if (!val || val < 100) { toast('Enter at least ₦100'); return; }
+    setBusy(true);
+    try {
+      const res = await walletApi.initializeDeposit({ amount: val });
+      const url = res?.authorization_url || res?.url;
+      if (url) window.open(url, '_blank', 'noopener');
+      else if (res?.reference) await walletApi.verifyDeposit(res.reference);
+      toast('Deposit initialized');
+      await load();
+    } catch (err) {
+      toast(messageFrom(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <h1 style={{ fontSize: 26, marginBottom: 6 }}>Wallet &amp; Deposits</h1>
+      <p className="muted" style={{ marginBottom: 18 }}>Balance: <b style={{ color: 'var(--text)' }}>{naira(walletBalance)}</b></p>
+      <form className="acct-panel row" style={{ gap: 10, maxWidth: 460, marginBottom: 20, alignItems: 'flex-end' }} onSubmit={deposit}>
+        <Field label="Top-up amount (NGN)" type="number" value={amount} onChange={setAmount} />
+        <button className="btn btn-primary btn-sm" type="submit" disabled={busy}>{busy ? 'Processing…' : 'Deposit'}</button>
+      </form>
+      <div className="acct-panel">
+        <h3 style={{ marginBottom: 12 }}>Recent transactions</h3>
+        {txs.length === 0 ? <p className="muted">No wallet transactions yet.</p> : txs.map((t, i) => (
+          <div key={t.id || i} className="row between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+            <div><b>{t.description || t.type || 'Transaction'}</b><div className="muted" style={{ fontSize: 12 }}>{fmtDate(t.created_at)}</div></div>
+            <b>{naira(Number(t.amount || 0))}</b>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function AccountReturns() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  const load = async () => {
+    try {
+      const res = await returnsApi.list({ per_page: 25 });
+      setItems(Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []);
+    } catch {} finally { setLoaded(true); }
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <>
+      <h1 style={{ fontSize: 26, marginBottom: 18 }}>My Returns</h1>
+      {!loaded ? <p className="muted">Loading returns…</p> : items.length === 0 ? (
+        <EmptyState icon="refresh" title="No return requests" body="Return requests submitted from your orders will appear here." />
+      ) : (
+        <div className="order-list">
+          {items.map(r => (
+            <div className="order-row" key={r.id}>
+              <div className="or-main">
+                <div className="or-id"><b>Return #{r.id}</b><span className="badge badge-soft">{r.status || 'pending'}</span></div>
+                <span className="muted" style={{ fontSize: 13 }}>Order #{r.order_id} · {r.reason || 'Return request'}</span>
+              </div>
+              <div className="or-actions">
+                <button className="btn btn-outline btn-sm" onClick={async () => {
+                  try { const d = await returnsApi.get(r.id); toast(`Return #${d.id}: ${d.status}`); }
+                  catch (e) { toast(messageFrom(e)); }
+                }}>Details</button>
+                {['pending', 'requested'].includes(String(r.status || '').toLowerCase()) && (
+                  <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={async () => {
+                    try { await returnsApi.cancel(r.id); toast('Return cancelled'); load(); }
+                    catch (e) { toast(messageFrom(e)); }
+                  }}>Cancel</button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function AccountNotifications() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [prefs, setPrefs] = useState({ email: true, push: true, marketing: false });
+
+  useEffect(() => {
+    notificationsApi.list({ per_page: 25 }).then(res => setItems(Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : [])).catch(() => {});
+    notificationsApi.preferences().then(res => { if (res && typeof res === 'object') setPrefs(p => ({ ...p, ...res })); }).catch(() => {});
+  }, []);
+
+  const savePrefs = async (next) => {
+    setPrefs(next);
+    try { await notificationsApi.updatePreferences(next); toast('Notification preferences updated'); }
+    catch (e) { toast(messageFrom(e)); }
+  };
+
+  return (
+    <>
+      <div className="row between" style={{ marginBottom: 18 }}>
+        <h1 style={{ fontSize: 26 }}>Notifications</h1>
+        <button className="btn btn-outline btn-sm" onClick={async () => {
+          await notificationsApi.readAll().catch(() => {});
+          setItems(l => l.map(x => ({ ...x, read_at: x.read_at || new Date().toISOString() })));
+          toast('All marked read');
+        }}>Mark all read</button>
+      </div>
+      <div className="acct-panel" style={{ marginBottom: 18 }}>
+        <h3 style={{ marginBottom: 10 }}>Preferences</h3>
+        <div className="row" style={{ gap: 18, flexWrap: 'wrap' }}>
+          {Object.entries(prefs).filter(([, v]) => typeof v === 'boolean').map(([k, v]) => (
+            <label key={k} className="row" style={{ gap: 8, textTransform: 'capitalize' }}>
+              <input type="checkbox" checked={v} onChange={e => savePrefs({ ...prefs, [k]: e.target.checked })} />
+              <span>{k.replace(/_/g, ' ')}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="acct-panel">
+        {items.length === 0 ? <p className="muted">No notifications yet.</p> : items.map(n => (
+          <div key={n.id} className="row between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', opacity: n.read_at ? 0.65 : 1 }}>
+            <div><b>{n.title || n.data?.title || 'Notification'}</b><div className="muted" style={{ fontSize: 13 }}>{n.message || n.data?.message || ''}</div></div>
+            {!n.read_at && <button className="btn btn-ghost btn-sm" onClick={async () => {
+              await notificationsApi.markRead(n.id).catch(() => {});
+              setItems(l => l.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
+            }}>Mark read</button>}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function AccountSecurity() {
+  const { toast } = useStore();
+  const [sessions, setSessions] = useState([]);
+  const [connected, setConnected] = useState([]);
+  const [pw, setPw] = useState({ current_password: '', password: '', password_confirmation: '' });
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    authApi.sessions().then(res => setSessions(Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : [])).catch(() => {});
+    authApi.connectedAccounts().then(res => setConnected(Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : [])).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+
+  const changePass = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await authApi.changePassword(pw);
+      setPw({ current_password: '', password: '', password_confirmation: '' });
+      toast('Password updated');
+    } catch (err) {
+      toast(messageFrom(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <h1 style={{ fontSize: 26, marginBottom: 18 }}>Security &amp; Sessions</h1>
+      <form className="acct-panel" style={{ maxWidth: 520, marginBottom: 20, display: 'grid', gap: 12 }} onSubmit={changePass}>
+        <h3>Change password</h3>
+        <Field label="Current password" type="password" value={pw.current_password} onChange={v => setPw(s => ({ ...s, current_password: v }))} />
+        <Field label="New password" type="password" value={pw.password} onChange={v => setPw(s => ({ ...s, password: v }))} />
+        <Field label="Confirm new password" type="password" value={pw.password_confirmation} onChange={v => setPw(s => ({ ...s, password_confirmation: v }))} />
+        <button className="btn btn-primary btn-sm" type="submit" disabled={busy}>{busy ? 'Updating…' : 'Update password'}</button>
+      </form>
+      <div className="acct-panel" style={{ marginBottom: 20 }}>
+        <h3 style={{ marginBottom: 10 }}>Active sessions ({sessions.length})</h3>
+        {sessions.length === 0 ? <p className="muted">No other active sessions.</p> : sessions.map(s => (
+          <div key={s.id} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+            <div><b>{s.device || s.user_agent || `Session #${s.id}`}</b><div className="muted" style={{ fontSize: 12 }}>{s.ip_address || ''}</div></div>
+            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={async () => {
+              await authApi.revokeSession(s.id).catch(() => {});
+              setSessions(l => l.filter(x => x.id !== s.id));
+              toast('Session revoked');
+            }}>Revoke</button>
+          </div>
+        ))}
+      </div>
+      <div className="acct-panel">
+        <h3 style={{ marginBottom: 10 }}>Connected social accounts</h3>
+        {connected.length === 0 ? <p className="muted">No social providers linked.</p> : connected.map(c => (
+          <div key={c.provider || c.platform || c.id} className="row between" style={{ padding: '8px 0' }}>
+            <b style={{ textTransform: 'capitalize' }}>{c.provider || c.platform}</b>
+            <button className="btn btn-ghost btn-sm" onClick={async () => {
+              await authApi.disconnectAccount(c.provider || c.platform).catch(() => {});
+              setConnected(l => l.filter(x => (x.provider || x.platform) !== (c.provider || c.platform)));
+              toast('Account disconnected');
+            }}>Disconnect</button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function AccountPage({ tab }) {
   const t = tab || 'dashboard';
-  const map = { dashboard: <Dashboard />, orders: <Orders />, support: <SupportTickets />, addresses: <Addresses />, payments: <Payments />, profile: <Profile />, referrals: <Referrals />, rewards: <MyRewards /> };
+  const map = {
+    dashboard: <Dashboard />, orders: <Orders />, returns: <AccountReturns />, wallet: <AccountWallet />,
+    notifications: <AccountNotifications />, security: <AccountSecurity />,
+    support: <SupportTickets />, addresses: <Addresses />, payments: <Payments />,
+    profile: <Profile />, referrals: <Referrals />, rewards: <MyRewards />,
+  };
   return <AccountShell active={t}>{map[t] || <Dashboard />}</AccountShell>;
 }
 

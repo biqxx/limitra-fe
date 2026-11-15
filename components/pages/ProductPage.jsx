@@ -210,6 +210,9 @@ export function ProductPage({ id }) {
       setReviewsList((prev) => prev.map((r) => (r.id === revId ? { ...r, helpful_count: Number(r.helpful_count || 0) + 1 } : r)));
     } catch {}
   };
+  const [relatedRemote, setRelatedRemote] = useState([]);
+  const [alternativesRemote, setAlternativesRemote] = useState([]);
+
   useEffect(() => {
     if (!id) { setDetailLoading(false); return; }
 
@@ -222,9 +225,18 @@ export function ProductPage({ id }) {
       .catch(() => { /* the safe catalog shape remains usable if detail loading fails */ })
       .finally(() => { if (!cancelled) setDetailLoading(false); });
 
+    productsApi.related(id)
+      .then(res => { if (!cancelled) setRelatedRemote((Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []).map(mapProductDetails)); })
+      .catch(() => {});
+    productsApi.alternatives(id)
+      .then(res => { if (!cancelled) setAlternativesRemote((Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []).map(mapProductDetails)); })
+      .catch(() => {});
+
     return () => { cancelled = true; };
   }, [id]);
-  const related = product ? byCat(product.category).filter(p => p.id !== product.id).slice(0, 5) : [];
+  const related = relatedRemote.length > 0
+    ? relatedRemote.slice(0, 5)
+    : (product ? byCat(product.category).filter(p => p.id !== product.id).slice(0, 5) : []);
   const faved = !!product && wish.includes(product.id);
   useEffect(() => {
     if (!product) return;
@@ -284,7 +296,7 @@ export function ProductPage({ id }) {
       variantId: comboStockRec?.id ?? null,
       selectedOptions: selectedAttributes,
     }, qty);
-    if (checkout) go('checkout');
+    if (checkout) go('cart');
   };
 
   return (
@@ -467,6 +479,12 @@ export function ProductPage({ id }) {
         <SectionHead eyebrow="You may also like" title="Related products" onSeeAll={() => go('shop', product.category)} />
         <div className="grid-prod">{related.map(p => <ProductCard key={p.id} product={p} />)}</div>
       </div></section>
+      {alternativesRemote.length > 0 && (
+        <section className="sec" style={{ paddingTop: 0 }}><div className="wrap">
+          <SectionHead eyebrow="Similar picks" title="Alternative options" />
+          <div className="grid-prod">{alternativesRemote.slice(0, 5).map(p => <ProductCard key={p.id} product={p} />)}</div>
+        </div></section>
+      )}
 
       <div className="pdp-stickybar">
         <ShareButton product={product} className="psb-share" compact />

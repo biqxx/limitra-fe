@@ -11,6 +11,7 @@ import { useStore } from '@/components/store/StoreProvider';
 import { Breadcrumbs, EmptyState, Placeholder, Stars, Price } from '@/components/ui/Shared';
 import { Dropdown } from '@/components/forms/Shared';
 import { FilterPanel, pagerList, priceSort } from '@/components/pages/ShopPage';
+import { microstoresApi } from '@/lib/api/endpoints';
 import { storeBySlug } from '@/lib/microstoresData';
 
 const SORTS = [['relevance', 'Most relevant'], ['low', 'Price: low to high'], ['high', 'Price: high to low'], ['rating', 'Top rated'], ['new', 'Newest']];
@@ -71,6 +72,10 @@ const EMPTY_FILTERS = { maxPrice: null, brands: [], minRating: 0, onSale: false,
 export function MicroStorePage({ slug }) {
   const { go, toast } = useStore();
   const store = storeBySlug(slug);
+
+  useEffect(() => {
+    if (slug) microstoresApi.trackClick(slug, { source: 'storefront' }).catch(() => {});
+  }, [slug]);
 
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('all');

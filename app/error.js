@@ -1,7 +1,25 @@
 'use client';
 /* Ported from legacy/500.html */
+import { useEffect, useRef } from 'react';
 import Link from 'next/link';
-export default function GlobalError({ reset }) {
+import { clientErrorsApi } from '@/lib/api/endpoints';
+
+export default function GlobalError({ error, reset }) {
+  const reportedRef = useRef(false);
+
+  useEffect(() => {
+    if (reportedRef.current) return;
+    reportedRef.current = true;
+    const page = typeof window !== 'undefined' ? `${window.location.pathname}${window.location.search}` : 'unknown';
+    const url = typeof window !== 'undefined' ? window.location.href : undefined;
+    clientErrorsApi.report({
+      page,
+      url,
+      message: error?.message ? String(error.message).slice(0, 900) : 'Unhandled client error',
+      digest: error?.digest ? String(error.digest) : undefined,
+    }).catch(() => {});
+  }, [error]);
+
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg)', padding: 24 }}>
       <div style={{ maxWidth: 480, textAlign: 'center' }}>

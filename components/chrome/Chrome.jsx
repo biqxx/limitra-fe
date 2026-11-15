@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Icon } from '@/components/icons/Icon';
 import { Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
-import { newsletterApi } from '@/lib/api/endpoints';
+import { newsletterApi, notificationsApi, productsApi } from '@/lib/api/endpoints';
 import { hasAnyAdminAccess, hasAffiliateAccess } from '@/lib/auth/permissions';
 import { EmptyState, QtyStepper, Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { naira, CATEGORIES, SUBCATS as ALL_SUBCATS, PRODUCTS, byId, unitPriceOf } from '@/lib/data';
@@ -156,12 +156,25 @@ export function ThemeToggle({ compact }) {
 
 function SearchBody({ v, setV, close, go, setQuery, searchHistory, addSearch, clearSearch }) {
   const { loadCatalog, catalogVersion } = useStore();
+  const [remoteSuggestions, setRemoteSuggestions] = useState([]);
   useEffect(() => {
     if (PRODUCTS.length === 0) loadCatalog?.();
   }, [loadCatalog]);
 
   const q = v.trim().toLowerCase();
-  const results = q ? PRODUCTS.filter((p) => (p.name + ' ' + p.brand + ' ' + p.category).toLowerCase().includes(q)).slice(0, 6) : [];
+  useEffect(() => {
+    if (q.length < 2) { setRemoteSuggestions([]); return; }
+    let active = true;
+    const t = setTimeout(() => {
+      productsApi.suggestions({ q })
+        .then((res) => { if (active) setRemoteSuggestions(Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []); })
+        .catch(() => {});
+    }, 180);
+    return () => { active = false; clearTimeout(t); };
+  }, [q]);
+
+  const localResults = q ? PRODUCTS.filter((p) => (p.name + ' ' + p.brand + ' ' + p.category).toLowerCase().includes(q)).slice(0, 6) : [];
+  const results = remoteSuggestions.length > 0 ? remoteSuggestions.slice(0, 6) : localResults;
   const catMatches = q ? CATEGORIES.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 4) : [];
   const recommended = (() => {
     const picked = [];
@@ -441,7 +454,28 @@ export function Header() {
   const [mobOpen, setMobOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifCount, setNotifCount] = useState(0);
+  const [notifList, setNotifList] = useState([]);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated) { setNotifCount(0); setNotifList([]); return; }
+    notificationsApi.unreadCount()
+      .then((res) => setNotifCount(Number(res?.count ?? res?.unread_count ?? 0)))
+      .catch(() => {});
+  }, [isAuthenticated]);
+
+  const toggleNotifs = async () => {
+    const next = !notifOpen;
+    setNotifOpen(next);
+    if (next && isAuthenticated) {
+      try {
+        const res = await notificationsApi.list({ per_page: 8 });
+        setNotifList(Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []);
+      } catch {}
+    }
+  };
   const navCatsRef = useRef(null);
   useEffect(() => {
     const f = () => setScrolled(window.scrollY > 10);
@@ -561,6 +595,41 @@ export function Header() {
                 </div>
               }
             </div>
+            {isAuthenticated && (
+              <div className="user-pop-wrap" onMouseLeave={() => setNotifOpen(false)}>
+                <button className="head-act icon-only" onClick={toggleNotifs} aria-label="Notifications">
+                  <span className="badge-dot">{notifCount > 0 && <i>{notifCount}</i>}<Icon name="bell" size={21} /></span>
+                </button>
+                {notifOpen && (
+                  <div className="user-pop" style={{ width: 300 }}>
+                    <div className="row between" style={{ paddingBottom: 8, borderBottom: '1px solid var(--border, rgba(0,0,0,.08))', marginBottom: 8 }}>
+                      <b style={{ fontSize: 13.5 }}>Notifications</b>
+                      {notifCount > 0 && (
+                        <button className="link-btn" style={{ fontSize: 12 }} onClick={async () => {
+                          await notificationsApi.readAll().catch(() => {});
+                          setNotifCount(0);
+                          setNotifList(list => list.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() })));
+                        }}>Mark all read</button>
+                      )}
+                    </div>
+                    {notifList.length === 0 ? (
+                      <p className="muted" style={{ fontSize: 12.5, padding: '8px 0' }}>No notifications yet.</p>
+                    ) : notifList.slice(0, 6).map(n => (
+                      <button key={n.id} className="pop-link" style={{ width: '100%', textAlign: 'left', alignItems: 'flex-start', opacity: n.read_at ? 0.65 : 1 }} onClick={async () => {
+                        if (!n.read_at) {
+                          await notificationsApi.markRead(n.id).catch(() => {});
+                          setNotifCount(c => Math.max(0, c - 1));
+                          setNotifList(list => list.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
+                        }
+                      }}>
+                        <span style={{ fontSize: 12.5 }}>{n.title || n.data?.title || n.message || 'Notification'}</span>
+                      </button>
+                    ))}
+                    <a className="pop-link" style={{ marginTop: 6, justifyContent: 'center', fontWeight: 700 }} onClick={() => { setNotifOpen(false); go('account', 'notifications'); }}>Notification settings</a>
+                  </div>
+                )}
+              </div>
+            )}
             <button className="head-act icon-only" onClick={() => go('wishlist')} aria-label="Wishlist">
               <span className="badge-dot">{wish.length > 0 && <i>{wish.length}</i>}<Icon name="heart" size={22} /></span>
             </button>

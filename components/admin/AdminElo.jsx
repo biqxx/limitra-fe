@@ -379,7 +379,14 @@ export function AdminElo() {
               <span className={'adm-pill ' + (doc.indexed ? 'ok' : 'muted')}>{doc.status}</span>
               <div className="adm-rowact">
                 <button title="Index now" onClick={() => indexDoc(doc)}><Icon name="refresh" size={15} /></button>
-                <button title="Edit document" onClick={() => setDocDraft(doc)}><Icon name="edit" size={15} /></button>
+                <button title="Edit document" onClick={async () => {
+                  try {
+                    const full = await adminAiApi.getKnowledge(doc.id);
+                    setDocDraft(full || doc);
+                  } catch {
+                    setDocDraft(doc);
+                  }
+                }}><Icon name="edit" size={15} /></button>
                 <button className="del" title="Delete document" onClick={() => removeDoc(doc)}><Icon name="trash" size={15} /></button>
               </div>
             </div>
