@@ -5,6 +5,7 @@
    `window.__admHL` cross-page row-highlight mechanism (see AdminOrders/AdminAffiliates/
    AdminInventory, the three pages that had `data-hlkey` rows). */
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from '@/components/icons/Icon';
 import { useAdminToast } from './AdminToastContext';
 import { ADMIN_SCREEN_PERMISSIONS, hasAnyPermission } from '@/lib/auth/permissions';
@@ -15,7 +16,7 @@ export const ADMIN_ORDERS = [];
 
 export const ADMIN_NAV = [
 ['Overview', [['dashboard', 'Dashboard', 'grid'], ['analytics', 'Analytics', 'spark']]],
-['Catalog', [['products', 'Products', 'bag'], ['categories', 'Categories', 'list'], ['sourcing', 'Product sourcing', 'search'], ['procurement', 'Procurement', 'package'], ['pricing', 'Pricing rules', 'dollar'], ['inventory', 'Inventory', 'package'], ['orders', 'Orders', 'truck'], ['returns', 'Returns & Refunds', 'refresh'], ['coupons', 'Coupons & Promos', 'tag'], ['delivery', 'Delivery & Shipping', 'truck'], ['reviews', 'Product Reviews', 'star']]],
+['Catalog', [['products', 'Products', 'bag'], ['categories', 'Categories', 'list'], ['sourcing', 'Product sourcing', 'search'], ['sourcing-queue', 'Product queue', 'clock'], ['procurement', 'Procurement', 'package'], ['pricing', 'Pricing rules', 'dollar'], ['inventory', 'Inventory', 'package'], ['orders', 'Orders', 'truck'], ['returns', 'Returns & Refunds', 'refresh'], ['coupons', 'Coupons & Promos', 'tag'], ['delivery', 'Delivery & Shipping', 'truck'], ['reviews', 'Product Reviews', 'star']]],
 ['People & Stores', [['customers', 'Customers', 'user'], ['staff', 'Staff & Team', 'user'], ['affiliates', 'Affiliates', 'share'], ['referrals', 'Referrals', 'dollar'], ['microstores', 'MicroStores', 'store'], ['celebrity-stores', 'Celebrity Stores', 'star']]],
 ['Engagement', [['spin', 'Spin & Win', 'gift'], ['videos', 'Videos', 'video'], ['elo', 'Elo AI', 'headset']]],
 ['System', [['cms', 'Content', 'edit'], ['careers', 'Careers', 'user'], ['roles', 'Roles & Access', 'lock'], ['reports', 'Reports', 'download'], ['support', 'Support Tickets', 'headset'], ['activity', 'Activity Log', 'clock'], ['queues', 'Queue Monitor', 'refresh'], ['notifications', 'Notifications', 'bell'], ['mail-logs', 'Mail Logs', 'info'], ['settings', 'Settings', 'lock']]]];
@@ -157,6 +158,7 @@ export function AdmSelect({ value, options, onChange, creatable, onCreate, compa
   const [coords, setCoords] = useState(null);
   const ref = useRef(null);
   const trigRef = useRef(null);
+  const popRef = useRef(null);
   const place = () => {
     if (!trigRef.current) return;
     const r = trigRef.current.getBoundingClientRect();
@@ -166,7 +168,10 @@ export function AdmSelect({ value, options, onChange, creatable, onCreate, compa
   useEffect(() => {
     if (!open) return;
     place();
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setAdding(false); } };
+    const onDoc = (e) => {
+      if ((ref.current && ref.current.contains(e.target)) || (popRef.current && popRef.current.contains(e.target))) return;
+      setOpen(false); setAdding(false);
+    };
     const onKey = (e) => { if (e.key === 'Escape') { setOpen(false); setAdding(false); } };
     const onScroll = () => place();
     document.addEventListener('mousedown', onDoc);
@@ -190,8 +195,8 @@ export function AdmSelect({ value, options, onChange, creatable, onCreate, compa
           ? <><Icon name={icon || 'sort'} size={16} /><Icon name="chevdown" size={13} className="adm-sel-chev" /></>
           : <><span>{cur ? cur.label : 'Select…'}</span><Icon name="chevdown" size={15} className="adm-sel-chev" /></>}
       </button>
-      {open && coords && (
-          <div className="adm-sel-pop fixed" role="listbox" style={{ position: 'fixed', left: coords.left, top: coords.top, width: coords.width }}>
+      {open && coords && typeof document !== 'undefined' && createPortal(
+          <div ref={popRef} className="adm-sel-pop fixed" role="listbox" style={{ position: 'fixed', left: coords.left, top: coords.top, width: coords.width, maxHeight: `min(260px, calc(100vh - ${Math.round(coords.top + 12)}px))`, overflowY: 'auto' }}>
             {compact && title && <div className="adm-sel-title">{title}</div>}
             {norm.map(o => (
               <button type="button" key={o.value} role="option" aria-selected={o.value === value}
@@ -208,7 +213,8 @@ export function AdmSelect({ value, options, onChange, creatable, onCreate, compa
             ) : (
               <button type="button" className="adm-sel-opt create" onClick={() => setAdding(true)}><Icon name="plus" size={15} /> New category</button>
             ))}
-          </div>
+          </div>,
+          document.body
       )}
     </div>
   );

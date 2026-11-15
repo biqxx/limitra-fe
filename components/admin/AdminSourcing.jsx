@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Icon } from '@/components/icons/Icon';
 import { sourcingApi, adminProductsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
@@ -165,7 +166,11 @@ export function AdminSourcing() {
   }, [page, pagination, results.length]);
 
   return <div className="src-page">
-    <AdmHead title="Product sourcing" sub="Search suppliers, then let AI rewrite and save selected products as catalog drafts in the background." />
+    <AdmHead title="Product sourcing" sub="Search suppliers, then let AI rewrite and save selected products as catalog drafts in the background.">
+      <Link href="/admin/sourcing-queue" className="adm-btn ghost">
+        <Icon name="clock" size={15} /> Product queue{jobs.length > 0 ? ` (${jobs.length})` : ''}
+      </Link>
+    </AdmHead>
 
     <section className="panel src-search-panel">
       <form className="src-search" onSubmit={event => { event.preventDefault(); runSearch(1); }}>
@@ -201,11 +206,6 @@ export function AdminSourcing() {
       <div className="src-pagination"><button className="adm-btn ghost" disabled={searching || page <= 1} onClick={() => runSearch(page - 1)}><Icon name="chevleft" size={15} /> Previous</button><span>Page {page}</span><button className="adm-btn ghost" disabled={searching || !hasNext} onClick={() => runSearch(page + 1)}>Next <Icon name="chevright" size={15} /></button></div>
     </section>}
 
-    {jobs.length > 0 && <section className="src-review-section">
-      <div className="src-section-head"><div><h2>Background queue</h2><p>You can leave this page. The server will keep processing these products.</p></div><button className="adm-btn ghost" onClick={() => loadJobs().catch(error => toast(messageFrom(error)))}><Icon name="refresh" size={15} /> Refresh</button></div>
-      <div className="src-review-list">{jobs.map(job => <SourcingJob key={job.id} job={job} onRetry={() => queueProducts([job])} onReview={() => openReview(job.product_id)} />)}</div>
-    </section>}
-
     {reviewing && <ProductEditDrawer
       key={`${reviewing.id}:${(reviewing._raw?.sources || []).map(source => source.id).join(',')}`}
       draft={reviewing}
@@ -224,9 +224,174 @@ export function AdminSourcing() {
   </div>;
 }
 
-function SourcingJob({ job, onRetry, onReview }) {
+export function AdminSourcingQueue() {
+  const toast = useAdminToast();
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('All');
+  const [deletingId, setDeletingId] = useState(null);
+  const [reviewing, setReviewing] = useState(null);
+
+  const loadJobs = useCallback(async () => {
+    try {
+      const payload = await sourcingApi.jobs({ per_page: 50 });
+      setJobs(payload?.items || []);
+    } catch (error) {
+      toast(messageFrom(error));
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    loadJobs();
+  }, [loadJobs]);
+
+  const hasActiveJobs = jobs.some(job => ['queued', 'processing'].includes(job.status));
+  useEffect(() => {
+    if (!hasActiveJobs) return undefined;
+    const timer = window.setInterval(() => loadJobs(), 4000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveJobs, loadJobs]);
+
+  const openReview = async (id) => {
+    if (id == null) return;
+    try {
+      const detail = await adminProductsApi.get(id);
+      setReviewing(productToDraft(mapAdminProduct(detail)));
+    } catch (error) {
+      toast(messageFrom(error));
+    }
+  };
+
+  const retryJob = async (job) => {
+    try {
+      const queued = await sourcingApi.queue({
+        products: [{ source: productSource(job), external_product_id: productId(job) }],
+      });
+      setJobs(current => mergeJobs(current, Array.isArray(queued) ? queued : []));
+      toast('Product re-queued for AI rewriting.');
+    } catch (error) {
+      toast(messageFrom(error));
+    }
+  };
+
+  const deleteJob = async (job) => {
+    setDeletingId(job.id);
+    try {
+      await sourcingApi.deleteJob(job.id);
+      setJobs(current => current.filter(item => item.id !== job.id));
+      toast('Item removed from product queue.');
+    } catch (error) {
+      toast(messageFrom(error));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const filtered = jobs.filter(job => {
+    if (tab === 'Queued') return ['queued', 'processing'].includes(job.status);
+    if (tab === 'Completed') return job.status === 'completed';
+    if (tab === 'Failed') return job.status === 'failed';
+    return true;
+  });
+
+  return <div className="src-page">
+    <AdmHead title="Product queue" sub="Background AI sourcing jobs. Review completed drafts, retry failed items, or remove items from the queue.">
+      <Link href="/admin/sourcing" className="adm-btn ghost"><Icon name="search" size={15} /> Back to sourcing</Link>
+      <button className="adm-btn ghost" onClick={() => loadJobs()}><Icon name="refresh" size={15} /> Refresh</button>
+    </AdmHead>
+
+    <div className="adm-filters">
+      {['All', 'Queued', 'Completed', 'Failed'].map(t => (
+        <button key={t} className={'adm-chip' + (tab === t ? ' on' : '')} onClick={() => setTab(t)}>{t}</button>
+      ))}
+    </div>
+
+    {loading ? (
+      <div className="panel" style={{ padding: 28, textAlign: 'center' }}><span className="muted">Loading product queue…</span></div>
+    ) : filtered.length === 0 ? (
+      <div className="src-empty">
+        <Icon name="clock" size={28} />
+        <b>No items in {tab === 'All' ? 'the product queue' : `${tab.toLowerCase()} status`}</b>
+        <span>Queue products from <Link href="/admin/sourcing" className="link-btn">Product sourcing</Link> to see them here.</span>
+      </div>
+    ) : (
+      <div className="src-review-list">
+        {filtered.map(job => (
+          <SourcingJob
+            key={job.id}
+            job={job}
+            deleting={deletingId === job.id}
+            onRetry={() => retryJob(job)}
+            onReview={() => openReview(job.product_id)}
+            onDelete={() => deleteJob(job)}
+          />
+        ))}
+      </div>
+    )}
+
+    {reviewing && <ProductEditDrawer
+      key={`${reviewing.id}:${(reviewing._raw?.sources || []).map(source => source.id).join(',')}`}
+      draft={reviewing}
+      onClose={() => setReviewing(null)}
+      onSave={async (d) => {
+        try {
+          const pid = await saveAdminProduct(d, toast);
+          if (pid == null) return;
+          setReviewing(null);
+          await loadJobs();
+        } catch (error) {
+          toast(messageFrom(error));
+        }
+      }}
+    />}
+  </div>;
+}
+
+function SourcingJob({ job, deleting, onRetry, onReview, onDelete }) {
   const title = job.enhanced_content?.name || job.supplier_product?.title || `${sourceLabel(job.supplier)} product ${job.external_product_id}`;
-  if (job.status === 'completed') return <div className="panel src-review-done"><Icon name="check" size={20} stroke={3} /><div><b>{title}</b><span>{job.warning || 'AI rewrite completed and the product was added as a draft.'}</span></div><button className="adm-btn ghost" onClick={onReview}>Review product</button></div>;
-  if (job.status === 'failed') return <div className="panel src-review-error"><Icon name="info" size={20} /><div><b>{title}</b><span>{job.error || 'This product could not be processed.'}</span></div><button className="adm-btn ghost" onClick={onRetry}>Retry</button></div>;
-  return <div className="panel src-review-loading"><Icon name="refresh" size={20} /><div><b>{title}</b><span>{job.status === 'processing' ? 'AI is rewriting and saving this product…' : 'Waiting for a background worker…'}</span></div></div>;
+  const delBtn = (
+    <button
+      type="button"
+      className="adm-btn ghost danger"
+      disabled={deleting}
+      onClick={onDelete}
+      title="Remove from queue"
+      aria-label="Remove from queue"
+    >
+      <Icon name="trash" size={15} /> {deleting ? 'Removing…' : 'Delete'}
+    </button>
+  );
+  if (job.status === 'completed') {
+    return (
+      <div className="panel src-review-done">
+        <Icon name="check" size={20} stroke={3} />
+        <div><b>{title}</b><span>{job.warning || 'AI rewrite completed and the product was added as a draft.'}</span></div>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="adm-btn ghost" onClick={onReview}>Review product</button>
+          {delBtn}
+        </div>
+      </div>
+    );
+  }
+  if (job.status === 'failed') {
+    return (
+      <div className="panel src-review-error">
+        <Icon name="info" size={20} />
+        <div><b>{title}</b><span>{job.error || 'This product could not be processed.'}</span></div>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="adm-btn ghost" onClick={onRetry}>Retry</button>
+          {delBtn}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="panel src-review-loading">
+      <Icon name="refresh" size={20} />
+      <div><b>{title}</b><span>{job.status === 'processing' ? 'AI is rewriting and saving this product…' : 'Waiting for a background worker…'}</span></div>
+      {delBtn}
+    </div>
+  );
 }

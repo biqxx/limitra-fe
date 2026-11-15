@@ -8,9 +8,10 @@
 import { Suspense, useState, useEffect, Fragment } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
-import { AFF, FAFF_NAV, fn, affPath } from '@/components/affiliate/Affiliate';
+import { FAFF_NAV, fn, affPath, initialsOf, AffiliateProvider, useAffiliate } from '@/components/affiliate/Affiliate';
 import { AffiliateToastProvider } from '@/components/affiliate/AffiliateToastContext';
-import { StoreProvider } from '@/components/store/StoreProvider';
+import { StoreProvider, useStore } from '@/components/store/StoreProvider';
+import { hasAffiliateAccess } from '@/lib/auth/permissions';
 // NOTE: these two stylesheets were relocated from legacy/ to styles/ as part of this
 // conversion (styles/admin.css, styles/aff-dashboard.css); the affiliate dashboard depends
 // on admin's shared .adm-* classes plus its own .aff-* additions on top (see
@@ -35,7 +36,9 @@ export default function AffiliateDashboardLayout({ children }) {
   return (
     <Suspense fallback={null}>
       <StoreProvider>
-        <AffiliateDashboardShell>{children}</AffiliateDashboardShell>
+        <AffiliateProvider>
+          <AffiliateDashboardShell>{children}</AffiliateDashboardShell>
+        </AffiliateProvider>
       </StoreProvider>
     </Suspense>
   );
@@ -44,14 +47,17 @@ export default function AffiliateDashboardLayout({ children }) {
 function AffiliateDashboardShell({ children }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { user, isAuthenticated, authLoading, logout } = useStore();
+  const { dashboard, availableBalance } = useAffiliate() || {};
 
-  /* route guard, affiliate (or super admin) only */
+  /* route guard — real session + affiliate role check */
+  const allowedAffiliate = isAuthenticated && hasAffiliateAccess(user);
   useEffect(() => {
-    let aff = null, adm = null;
-    try { aff = JSON.parse(localStorage.getItem('lim_affiliate') || 'null'); } catch (e) {}
-    try { adm = JSON.parse(localStorage.getItem('lim_admin') || 'null'); } catch (e) {}
-    if (!aff && !adm) { router.replace('/access-denied?need=affiliate'); }
-  }, [router]);
+    if (authLoading) return;
+    if (!allowedAffiliate) {
+      router.replace('/access-denied?need=affiliate');
+    }
+  }, [authLoading, allowedAffiliate, router]);
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
@@ -62,11 +68,21 @@ function AffiliateDashboardShell({ children }) {
   useEffect(() => { document.documentElement.setAttribute('data-theme', theme); try { localStorage.setItem('lim_theme', theme); } catch (e) {} }, [theme]);
   useEffect(() => { setMobOpen(false); window.scrollTo(0, 0); }, [pathname]);
 
+  if (authLoading || !allowedAffiliate) return null;
+
+  const displayName = user?.name || user?.username || 'Affiliate';
+  const displayEmail = user?.email || '';
+  const initials = initialsOf(displayName);
+  const tierLabel = dashboard?.current_tier || 'Bronze';
+
   const go = (p) => { router.push(affPath(p)); };
   const isActive = (key) => pathname === affPath(key);
   const currentKey = FAFF_NAV.flatMap(([, items]) => items).find(([key]) => isActive(key))?.[0] || 'dashboard';
 
-  const signOut = () => { try { localStorage.removeItem('lim_affiliate'); } catch (e) {} window.location.href = '/'; };
+  const signOut = async () => {
+    try { await logout(); } catch (e) {}
+    router.replace('/');
+  };
 
   return (
     <AffiliateToastProvider>
@@ -88,17 +104,17 @@ function AffiliateDashboardShell({ children }) {
         <div className="adm-main">
           <div className="adm-top">
             <button className="adm-burger" onClick={() => { if (window.matchMedia('(max-width: 860px)').matches) setMobOpen(o => !o); else setCollapsed(c => !c); }} aria-label="Toggle menu"><Icon name="menu" size={20} /></button>
-            <div className="aff-balance-chip"><Icon name="card" size={15} /> Balance <b>{fn(86400)}</b><button className="aff-bal-wd" onClick={() => go('withdraw')}>Withdraw</button></div>
+            <div className="aff-balance-chip"><Icon name="card" size={15} /> Balance <b>{fn(availableBalance || 0)}</b><button className="aff-bal-wd" onClick={() => go('withdraw')}>Withdraw</button></div>
             <div className="adm-top-actions">
               <a className="adm-icon-btn" href="/" title="View store"><Icon name="store" size={19} /></a>
               <button className="adm-icon-btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} title="Theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} /></button>
               <div className="adm-acct-wrap">
-                <button className="adm-avatar" onClick={() => setAcctOpen(o => !o)}>{AFF.initials}</button>
+                <button className="adm-avatar" onClick={() => setAcctOpen(o => !o)}>{initials}</button>
                 {acctOpen && (<>
                   <div className="adm-notif-scrim" onClick={() => setAcctOpen(false)} />
                   <div className="adm-acct" role="menu">
-                    <div className="adm-acct-head"><span className="adm-avatar" style={{ width: 42, height: 42 }}>{AFF.initials}</span><div><b>{AFF.name}</b><small>{AFF.email}</small></div></div>
-                    <div className="adm-acct-role"><span className="adm-pill info">{AFF.tier} affiliate</span></div>
+                    <div className="adm-acct-head"><span className="adm-avatar" style={{ width: 42, height: 42 }}>{initials}</span><div><b>{displayName}</b><small>{displayEmail}</small></div></div>
+                    <div className="adm-acct-role"><span className="adm-pill info">{tierLabel} affiliate</span></div>
                     <button className="adm-acct-item" onClick={() => { go('settings'); setAcctOpen(false); }}><Icon name="lock" size={16} /> Profile &amp; settings</button>
                     <button className="adm-acct-item" onClick={() => { go('withdraw'); setAcctOpen(false); }}><Icon name="card" size={16} /> Withdraw earnings</button>
                     <a className="adm-acct-item" href="/"><Icon name="store" size={16} /> Back to store</a>

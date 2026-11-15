@@ -153,10 +153,32 @@ export function ThemeToggle({ compact }) {
 }
 
 function SearchBody({ v, setV, close, go, setQuery, searchHistory, addSearch, clearSearch }) {
+  const { loadCatalog, catalogVersion } = useStore();
+  useEffect(() => {
+    if (PRODUCTS.length === 0) loadCatalog?.();
+  }, [loadCatalog]);
+
   const q = v.trim().toLowerCase();
   const results = q ? PRODUCTS.filter((p) => (p.name + ' ' + p.brand + ' ' + p.category).toLowerCase().includes(q)).slice(0, 6) : [];
   const catMatches = q ? CATEGORIES.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 4) : [];
-  const recommended = PRODUCTS.filter((p) => p.bestseller).slice(0, 4);
+  const recommended = (() => {
+    const picked = [];
+    const seen = new Set();
+    const pushFrom = (arr) => {
+      for (const p of arr) {
+        if (picked.length >= 4) break;
+        if (!p || seen.has(p.id)) continue;
+        seen.add(p.id);
+        picked.push(p);
+      }
+    };
+    pushFrom(PRODUCTS.filter((p) => p.bestseller));
+    if (picked.length < 4) pushFrom(PRODUCTS.filter((p) => p.badges?.includes('hot')));
+    if (picked.length < 4) pushFrom([...PRODUCTS].sort((a, b) => (b.rating || 0) - (a.rating || 0)));
+    if (picked.length < 4) pushFrom(PRODUCTS);
+    return picked;
+  })();
+  void catalogVersion;
   const trending = ['Apex 14 Pro', 'wireless earbuds', 'gaming laptop', 'smart bulb', 'power bank'];
   const submit = (term) => {const t = (term ?? v).trim();if (!t) return;addSearch(t);setQuery(t);close();go('search', encodeURIComponent(t));};
   const openProduct = (id) => {close();go('product', id);};
