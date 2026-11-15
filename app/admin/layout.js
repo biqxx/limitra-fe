@@ -178,7 +178,7 @@ function AdminShell({ children }) {
   };
   const signOut = async () => {
     try { await logout(); } catch (e) {}
-    window.location.href = '/';
+    router.push('/');
   };
 
   return (

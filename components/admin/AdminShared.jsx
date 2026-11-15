@@ -195,13 +195,19 @@ export function AdmSelect({ value, options, onChange, creatable, onCreate, compa
   };
   useEffect(() => {
     if (!open) return;
-    place();
+    const onScroll = () => {
+      if (!ref.current) return;
+      const r = ref.current.getBoundingClientRect();
+      const popH = popRef.current?.offsetHeight || 220;
+      const up = window.innerHeight - r.bottom < popH + 16 && r.top > popH + 16;
+      setPos({ left: r.left, width: r.width, top: up ? r.top - 6 : r.bottom + 6, up });
+    };
+    onScroll();
     const onDoc = (e) => {
       if ((ref.current && ref.current.contains(e.target)) || (popRef.current && popRef.current.contains(e.target))) return;
       setOpen(false); setAdding(false);
     };
     const onKey = (e) => { if (e.key === 'Escape') { setOpen(false); setAdding(false); } };
-    const onScroll = () => place();
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onScroll, true);

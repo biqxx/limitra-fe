@@ -1,6 +1,6 @@
 'use client';
 /* LIMITRA Affiliate Dashboard — wired to /api/affiliate/* endpoints via affiliateApi. */
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';
 import { Icon } from '@/components/icons/Icon';
@@ -111,8 +111,13 @@ export function AffiliateProvider({ children }) {
     refreshDashboard();
   }, [authLoading, allowed, refreshDashboard]);
 
+  const ctxValue = useMemo(
+    () => ({ dashboard, availableBalance, loading, error, refreshDashboard }),
+    [dashboard, availableBalance, loading, error, refreshDashboard],
+  );
+
   return (
-    <AffiliateCtx.Provider value={{ dashboard, availableBalance, loading, error, refreshDashboard }}>
+    <AffiliateCtx.Provider value={ctxValue}>
       {children}
     </AffiliateCtx.Provider>
   );
@@ -530,7 +535,9 @@ function AffPromote() {
           setPages(res?.pagination?.last_page || 1);
           setRate(Number(res?.commission_rate ?? 0));
         })
-        .catch(() => {})
+        .catch((err) => {
+          if (active) setError(messageFrom(err, 'Could not load promotable products'));
+        })
         .finally(() => { if (active) setLoading(false); });
     }, 200);
     return () => { active = false; clearTimeout(timer); };
@@ -539,6 +546,7 @@ function AffPromote() {
   return (
     <>
       <FHead title="Promotion Center" sub="Browse active products and generate tracked referral links." />
+      {error && <div className="panel" style={{ borderColor: 'var(--red)', color: 'var(--red)', marginBottom: 14 }}>{error}</div>}
       <div className="adm-filters">
         <div className="adm-mini-search">
           <FIcon name="search" size={16} className="muted" />

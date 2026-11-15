@@ -440,7 +440,7 @@ export function AdminStaff() {
   ).length;
   const suspendedCount = staffList.length - activeCount;
   const pendingInvites = invitations.filter(
-    (i) => !i.accepted_at && String(i.status || 'pending').toLowerCase() === 'pending'
+    (i) => !i.accepted_at && !i.revoked_at && ['pending', 'queued', 'sent'].includes(String(i.status || 'pending').toLowerCase())
   ).length;
 
   const resendInvite = async (inv) => {
@@ -646,10 +646,12 @@ export function AdminStaff() {
                   ) : (
                     shownInvites.map((inv) => {
                       const invStatus = String(
-                        inv.accepted_at ? 'accepted' : inv.status || 'pending'
+                        inv.accepted_at ? 'accepted' : inv.revoked_at ? 'revoked' : inv.status || 'pending'
                       ).toLowerCase();
                       const pillClass =
-                        invStatus === 'accepted' ? 'ok' : invStatus === 'expired' ? 'bad' : 'warn';
+                        invStatus === 'accepted' ? 'ok'
+                          : (invStatus === 'expired' || invStatus === 'revoked' || invStatus === 'failed') ? 'bad'
+                          : 'warn';
                       return (
                         <tr key={inv.id}>
                           <td>
@@ -678,7 +680,7 @@ export function AdminStaff() {
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                              {invStatus !== 'accepted' && (
+                              {invStatus !== 'accepted' && invStatus !== 'revoked' && (
                                 <button
                                   className="adm-btn ghost"
                                   disabled={busyId === `resend-${inv.id}`}
@@ -687,13 +689,15 @@ export function AdminStaff() {
                                   Resend
                                 </button>
                               )}
-                              <button
-                                className="adm-btn ghost"
-                                disabled={busyId === `revoke-${inv.id}`}
-                                onClick={() => revokeInvite(inv)}
-                              >
-                                Revoke
-                              </button>
+                              {invStatus !== 'accepted' && invStatus !== 'revoked' && (
+                                <button
+                                  className="adm-btn ghost"
+                                  disabled={busyId === `revoke-${inv.id}`}
+                                  onClick={() => revokeInvite(inv)}
+                                >
+                                  Revoke
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>

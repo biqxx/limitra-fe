@@ -706,14 +706,18 @@ function Referrals() {
           <p className="muted" style={{ fontSize: 14 }}>No referrals yet, share your link to start earning.</p>
         ) : (
           <div className="ref-list">
-            {referral.referrals.map((r, i) => (
-              <div className="ref-row" key={i}>
-                <span className="ref-av">{r.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}</span>
-                <div className="ref-row-main"><b>{r.name}</b><small className="muted">{r.date}</small></div>
-                <StatusPill status={r.status === 'Completed' ? 'Delivered' : 'Processing'} />
-                <b className="ref-reward">{r.reward > 0 ? '+' + naira(r.reward) : 'Pending'}</b>
+            {referral.referrals.map((r, i) => {
+              const name = String(r?.name || r?.username || r?.email || 'User');
+              const initials = name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'U';
+              return (
+              <div className="ref-row" key={r?.id ?? i}>
+                <span className="ref-av">{initials}</span>
+                <div className="ref-row-main"><b>{name}</b><small className="muted">{r?.date || ''}</small></div>
+                <StatusPill status={r?.status === 'Completed' ? 'Delivered' : 'Processing'} />
+                <b className="ref-reward">{r?.reward > 0 ? '+' + naira(r.reward) : 'Pending'}</b>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

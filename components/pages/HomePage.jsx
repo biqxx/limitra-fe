@@ -336,7 +336,7 @@ function FlashStack({ deals }) {
   for (let d = Math.min(2, n - 1); d >= 0; d--) {
     const idx = (top + d) % n;
     const isTop = d === 0;
-    const off = flyOut ? flyOut * (window.innerWidth || 400) : drag;
+    const off = flyOut ? flyOut * ((typeof window !== 'undefined' && window.innerWidth) || 400) : drag;
     const rot = isTop ? off * 0.05 : 0;
     const style = isTop
       ? { transform: `translateX(${off}px) rotate(${rot}deg)`, transition: (flyOut || drag === 0) ? 'transform .26s cubic-bezier(.22,1,.36,1)' : 'none', zIndex: 30, opacity: flyOut ? 0 : 1 }

@@ -236,12 +236,12 @@ function HighlightCard({ video, onOpen }) {
   const [hover, setHover] = useState(false);
   const [prog, setProg] = useState(0);
   useEffect(() => {
-    if (!hover) { setProg(0); return; }
+    if (!hover) return;
     const id = setInterval(() => setProg(p => (p >= 100 ? 0 : p + 1.2)), 80);
     return () => clearInterval(id);
   }, [hover]);
   return (
-    <button className={'vhl' + (hover ? ' playing' : '')} onClick={onOpen} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+    <button className={'vhl' + (hover ? ' playing' : '')} onClick={onOpen} onMouseEnter={() => setHover(true)} onMouseLeave={() => { setHover(false); setProg(0); }}>
       <div className="vhl-media">
         <img src={VID_POSTER[video.id]} alt={video.title} className="vhl-img" />
         <span className="vhl-scrim" />

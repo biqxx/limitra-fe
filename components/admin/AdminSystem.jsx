@@ -384,12 +384,15 @@ function InviteStaffDrawer({ roles, onInvited, onClose }) {
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    if (!email.trim()) return;
+    if (!name.trim() || !email.trim()) {
+      addToast('Enter both full name and email address');
+      return;
+    }
     setSaving(true);
     try {
       await adminRolesApi.inviteStaff({
         email: email.trim(),
-        name: name.trim() || undefined,
+        name: name.trim(),
         role_id: roleId ? Number(roleId) : undefined,
       });
       addToast('Staff invitation sent');
@@ -422,7 +425,7 @@ function InviteStaffDrawer({ roles, onInvited, onClose }) {
         </div>
         <div className="adm-drawer-f">
           <button className="adm-btn ghost" onClick={onClose} disabled={saving}>Cancel</button>
-          <button className="adm-btn primary" onClick={submit} disabled={saving || !email.trim()}>{saving ? 'Sending…' : 'Send invite'}</button>
+          <button className="adm-btn primary" onClick={submit} disabled={saving || !name.trim() || !email.trim()}>{saving ? 'Sending…' : 'Send invite'}</button>
         </div>
       </aside>
     </>

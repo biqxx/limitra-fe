@@ -36,25 +36,24 @@ export function Stars({ value = 0, size = 13 }) {
 
 export function DiscountTimer({ endsAt, remainingSeconds, compact }) {
   const targetMs = endsAt ? new Date(endsAt).getTime() : null;
-  const computeLeft = () => {
-    if (targetMs && !Number.isNaN(targetMs)) return Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
-    if (remainingSeconds != null) return Math.max(0, Number(remainingSeconds));
-    return null;
-  };
-  const [secs, setSecs] = useState(computeLeft);
+  const [secs, setSecs] = useState(null);
 
   useEffect(() => {
-    setSecs(computeLeft());
-    if (!targetMs && remainingSeconds == null) return;
+    const computeLeft = () => {
+      if (targetMs && !Number.isNaN(targetMs)) return Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
+      if (remainingSeconds != null) return Math.max(0, Number(remainingSeconds));
+      return null;
+    };
+    const initId = setTimeout(() => setSecs(computeLeft()), 0);
+    if (!targetMs && remainingSeconds == null) return () => clearTimeout(initId);
     const id = setInterval(() => {
       setSecs((prev) => {
         if (targetMs && !Number.isNaN(targetMs)) return Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
         return prev != null && prev > 0 ? prev - 1 : 0;
       });
     }, 1000);
-    return () => clearInterval(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endsAt, remainingSeconds]);
+    return () => { clearTimeout(initId); clearInterval(id); };
+  }, [targetMs, remainingSeconds]);
 
   if (secs == null || secs <= 0) return null;
   const d = Math.floor(secs / 86400);

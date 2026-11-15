@@ -269,12 +269,8 @@ export function AuthPage({ mode = 'signin' }) {
       return;
     }
 
-    // social sign-in / sign-up and their OTP step have no backend yet — stays simulated
-    setTimeout(() => {
-      setLoading(false);
-      if (m === 'otp') {toast('Verified!');go('account');return;}
-      if (isSocial) {toast(`Code sent via ${idm}`);setOtpFrom('social');setM('otp');}
-    }, 900);
+    setLoading(false);
+    toast('Social sign-in is not available yet — please sign in with your email.', 'error');
   };
 
   const resendCode = async () => {

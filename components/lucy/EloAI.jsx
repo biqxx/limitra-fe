@@ -282,7 +282,7 @@ export function EloAI() {
             {busy && (
               <div className="lucy-msg assistant">
                 <span className="lucy-msg-av"><span className="lucy-av-text sm">Elo</span></span>
-                <div className="lucy-bubble typing">{pending.length || msgs[msgs.length - 1]?.images ? <span className="lucy-analyzing"><span className="lucy-spin" /> Looking at your photo…</span> : <><i /><i /><i /></>}</div>
+                <div className="lucy-bubble typing">{(pending.length > 0 || (msgs[msgs.length - 1]?.images?.length ?? 0) > 0) ? <span className="lucy-analyzing"><span className="lucy-spin" /> Looking at your photo…</span> : <><i /><i /><i /></>}</div>
               </div>
             )}
           </div>

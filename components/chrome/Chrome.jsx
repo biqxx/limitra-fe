@@ -304,12 +304,12 @@ function SearchModal({ open, onClose }) {
 }
 
 function MegaMenu({ onClose }) {
-  const { go } = useStore();
+  const { go, catalogLoading } = useStore();
   return (
     <div className="mega" onMouseLeave={onClose}>
       <div className="mega-grid">
         {CATEGORIES.length === 0
-          ? <div className="mega-empty">Categories are coming soon — check back shortly.</div>
+          ? <div className="mega-empty">{catalogLoading ? 'Loading categories…' : 'Categories are coming soon — check back shortly.'}</div>
           : CATEGORIES.map((c) =>
           <a key={c.slug} className="mega-cat" onClick={() => {go('shop', c.slug);onClose();}}>
               <span className="mega-ic"><Icon name={CAT_ICON[c.slug]} size={20} /></span>
@@ -380,7 +380,7 @@ function MiniCart({ open, onClose }) {
 }
 
 function MobileMenu({ open, onClose }) {
-  const { go, theme, toggleTheme, user, isAuthenticated, logout } = useStore();
+  const { go, theme, toggleTheme, user, isAuthenticated, logout, catalogLoading } = useStore();
   const router = useRouter();
   const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const isAffiliate = isAuthenticated && hasAffiliateAccess(user);
@@ -396,7 +396,7 @@ function MobileMenu({ open, onClose }) {
         <div className="drawer-body">
           <div className="mm-sec">Shop by category</div>
           {CATEGORIES.length === 0
-            ? <div className="mm-empty">Categories are coming soon — check back shortly.</div>
+            ? <div className="mm-empty">{catalogLoading ? 'Loading categories…' : 'Categories are coming soon — check back shortly.'}</div>
             : CATEGORIES.map((c) =>
             <a key={c.slug} className="mm-link" onClick={() => nav('shop', c.slug)}>
                 <span className="row" style={{ gap: 12 }}><Icon name={CAT_ICON[c.slug]} size={18} />{c.name}</span>

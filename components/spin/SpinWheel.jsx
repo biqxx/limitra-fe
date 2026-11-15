@@ -1,8 +1,10 @@
 'use client';
 /* LIMITRA, Spin & Win signup reward wheel — ported from legacy/spin.jsx */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useStore } from '@/components/store/StoreProvider';
 import { rewardsApi } from '@/lib/api/endpoints';
+import { messageFrom } from '@/lib/api/errors';
 import { naira } from '@/lib/data';
 
 /* prize segments, value drives checkout discount; weight drives probability */
@@ -42,6 +44,8 @@ export function SpinWheel({ onClose }) {
   const [spinning, setSpinning] = useState(false);
   const [rot, setRot] = useState(0);
   const [result, setResult] = useState(null);
+  const spinTimerRef = useRef(null);
+  useEffect(() => () => { if (spinTimerRef.current) clearTimeout(spinTimerRef.current); }, []);
   const n = SPIN_PRIZES.length;
   const seg = 360 / n;
 
@@ -69,17 +73,15 @@ export function SpinWheel({ onClose }) {
           if (matchIdx >= 0) idx = matchIdx;
         }
       } catch (err) {
-        if (err?.status === 422 || err?.status === 409) {
-          toast(err?.message || 'You have already used your spin', 'error');
-          setSpinning(false);
-          return;
-        }
+        toast(messageFrom(err, 'Unable to spin right now'), 'error');
+        setSpinning(false);
+        return;
       }
     }
     const visualIdx = (idx - 2 + n) % n;
     const target = 360 * 6 + (360 - (visualIdx * seg + seg / 2));
     setRot(target);
-    setTimeout(() => {
+    spinTimerRef.current = setTimeout(() => {
       const basePrize = SPIN_PRIZES[idx];
       const prize = serverPrize ? { ...basePrize, label: serverPrize.label || basePrize.label, code: serverPrize.code || serverPrize.coupon_code } : basePrize;
       const code = prize.code || claimSpin(prize);
@@ -115,7 +117,7 @@ export function SpinWheel({ onClose }) {
               <button className="wheel-hub" onClick={spin} disabled={spinning} aria-label="Spin">{spinning ? '…' : 'SPIN'}</button>
             </div>
             <button className="btn btn-accent btn-block btn-lg" onClick={spin} disabled={spinning} style={{ marginTop: 22 }}>{spinning ? 'Spinning…' : 'Spin to win'}</button>
-            <p className="spin-terms">One spin per account. Rewards valid 7 days. <a>Terms apply</a>.</p>
+            <p className="spin-terms">One spin per account. Rewards valid 7 days. <Link href="/help/terms" onClick={onClose}>Terms apply</Link>.</p>
           </>
         ) : (
           <div className="spin-result">

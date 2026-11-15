@@ -462,7 +462,7 @@ export function StoreProvider({ children }) {
       toast(messageFrom(e), 'error');
       throw e;
     }
-  }, []);
+  }, [toast]);
   const removeAddress = useCallback(async (id) => {
     try {
       await addressesApi.remove(id);
@@ -471,7 +471,7 @@ export function StoreProvider({ children }) {
     } catch (e) {
       toast(messageFrom(e), 'error');
     }
-  }, []);
+  }, [toast]);
   const setPrimaryAddress = useCallback(async (id) => {
     try {
       await addressesApi.setDefault(id);
@@ -480,7 +480,7 @@ export function StoreProvider({ children }) {
     } catch (e) {
       toast(messageFrom(e), 'error');
     }
-  }, []);
+  }, [toast]);
 
   /* saved cards — also client-local. savedCardsApi is live, but creating a real
      card needs a payment-gateway tokenization step (card_token) that doesn't
@@ -498,8 +498,8 @@ export function StoreProvider({ children }) {
       return [...base, next];
     });
     toast(data.id && cardsRef.current.some(c => c.id === data.id) ? 'Card updated' : 'Card saved');
-  }, []);
-  const removeCard = useCallback((id) => { setCards(list => list.filter(c => c.id !== id)); toast('Card removed'); }, []);
+  }, [toast]);
+  const removeCard = useCallback((id) => { setCards(list => list.filter(c => c.id !== id)); toast('Card removed'); }, [toast]);
   const setPrimaryCard = useCallback((id) => { setCards(list => list.map(c => ({ ...c, primary: c.id === id }))); toast('Default card updated'); }, [toast]);
 
   /* cart ops — guests stay fully local; signed-in users hit the real backend and
@@ -577,6 +577,10 @@ export function StoreProvider({ children }) {
       setLocalCart(c => qty <= 0 ? c.filter(i => i.key !== key) : c.map(i => i.key === key ? { ...i, qty } : i));
       return;
     }
+    if (String(key).startsWith('opt-')) {
+      toast('Syncing cart item, please try again in a moment');
+      return;
+    }
     try {
       if (qty <= 0) await cartItemsApi.remove(key);
       else await cartItemsApi.updateQty(key, qty);
@@ -588,6 +592,10 @@ export function StoreProvider({ children }) {
 
   const removeItem = useCallback(async (key) => {
     if (!isAuthenticated) { setLocalCart(c => c.filter(i => i.key !== key)); return; }
+    if (String(key).startsWith('opt-')) {
+      toast('Syncing cart item, please try again in a moment');
+      return;
+    }
     try {
       await cartItemsApi.remove(key);
       await refreshRemoteCart();
@@ -646,10 +654,14 @@ export function StoreProvider({ children }) {
 
   /* referrals, referrer earns ₦5,000 store credit per completed referral; credit only offsets order totals */
   const REFERRAL_REWARD = 5000;
+  const referralRef = useRef(referral);
+  useEffect(() => { referralRef.current = referral; }, [referral]);
   // spend up to `amount` (or full balance) of credit; returns the amount actually applied
   const redeemCredit = useCallback((amount) => {
-    let applied = 0;
-    setReferral(r => { applied = Math.min(r.credit, amount); return { ...r, credit: r.credit - applied }; });
+    const applied = Math.max(0, Math.min(Number(referralRef.current?.credit) || 0, Number(amount) || 0));
+    if (applied > 0) {
+      setReferral(r => ({ ...r, credit: Math.max(0, (Number(r.credit) || 0) - applied) }));
+    }
     return applied;
   }, []);
 
@@ -723,7 +735,7 @@ export function StoreProvider({ children }) {
     ? remoteCartItems.reduce((s, it) => s + Number(it.unit_price ?? it.price ?? it.product?.price ?? 0) * (it.quantity || 0), 0)
     : localCart.reduce((s, i) => s + unitPriceOf(i, byId(i.id)) * i.qty, 0);
 
-  const value = {
+  const value = useMemo(() => ({
     theme, toggleTheme, route, go,
     user, isAuthenticated, authLoading, logout, refreshUser,
     catalogLoading, catalogVersion, loadCatalog,
@@ -738,7 +750,22 @@ export function StoreProvider({ children }) {
     referral, REFERRAL_REWARD, redeemCredit,
     rewards, spinUsed, claimSpin, redeemReward,
     promo, setPromo,
-  };
+  }), [
+    theme, toggleTheme, route, go,
+    user, isAuthenticated, authLoading, logout, refreshUser,
+    catalogLoading, catalogVersion, loadCatalog,
+    cart, addToCart, setQty, removeItem, clearCart, cartCount, cartTotal, cartId,
+    wish, toggleWish,
+    addresses, addressesLoading, loadAddresses, saveAddress, removeAddress, setPrimaryAddress,
+    cards, saveCard, removeCard, setPrimaryCard,
+    wallet, walletBalance, loadWallet,
+    toasts, toast,
+    query, setQuery,
+    searchHistory, addSearch, clearSearch,
+    referral, redeemCredit,
+    rewards, spinUsed, claimSpin, redeemReward,
+    promo,
+  ]);
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;
 }
 

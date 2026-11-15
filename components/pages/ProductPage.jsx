@@ -271,14 +271,14 @@ export function ProductPage({ id }) {
   const comboStock = comboStockRec ? Number(comboStockRec.stock) || 0 : null;
   const comboOutOfStock = comboStock != null && comboStock <= 0;
   const outOfStock = comboOutOfStock || (!variants.length && product.stock <= 0);
-  const buy = (checkout) => {
+  const buy = async (checkout) => {
     const selectedVariants = {};
     variants.forEach(g => {
       const sel = selected[g.name];
       if (sel == null) return;
       selectedVariants[g.name] = g.type === 'color' ? { label: sel.name, hex: sel.hex } : { label: sel.label };
     });
-    addToCart(product, {
+    await addToCart(product, {
       variants: selectedVariants,
       unitPrice: price,
       variantId: comboStockRec?.id ?? null,

@@ -18,9 +18,8 @@ export function trackShare(productId, source, event) {
 }
 
 function productUrl(product) {
-  // SEO-friendly, unique product URL
-  const base = location.origin + location.pathname;
-  return base + '#/product/' + product.slug;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}/product/${encodeURIComponent(product?.slug || product?.id || '')}`;
 }
 
 function shareMessage(product) {

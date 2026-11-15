@@ -1,6 +1,6 @@
 'use client';
 /* LIMITRA, Cart & Checkout flow — ported from legacy/pages-cart.jsx */
-import { Fragment, useState, useEffect } from 'react';
+import { Fragment, useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
@@ -132,11 +132,30 @@ function PromoBox({ promo, setPromo, cartId }) {
   );
 }
 
+const subscribeCredit = (cb) => {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener('storage', cb);
+  window.addEventListener('lim:credit-change', cb);
+  return () => {
+    window.removeEventListener('storage', cb);
+    window.removeEventListener('lim:credit-change', cb);
+  };
+};
+const getCreditSnapshot = () => {
+  try { return localStorage.getItem('lim_use_credit') === '1'; } catch (e) { return false; }
+};
+function useCreditToggle() {
+  const useCredit = useSyncExternalStore(subscribeCredit, getCreditSnapshot, () => false);
+  const setUseCredit = useCallback((v) => {
+    try { localStorage.setItem('lim_use_credit', v ? '1' : '0'); } catch (e) {}
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('lim:credit-change'));
+  }, []);
+  return [useCredit, setUseCredit];
+}
+
 export function CartPage() {
   const { cart, setQty, removeItem, clearCart, go, toast, cartId, promo, setPromo } = useStore();
-  const [useCredit, setUseCredit] = useState(false);
-  useEffect(() => { try { setUseCredit(localStorage.getItem('lim_use_credit') === '1'); } catch (e) {} }, []);
-  const toggleCredit = (v) => { setUseCredit(v); localStorage.setItem('lim_use_credit', v ? '1' : '0'); };
+  const [useCredit, toggleCredit] = useCreditToggle();
 
   if (cart.length === 0) {
     return (
@@ -252,9 +271,7 @@ export function CheckoutPage() {
   const [resolvingReturn, setResolvingReturn] = useState(false);
   const [placeError, setPlaceError] = useState('');
   const [idemKey] = useState(() => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()));
-  const [useCredit, setUseCreditState] = useState(false);
-  useEffect(() => { try { setUseCreditState(localStorage.getItem('lim_use_credit') === '1'); } catch (e) {} }, []);
-  const setUseCredit = (v) => { setUseCreditState(v); localStorage.setItem('lim_use_credit', v ? '1' : '0'); };
+  const [useCredit, setUseCredit] = useCreditToggle();
   const primaryAddr = addresses.find(a => a.is_default) || addresses[0];
   const [selAddr, setSelAddr] = useState(primaryAddr ? primaryAddr.id : null);
   const [email, setEmail] = useState(user?.email || '');
@@ -500,8 +517,15 @@ export function CheckoutPage() {
       }, idemKey + '-pay');
       const redirectUrl = payment?.authorization_url ?? payment?.payment_url ?? payment?.checkout_url ?? payment?.url ?? payment?.data?.authorization_url;
       if (redirectUrl) {
-        window.location.href = redirectUrl;
-        return; // navigating away
+        try {
+          const parsed = new URL(String(redirectUrl), window.location.origin);
+          if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+            window.location.href = parsed.toString();
+            return; // navigating away
+          }
+        } catch (e) {
+          // ignore malformed redirect URL
+        }
       }
 
       if (apiMethod === 'bank_transfer') {
@@ -719,7 +743,7 @@ export function CheckoutPage() {
       {addrModal && (
         <Modal title={typeof addrModal === 'string' && addrModal.startsWith('edit-') ? 'Edit address' : 'Add a new address'} sub="Where should we deliver your order?" onClose={() => setAddrModal(false)}>
           <AddressForm
-            initial={typeof addrModal === 'string' && addrModal.startsWith('edit-') ? addresses.find(a => a.id === Number(addrModal.slice(5))) : null}
+            initial={typeof addrModal === 'string' && addrModal.startsWith('edit-') ? addresses.find(a => String(a.id) === addrModal.slice(5)) : null}
             onSave={async (d) => { if (d.id) { await saveAddress(d); setSelAddr(d.id); setAddrModal(false); } else { await addNewAddress(d); } }}
             onCancel={() => setAddrModal(false)} />
         </Modal>
