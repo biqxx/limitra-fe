@@ -92,7 +92,7 @@ export function AboutPage() {
         <section className="about-sec">
           <div className="about-head">
             <span className="eyebrow">Our journey</span>
-            <h2>How far we've come</h2>
+            <h2>How far we&apos;ve come</h2>
           </div>
           <div className="about-timeline">
             {milestones.map(([yr, t, b]) => (

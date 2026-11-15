@@ -1,6 +1,7 @@
 'use client';
 /* Ported from legacy/access-denied.html */
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { Suspense } from 'react';
 
 function AccessDeniedBody() {
@@ -20,8 +21,8 @@ function AccessDeniedBody() {
         <h1 style={{ fontSize: 26, marginBottom: 10 }}>Access denied</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 15, lineHeight: 1.6, marginBottom: 26, textWrap: 'pretty' }}>{msg}</p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <a className="btn btn-primary btn-lg" href="/auth/signin">Sign in</a>
-          <a className="btn btn-outline btn-lg" href="/">Back to store</a>
+          <Link className="btn btn-primary btn-lg" href="/auth/signin">Sign in</Link>
+          <Link className="btn btn-outline btn-lg" href="/">Back to store</Link>
         </div>
       </div>
     </div>

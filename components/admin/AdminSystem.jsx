@@ -3,7 +3,7 @@
    legacy/admin-sections.jsx. `window.admToast` calls replaced with `useAdminToast()`. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
-import { adminRolesApi, adminContentApi } from '@/lib/api/endpoints';
+import { adminRolesApi, adminContentApi, adminReportsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { useStore } from '@/components/store/StoreProvider';
 import { hasPermission } from '@/lib/auth/permissions';
@@ -589,20 +589,106 @@ export function AdminRoles() {
 
 /* ---------- REPORTS ---------- */
 export function AdminReports() {
-  const reports = [['Sales report', 'Revenue, AOV, refunds', 'dollar'], ['Orders report', 'All orders & statuses', 'truck'], ['Customers report', 'Acquisition & retention', 'user'], ['Affiliates report', 'Earnings & payouts', 'share'], ['Referrals report', 'Lim Cash issued', 'gift'], ['Inventory report', 'Stock movements', 'package']];
+  const addToast = useAdminToast();
+  const [exportsList, setExportsList] = useState([]);
+  const [busyKey, setBusyKey] = useState('');
+
+  const loadReports = useCallback(async () => {
+    try {
+      const res = await adminReportsApi.list({ per_page: 20 });
+      setExportsList(asList(res));
+    } catch {
+      // Ignore if reports.read not granted
+    }
+  }, []);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadReports(); }, [loadReports]);
+
+  const generateReport = async (type, format) => {
+    const key = `${type}-${format}`;
+    setBusyKey(key);
+    try {
+      const res = await adminReportsApi.create({ type, format });
+      const created = res?.data ?? res;
+      addToast(`${type} ${format.toUpperCase()} report queued`);
+      if (created?.download_url) {
+        window.open(created.download_url, '_blank', 'noopener');
+      }
+      await loadReports();
+    } catch (err) {
+      addToast(messageFrom(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const reports = [
+    ['sales', 'Sales report', 'Revenue, AOV, refunds', 'dollar'],
+    ['orders', 'Orders report', 'All orders & statuses', 'truck'],
+    ['customers', 'Customers report', 'Acquisition & retention', 'user'],
+    ['affiliates', 'Affiliates report', 'Earnings & payouts', 'share'],
+    ['referrals', 'Referrals report', 'Lim Cash issued', 'gift'],
+    ['inventory', 'Inventory report', 'Stock movements', 'package'],
+  ];
+
   return (
     <>
-      <AdmHead title="Reports & Exports" sub="Generate and download business reports" />
-      <div className="adm-row c3">
-        {reports.map((r, i) => (
-          <div className="panel" key={i}>
-            <span className="kpi-ic" style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}><Icon name={r[2]} size={18} /></span>
-            <h3 style={{ margin: '12px 0 4px', fontSize: 16 }}>{r[0]}</h3>
-            <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>{r[1]}</p>
-            <div className="row" style={{ gap: 8 }}><button className="adm-btn ghost" style={{ flex: 1, justifyContent: 'center' }}>CSV</button><button className="adm-btn ghost" style={{ flex: 1, justifyContent: 'center' }}>Excel</button><button className="adm-btn ghost" style={{ flex: 1, justifyContent: 'center' }}>PDF</button></div>
+      <AdmHead title="Reports & Exports" sub="Generate and download business reports">
+        <button className="adm-btn ghost" onClick={loadReports}><Icon name="refresh" size={14} /> Refresh</button>
+      </AdmHead>
+      <div className="adm-row c3" style={{ marginBottom: 20 }}>
+        {reports.map(([type, title, desc, ic]) => (
+          <div className="panel" key={type}>
+            <span className="kpi-ic" style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}><Icon name={ic} size={18} /></span>
+            <h3 style={{ margin: '12px 0 4px', fontSize: 16 }}>{title}</h3>
+            <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>{desc}</p>
+            <div className="row" style={{ gap: 8 }}>
+              {['csv', 'xlsx', 'pdf'].map((fmt) => (
+                <button
+                  key={fmt}
+                  className="adm-btn ghost"
+                  style={{ flex: 1, justifyContent: 'center' }}
+                  disabled={busyKey === `${type}-${fmt}`}
+                  onClick={() => generateReport(type, fmt)}
+                >
+                  {busyKey === `${type}-${fmt}` ? '…' : fmt.toUpperCase()}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
       </div>
+      {exportsList.length > 0 && (
+        <div className="panel" style={{ padding: 0 }}>
+          <div className="panel-h" style={{ padding: '16px 20px 8px' }}><h3>Recent exports</h3></div>
+          <div className="adm-table-wrap">
+            <table className="adm-table">
+              <thead><tr><th>Report</th><th>Format</th><th>Status</th><th>Created</th><th></th></tr></thead>
+              <tbody>
+                {exportsList.map((rep) => (
+                  <tr key={rep.id}>
+                    <td><b style={{ textTransform: 'capitalize' }}>{rep.type || rep.name || 'Report'}</b></td>
+                    <td className="muted" style={{ textTransform: 'uppercase' }}>{rep.format || 'csv'}</td>
+                    <td><span className={'adm-pill ' + (rep.status === 'completed' || rep.status === 'ready' ? 'ok' : rep.status === 'failed' ? 'bad' : 'warn')}>{rep.status || 'queued'}</span></td>
+                    <td className="muted">{rep.created_at ? new Date(rep.created_at).toLocaleString() : '—'}</td>
+                    <td>
+                      <div className="adm-rowact">
+                        {(rep.download_url || rep.status === 'completed' || rep.status === 'ready') && (
+                          <button title="Download" onClick={() => window.open(rep.download_url || adminReportsApi.downloadUrl(rep.id), '_blank', 'noopener')}><Icon name="download" size={15} /></button>
+                        )}
+                        {rep.status === 'failed' && (
+                          <button title="Retry" onClick={async () => { try { await adminReportsApi.retry(rep.id); addToast('Retrying report'); loadReports(); } catch (e) { addToast(messageFrom(e)); } }}><Icon name="refresh" size={15} /></button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   );
 }

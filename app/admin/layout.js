@@ -20,6 +20,7 @@ import { Icon } from '@/components/icons/Icon';
 import { visibleAdminNav } from '@/components/admin/AdminShared';
 import { AdminToastProvider } from '@/components/admin/AdminToastContext';
 import { StoreProvider, useStore } from '@/components/store/StoreProvider';
+import { adminNotificationsApi } from '@/lib/api/endpoints';
 import { canAccessAdminRoute, firstPermittedAdminPath, hasAnyAdminAccess, routeKeyFromPath } from '@/lib/auth/permissions';
 
 const pathForKey = (key) => '/admin' + (key === 'dashboard' ? '' : '/' + key);
@@ -79,8 +80,43 @@ function AdminShell({ children }) {
 
   const [acctOpen, setAcctOpen] = useState(false);
 
-  // No notifications backend yet — starts empty rather than showing fake activity.
   const [notifs, setNotifs] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const mapNotification = (n) => {
+    const sev = String(n.severity || 'info').toLowerCase();
+    const tint = sev === 'error' || sev === 'critical' ? 'red' : sev === 'warning' ? 'amber' : sev === 'success' ? 'green' : 'blue';
+    const ic = sev === 'error' || sev === 'critical' || sev === 'warning' ? 'alert' : 'bell';
+    const actionUrl = n.action?.url || n.action?.path || null;
+    return {
+      id: n.id,
+      title: n.title || 'Notification',
+      body: n.message || '',
+      time: n.created_at ? new Date(n.created_at).toLocaleString() : '',
+      read: Boolean(n.read_at),
+      tint,
+      ic,
+      url: typeof actionUrl === 'string' && actionUrl.startsWith('/') ? actionUrl : null,
+    };
+  };
+
+  useEffect(() => {
+    if (!allowedAdmin) return;
+    let cancelled = false;
+    adminNotificationsApi.list({ per_page: 20 })
+      .then((res) => {
+        if (cancelled) return;
+        const items = Array.isArray(res?.items) ? res.items : Array.isArray(res?.data?.items) ? res.data.items : [];
+        setNotifs(items.map(mapNotification));
+        const uc = res?.unread_count ?? res?.data?.unread_count;
+        if (typeof uc === 'number') setUnreadCount(uc);
+        else setUnreadCount(items.filter((x) => !x.read_at).length);
+      })
+      .catch(() => {
+        // Ignore 403/network errors for staff without notifications.read
+      });
+    return () => { cancelled = true; };
+  }, [allowedAdmin]);
 
   const adminName = user?.username || [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.email || 'Admin';
   const primaryRole = user?.roles?.[0]?.display_name || user?.roles?.[0]?.name || user?.role || 'Staff';
@@ -93,7 +129,7 @@ function AdminShell({ children }) {
 
   if (authLoading || !allowedAdmin || !allowedRoute) return null;
 
-  const unread = notifs.filter(n => !n.read).length;
+  const unread = Math.max(unreadCount, notifs.filter(n => !n.read).length);
   const counts = { orders: 0, affiliates: 0 };
   const navGroups = visibleAdminNav(user);
 
@@ -103,14 +139,28 @@ function AdminShell({ children }) {
     router.push(target);
     setMobOpen(false);
   };
-  const notifClick = (i, nf) => {
-    setNotifs(ns => ns.map((x, j) => j === i ? { ...x, read: true } : x));
-    if (nf.go) {
+  const notifClick = async (i, nf) => {
+    if (!nf.read) {
+      setNotifs(ns => ns.map((x, j) => j === i ? { ...x, read: true } : x));
+      setUnreadCount(c => Math.max(0, c - 1));
+      if (nf.id) {
+        adminNotificationsApi.markRead(nf.id).catch(() => {});
+      }
+    }
+    if (nf.url) {
+      router.push(nf.url);
+      setMobOpen(false);
+    } else if (nf.go) {
       const target = pathForKey(nf.go);
       router.push(nf.match ? target + '?highlight=' + encodeURIComponent(nf.match) : target);
       setMobOpen(false);
     }
     setNotifOpen(false);
+  };
+  const markAllNotifsRead = async () => {
+    setNotifs(ns => ns.map(n => ({ ...n, read: true })));
+    setUnreadCount(0);
+    adminNotificationsApi.markAllRead().catch(() => {});
   };
   const signOut = async () => {
     try { await logout(); } catch (e) {}
@@ -160,7 +210,7 @@ function AdminShell({ children }) {
                   <>
                     <div className="adm-notif-scrim" onClick={() => setNotifOpen(false)} />
                     <div className="adm-notif" role="menu">
-                      <div className="adm-notif-h"><b>Notifications</b><button className="link-btn" onClick={() => setNotifs(ns => ns.map(n => ({ ...n, read: true })))}>Mark all read</button></div>
+                      <div className="adm-notif-h"><b>Notifications</b><button className="link-btn" onClick={markAllNotifsRead}>Mark all read</button></div>
                       <div className="adm-notif-list">
                         {notifs.length === 0
                           ? <div style={{ padding: '24px 20px', textAlign: 'center', color: 'var(--text-faint)', fontSize: 13.5 }}>No notifications yet.</div>
@@ -186,7 +236,7 @@ function AdminShell({ children }) {
                       <div className="adm-acct-head"><span className="adm-avatar" style={{ width: 42, height: 42 }}>{adm.initials}</span><div><b>{adm.name}</b><small>{adm.email}</small></div></div>
                       <div className="adm-acct-role"><span className="adm-pill info">{adm.role}</span></div>
                       <button className="adm-acct-item" onClick={() => { router.push('/admin/roles'); setAcctOpen(false); }}><Icon name="lock" size={16} /> Roles &amp; access</button>
-                      <button className="adm-acct-item" onClick={() => { router.push('/admin/cms'); setAcctOpen(false); }}><Icon name="edit" size={16} /> Website settings</button>
+                      <button className="adm-acct-item" onClick={() => { router.push('/admin/settings'); setAcctOpen(false); }}><Icon name="edit" size={16} /> Website settings</button>
                       <button className="adm-acct-item danger" onClick={signOut}><Icon name="lock" size={16} /> Sign out</button>
                     </div>
                   </>

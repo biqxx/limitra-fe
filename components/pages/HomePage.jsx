@@ -339,7 +339,7 @@ function FlashStack({ deals }) {
     const off = flyOut ? flyOut * (window.innerWidth || 400) : drag;
     const rot = isTop ? off * 0.05 : 0;
     const style = isTop
-      ? { transform: `translateX(${off}px) rotate(${rot}deg)`, transition: (flyOut || startX.current == null) ? 'transform .26s cubic-bezier(.22,1,.36,1)' : 'none', zIndex: 30, opacity: flyOut ? 0 : 1 }
+      ? { transform: `translateX(${off}px) rotate(${rot}deg)`, transition: (flyOut || drag === 0) ? 'transform .26s cubic-bezier(.22,1,.36,1)' : 'none', zIndex: 30, opacity: flyOut ? 0 : 1 }
       : { transform: `translateY(${d * 12}px) scale(${1 - d * 0.06})`, zIndex: 30 - d, opacity: 1 - d * 0.16, transition: 'transform .26s var(--ease), opacity .26s var(--ease)' };
     stack.push(
       <div className="flash-stack-card" key={deals[idx].id + '-' + d} style={style}
@@ -521,10 +521,11 @@ export function HomePage() {
 }
 
 function PromoteModal({ data, onClose }) {
-  const { toast, go } = useStore();
+  const { toast, go, user, referral } = useStore();
   const { p, pct, earn } = data;
   const [copied, setCopied] = useState(false);
-  const url = `https://limitra.ng/product/${p.slug || p.id}?ref=AFF12345`;
+  const refCode = user?.affiliate_code || user?.referral_code || referral?.code || '';
+  const url = `https://limitra.ng/product/${p.slug || p.id}${refCode ? `?ref=${encodeURIComponent(refCode)}` : ''}`;
   const msg = `Check out ${p.name} on Limitra — ${naira(p.price)}`;
   const enc = encodeURIComponent;
   const copy = async () => {try {await navigator.clipboard.writeText(url);} catch (e) {}setCopied(true);toast('Referral link copied');setTimeout(() => setCopied(false), 1800);};

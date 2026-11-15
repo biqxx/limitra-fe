@@ -6,6 +6,7 @@
    form + FAQ section. Keeping these in one place means the three pages stay
    visually and numerically consistent instead of drifting copies. */
 import { useState } from 'react';
+import Link from 'next/link';
 import { Icon, Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { CREATOR_PROGRAMS } from '@/lib/creatorPrograms';
@@ -142,7 +143,7 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
   const [f, setF] = useState({ name: '', email: '', channel: 'instagram', handle: '', audience: '10k-50k', about: '' });
   const [errs, setErrs] = useState({});
   const [done, setDone] = useState(false);
-  const [code] = useState(codePrefix + Math.floor(100 + Math.random() * 900));
+  const [code] = useState(() => codePrefix + Math.floor(100 + Math.random() * 900));
 
   const submit = e => {
     e.preventDefault();
@@ -167,7 +168,7 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
           <span className="muted" style={{ fontSize: 12 }}>Your referral link</span>
           <div className="aff-link-row">
             <code>{link}</code>
-            <button className="btn btn-primary btn-sm" onClick={() => toast('Link copied to clipboard')}><Icon name="share" size={15} /> Copy</button>
+            <button className="btn btn-primary btn-sm" onClick={async () => { try { await navigator.clipboard.writeText(link); } catch (e) {} toast('Link copied to clipboard'); }}><Icon name="share" size={15} /> Copy</button>
           </div>
         </div>
         <p className="muted" style={{ fontSize: 13, marginTop: 16 }}>We&rsquo;ve emailed your dashboard login to <b>{f.email}</b>.</p>
@@ -207,7 +208,7 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
         </div>
       </div>
       <button className="btn btn-primary btn-block btn-lg" type="submit" style={{ marginTop: 18 }}>Submit application <Icon name="arrowr" size={18} /></button>
-      <p className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 12 }}>By applying you agree to the {termsLabel} <a className="link-btn" style={{ display: 'inline' }}>Terms</a>.</p>
+      <p className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 12 }}>By applying you agree to the {termsLabel} <Link href="/help/terms" className="link-btn" style={{ display: 'inline' }}>Terms</Link>.</p>
     </form>
   );
 }

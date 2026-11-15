@@ -35,8 +35,12 @@ export function BarChart({ data, labels, alt }) {
 export function Donut({ segments }) {
   const total = segments.reduce((s, x) => s + x.v, 0);
   if (total === 0) return <div className="chart-empty">No data yet</div>;
-  let acc = 0;
-  const stops = segments.map((s) => {const start = acc / total * 360;acc += s.v;const end = acc / total * 360;return `${s.c} ${start}deg ${end}deg`;}).join(', ');
+  const stops = segments.reduce((state, s) => {
+    const start = (state.acc / total) * 360;
+    const nextAcc = state.acc + s.v;
+    const end = (nextAcc / total) * 360;
+    return { acc: nextAcc, parts: [...state.parts, `${s.c} ${start}deg ${end}deg`] };
+  }, { acc: 0, parts: [] }).parts.join(', ');
   return (
     <div className="donut-wrap">
       <div className="donut" style={{ background: `conic-gradient(${stops})` }}>

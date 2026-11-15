@@ -7,6 +7,7 @@
    stay in sync. */
 import { Suspense, useState, useEffect, Fragment } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { Icon } from '@/components/icons/Icon';
 import { FAFF_NAV, fn, affPath, initialsOf, AffiliateProvider, useAffiliate } from '@/components/affiliate/Affiliate';
 import { AffiliateToastProvider } from '@/components/affiliate/AffiliateToastContext';
@@ -63,6 +64,7 @@ function AffiliateDashboardShell({ children }) {
   const [mobOpen, setMobOpen] = useState(false);
   const [acctOpen, setAcctOpen] = useState(false);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMobOpen(false); window.scrollTo(0, 0); }, [pathname]);
 
   if (authLoading || !allowedAffiliate) return null;
@@ -103,7 +105,7 @@ function AffiliateDashboardShell({ children }) {
             <button className="adm-burger" onClick={() => { if (window.matchMedia('(max-width: 860px)').matches) setMobOpen(o => !o); else setCollapsed(c => !c); }} aria-label="Toggle menu"><Icon name="menu" size={20} /></button>
             <div className="aff-balance-chip"><Icon name="card" size={15} /> Balance <b>{fn(availableBalance || 0)}</b><button className="aff-bal-wd" onClick={() => go('withdraw')}>Withdraw</button></div>
             <div className="adm-top-actions">
-              <a className="adm-icon-btn" href="/" title="View store"><Icon name="store" size={19} /></a>
+              <Link className="adm-icon-btn" href="/" title="View store"><Icon name="store" size={19} /></Link>
               <button className="adm-icon-btn" onClick={toggleTheme} title="Theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} /></button>
               <div className="adm-acct-wrap">
                 <button className="adm-avatar" onClick={() => setAcctOpen(o => !o)}>{initials}</button>
@@ -114,7 +116,7 @@ function AffiliateDashboardShell({ children }) {
                     <div className="adm-acct-role"><span className="adm-pill info">{tierLabel} affiliate</span></div>
                     <button className="adm-acct-item" onClick={() => { go('settings'); setAcctOpen(false); }}><Icon name="lock" size={16} /> Profile &amp; settings</button>
                     <button className="adm-acct-item" onClick={() => { go('withdraw'); setAcctOpen(false); }}><Icon name="card" size={16} /> Withdraw earnings</button>
-                    <a className="adm-acct-item" href="/"><Icon name="store" size={16} /> Back to store</a>
+                    <Link className="adm-acct-item" href="/"><Icon name="store" size={16} /> Back to store</Link>
                     <button className="adm-acct-item danger" onClick={signOut}><Icon name="lock" size={16} /> Sign out</button>
                   </div>
                 </>)}

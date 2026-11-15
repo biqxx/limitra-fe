@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Icon } from '@/components/icons/Icon';
 import { Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
+import { newsletterApi } from '@/lib/api/endpoints';
 import { hasAnyAdminAccess } from '@/lib/auth/permissions';
 import { EmptyState, QtyStepper, Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { naira, CATEGORIES, SUBCATS as ALL_SUBCATS, PRODUCTS, byId, unitPriceOf } from '@/lib/data';
@@ -609,6 +611,26 @@ const SOCIALS = [
 export function Footer() {
   const { go, toast, user, isAuthenticated, logout } = useStore();
   const router = useRouter();
+  const [newsEmail, setNewsEmail] = useState('');
+  const [newsSaving, setNewsSaving] = useState(false);
+  const submitNewsletter = async (e) => {
+    e.preventDefault();
+    const email = newsEmail.trim();
+    if (!email || !email.includes('@')) {
+      toast('Enter a valid email address', 'error');
+      return;
+    }
+    setNewsSaving(true);
+    try {
+      await newsletterApi.subscribe({ email });
+      setNewsEmail('');
+      toast('Subscribed to Limitra updates!');
+    } catch (err) {
+      toast(err?.message || 'Could not subscribe right now', 'error');
+    } finally {
+      setNewsSaving(false);
+    }
+  };
   const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const cols = [
   ['Shop', [['Phones & Tablets', () => go('shop', 'phones')], ['Computers & Accessories', () => go('shop', 'computing')], ['Electronics', () => go('shop', 'electronics')], ['Women’s Fashion', () => go('shop', 'womens')], ['All deals', () => go('shop', 'deals')]]],
@@ -623,15 +645,15 @@ export function Footer() {
           <h3>Get the best of Limitra in your inbox</h3>
           <p className="muted">New drops, price alerts and members-only deals. No spam.</p>
         </div>
-        <form className="foot-news" onSubmit={(e) => e.preventDefault()}>
-          <input className="input" placeholder="Enter your email address" />
-          <button className="btn btn-accent">Subscribe</button>
+        <form className="foot-news" onSubmit={submitNewsletter}>
+          <input className="input" type="email" value={newsEmail} onChange={(e) => setNewsEmail(e.target.value)} placeholder="Enter your email address" disabled={newsSaving} />
+          <button className="btn btn-accent" type="submit" disabled={newsSaving}>{newsSaving ? 'Subscribing…' : 'Subscribe'}</button>
         </form>
       </div>
       <div className="wrap foot-main">
         <div className="foot-brand">
           <span className="row"><Logo height={38} /></span>
-          <p className="muted" style={{ marginTop: 14, maxWidth: 280, textWrap: 'pretty' }}>Nigeria's premium marketplace for verified, authentic products.
+          <p className="muted" style={{ marginTop: 14, maxWidth: 280, textWrap: 'pretty' }}>Nigeria&apos;s premium marketplace for verified, authentic products.
 Fast nationwide delivery.</p>
           <div className="trust-row">
             <span className="trust"><Icon name="shield" size={16} /> Buyer protection</span>
@@ -683,7 +705,7 @@ Fast nationwide delivery.</p>
       </div>
       <div className="foot-bottom wrap">
         <span>© 2026 Limitra Ltd. All rights reserved.</span>
-        <span className="row" style={{ gap: 20 }}><a>Privacy</a><a>Terms</a><a>Cookies</a></span>
+        <span className="row" style={{ gap: 20 }}><Link href="/help/privacy">Privacy</Link><Link href="/help/terms">Terms</Link><Link href="/help/cookies">Cookies</Link></span>
       </div>
     </footer>);
 

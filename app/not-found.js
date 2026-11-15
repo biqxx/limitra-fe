@@ -1,4 +1,5 @@
 /* Ported from legacy/404.html */
+import Link from 'next/link';
 export default function NotFound() {
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg)', padding: 24 }}>
@@ -18,14 +19,14 @@ export default function NotFound() {
           The page you’re looking for may have been moved, removed, or the link might be broken. Let’s get you back to shopping.
         </p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <a className="btn btn-primary btn-lg" href="/">Back to store</a>
-          <a className="btn btn-outline btn-lg" href="/shop/all">Browse products</a>
+          <Link className="btn btn-primary btn-lg" href="/">Back to store</Link>
+          <Link className="btn btn-outline btn-lg" href="/shop/all">Browse products</Link>
         </div>
         <div style={{ marginTop: 30, paddingTop: 24, borderTop: '1px solid var(--border)', display: 'flex', gap: '8px 20px', justifyContent: 'center', flexWrap: 'wrap' }}>
-          <a style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--text-muted)', cursor: 'pointer' }} href="/shop/all">Shop</a>
-          <a style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--text-muted)', cursor: 'pointer' }} href="/help">Help center</a>
-          <a style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--text-muted)', cursor: 'pointer' }} href="/help/contact">Contact us</a>
-          <a style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--text-muted)', cursor: 'pointer' }} href="/account">My account</a>
+          <Link style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--text-muted)', cursor: 'pointer' }} href="/shop/all">Shop</Link>
+          <Link style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--text-muted)', cursor: 'pointer' }} href="/help">Help center</Link>
+          <Link style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--text-muted)', cursor: 'pointer' }} href="/help/contact">Contact us</Link>
+          <Link style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--text-muted)', cursor: 'pointer' }} href="/account">My account</Link>
         </div>
       </div>
     </div>

@@ -99,7 +99,7 @@ export function VideoModal({ video, onClose }) {
 
 function VideoShare({ video, compact }) {
   const { toast } = useStore();
-  const url = location.origin + location.pathname + '#/videos';
+  const url = typeof window !== 'undefined' ? `${window.location.origin}/videos/${video.id}` : `https://limitra.ng/videos/${video.id}`;
   const msg = `Watch "${video.title}" on Limitra, ${url}`;
   const enc = encodeURIComponent;
   const opts = [

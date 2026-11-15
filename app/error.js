@@ -1,5 +1,6 @@
 'use client';
 /* Ported from legacy/500.html */
+import Link from 'next/link';
 export default function GlobalError({ reset }) {
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg)', padding: 24 }}>
@@ -20,10 +21,10 @@ export default function GlobalError({ reset }) {
         </p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button className="btn btn-primary btn-lg" onClick={() => reset()}>Try again</button>
-          <a className="btn btn-outline btn-lg" href="/">Back to store</a>
+          <Link className="btn btn-outline btn-lg" href="/">Back to store</Link>
         </div>
         <div style={{ marginTop: 30, paddingTop: 24, borderTop: '1px solid var(--border)', fontSize: 13, color: 'var(--text-faint)' }}>
-          Still stuck? <a style={{ color: 'var(--primary)', cursor: 'pointer' }} href="/help/contact">Contact our support team</a> and we’ll help right away.
+          Still stuck? <Link style={{ color: 'var(--primary)', cursor: 'pointer' }} href="/help/contact">Contact our support team</Link> and we’ll help right away.
         </div>
       </div>
     </div>

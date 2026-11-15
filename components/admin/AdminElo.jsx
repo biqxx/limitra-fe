@@ -5,14 +5,14 @@
    SuccessResponse replies) — every read is defensive. Request schemas for
    knowledge/settings/conversation-update ARE documented (unlike most of
    this API) but still unverified live. */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { adminAiApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { useStore } from '@/components/store/StoreProvider';
 import { hasPermission } from '@/lib/auth/permissions';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead, Pager, usePager } from './AdminShared';
+import { AdmHead } from './AdminShared';
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // Deliberately not toLocaleDateString — ICU-data divergence between server
@@ -56,7 +56,10 @@ function normalizeDoc(d) {
     slug: d.slug,
     category: d.category,
     content: d.content ?? '',
-    indexed: d.indexed_at != null || d.is_indexed === true,
+    status: d.status ?? (d.indexed_at != null || d.is_indexed === true ? 'indexed' : 'draft'),
+    version: d.version ?? 1,
+    token_count: d.token_count ?? 0,
+    indexed: d.status === 'indexed' || d.indexed_at != null || d.is_indexed === true,
   };
 }
 
@@ -107,48 +110,42 @@ export function AdminElo() {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
-
-  const filteredConvos = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return conversations.filter((c) => {
-      if (statusFilter !== 'all' && c.status !== statusFilter) return false;
-      if (channelFilter !== 'all' && String(c.channel || 'web').toLowerCase() !== channelFilter) return false;
-      if (!needle) return true;
-      return (
-        String(c.id).includes(needle) ||
-        (c.customer || '').toLowerCase().includes(needle) ||
-        (c.email || '').toLowerCase().includes(needle) ||
-        (c.channel || '').toLowerCase().includes(needle)
-      );
-    });
-  }, [channelFilter, conversations, q, statusFilter]);
-
-  const { shown: shownConvos, pagerProps: convoPager } = usePager(
-    filteredConvos,
-    q + section + statusFilter + channelFilter,
-  );
-  const { shown: shownDocs, pagerProps: docPager } = usePager(
-    docs.filter(d => !q || (d.title || '').toLowerCase().includes(q.toLowerCase()) || (d.category || '').toLowerCase().includes(q.toLowerCase())),
-    q + section,
-  );
+  const [convoPage, setConvoPage] = useState(1);
+  const [convoMeta, setConvoMeta] = useState(null);
+  const [docStatusFilter, setDocStatusFilter] = useState('all');
+  const [docPage, setDocPage] = useState(1);
+  const [docMeta, setDocMeta] = useState(null);
 
   const loadAll = useCallback(async () => {
     setLoadError('');
+    const convoParams = { page: convoPage, per_page: 15 };
+    if (statusFilter !== 'all') convoParams.status = statusFilter;
+    if (channelFilter !== 'all') convoParams.channel = channelFilter;
+    if (q.trim() && section === 'conversations') convoParams.search = q.trim();
+
+    const docParams = { page: docPage, per_page: 15 };
+    if (docStatusFilter !== 'all') docParams.status = docStatusFilter;
+    if (q.trim() && section === 'knowledge') docParams.search = q.trim();
+
     const [mRes, cRes, kRes, sRes] = await Promise.allSettled([
       adminAiApi.metrics(),
-      adminAiApi.listConversations({ per_page: 100 }),
-      canManageKnowledge ? adminAiApi.listKnowledge({ per_page: 100 }) : Promise.resolve([]),
+      adminAiApi.listConversations(convoParams),
+      canManageKnowledge ? adminAiApi.listKnowledge(docParams) : Promise.resolve([]),
       adminAiApi.getSettings(),
     ]);
     if (mRes.status === 'fulfilled') setMetrics(mRes.value?.data ?? mRes.value);
     if (cRes.status === 'fulfilled') {
       setConversations(asList(cRes.value).map(normalizeConversation));
+      setConvoMeta(cRes.value?.pagination ?? cRes.value?.data?.pagination ?? null);
     } else {
       const errMsg = messageFrom(cRes.reason);
       setLoadError(errMsg);
       toast(errMsg);
     }
-    if (kRes.status === 'fulfilled') setDocs(asList(kRes.value).map(normalizeDoc));
+    if (kRes.status === 'fulfilled') {
+      setDocs(asList(kRes.value).map(normalizeDoc));
+      setDocMeta(kRes.value?.pagination ?? kRes.value?.data?.pagination ?? null);
+    }
     if (sRes.status === 'fulfilled') {
       const settingsData = sRes.value?.data ?? sRes.value;
       setSettings(settingsData);
@@ -159,7 +156,7 @@ export function AdminElo() {
       });
     }
     setLoaded(true);
-  }, [canManageKnowledge, toast]);
+  }, [canManageKnowledge, channelFilter, convoPage, docPage, docStatusFilter, q, section, statusFilter, toast]);
 
   // Initial network hydration is intentionally triggered when the page mounts.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -241,9 +238,15 @@ export function AdminElo() {
     } catch (error) { toast(messageFrom(error)); } finally { setSaving(false); }
   };
 
-  const metricEntries = metrics && typeof metrics === 'object' ? Object.entries(metrics).filter(([, v]) => typeof v === 'number' || typeof v === 'string') : [];
+  const metricCards = metrics ? [
+    ['Conversations', metrics.total_conversations ?? 0],
+    ['Messages', metrics.total_messages ?? 0],
+    ['Avg latency', `${metrics.average_latency_ms ?? 0} ms`],
+    ['Total tokens', Number(metrics.total_tokens ?? 0).toLocaleString()],
+    ['Hand-off rate', `${metrics.handoff_rate ?? 0}%`],
+  ] : [];
 
-  const handedOffCount = conversations.filter(c => c.status === 'handed_off').length;
+  const handedOffCount = metrics?.status_breakdown?.handed_off ?? conversations.filter(c => c.status === 'handed_off').length;
 
   return (
     <>
@@ -254,14 +257,26 @@ export function AdminElo() {
 
       {loadError && <div className="adm-note" style={{ marginBottom: 14, color: 'var(--red)' }}><Icon name="info" size={15} /> {loadError}</div>}
 
-      {metricEntries.length > 0 && (
-        <div className="kpi-grid" style={{ marginBottom: 18 }}>
-          {metricEntries.slice(0, 4).map(([k, v]) => (
-            <div key={k} className="cat-kpis" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: '15px 17px' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: 12.5, fontFamily: 'var(--font-display)', fontWeight: 600 }}>{humanize(k)}</span>
-              <b style={{ fontSize: 21, fontFamily: 'var(--font-display)' }}>{v}</b>
+      {metricCards.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <div className="kpi-grid">
+            {metricCards.map(([label, val]) => (
+              <div key={label} className="cat-kpis" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: '15px 17px' }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: 12.5, fontFamily: 'var(--font-display)', fontWeight: 600 }}>{label}</span>
+                <b style={{ fontSize: 21, fontFamily: 'var(--font-display)' }}>{val}</b>
+              </div>
+            ))}
+          </div>
+          {(metrics?.status_breakdown || metrics?.platform_breakdown) && (
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+              {Object.entries(metrics?.status_breakdown || {}).map(([st, cnt]) => (
+                <span key={`st-${st}`} className={'adm-pill ' + (CONVO_STATUS_CLS[st] || 'muted')}>{st.replace(/_/g, ' ')}: {cnt}</span>
+              ))}
+              {Object.entries(metrics?.platform_breakdown || {}).map(([pl, cnt]) => (
+                <span key={`pl-${pl}`} className="adm-pill info" style={{ textTransform: 'capitalize' }}>{pl || 'web'}: {cnt}</span>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -273,14 +288,14 @@ export function AdminElo() {
           <>
             <button
               className={'adm-chip' + (statusFilter === 'handed_off' ? ' on' : '')}
-              onClick={() => setStatusFilter(s => s === 'handed_off' ? 'all' : 'handed_off')}
+              onClick={() => { setConvoPage(1); setStatusFilter(s => s === 'handed_off' ? 'all' : 'handed_off'); }}
             >
               Hand-off queue ({handedOffCount})
             </button>
             <select
               className="adm-sel-native"
               value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
+              onChange={e => { setConvoPage(1); setStatusFilter(e.target.value); }}
               style={{ height: 34, borderRadius: 99, border: '1.5px solid var(--border)', padding: '0 12px', background: 'var(--surface)' }}
             >
               <option value="all">All statuses</option>
@@ -289,7 +304,7 @@ export function AdminElo() {
             <select
               className="adm-sel-native"
               value={channelFilter}
-              onChange={e => setChannelFilter(e.target.value)}
+              onChange={e => { setConvoPage(1); setChannelFilter(e.target.value); }}
               style={{ height: 34, borderRadius: 99, border: '1.5px solid var(--border)', padding: '0 12px', background: 'var(--surface)' }}
             >
               <option value="all">All channels</option>
@@ -297,10 +312,21 @@ export function AdminElo() {
             </select>
           </>
         )}
+        {section === 'knowledge' && (
+          <select
+            className="adm-sel-native"
+            value={docStatusFilter}
+            onChange={e => { setDocPage(1); setDocStatusFilter(e.target.value); }}
+            style={{ height: 34, borderRadius: 99, border: '1.5px solid var(--border)', padding: '0 12px', background: 'var(--surface)' }}
+          >
+            <option value="all">All doc statuses</option>
+            {['draft', 'indexed', 'archived'].map(st => <option key={st} value={st}>{st}</option>)}
+          </select>
+        )}
         {section !== 'settings' && (
           <div className="adm-mini-search" style={{ marginLeft: 'auto' }}>
             <Icon name="search" size={15} className="muted" />
-            <input placeholder={section === 'conversations' ? 'Search conversations…' : 'Search knowledge base…'} value={q} onChange={e => setQ(e.target.value)} />
+            <input placeholder={section === 'conversations' ? 'Search conversations…' : 'Search knowledge base…'} value={q} onChange={e => { setConvoPage(1); setDocPage(1); setQ(e.target.value); }} />
           </div>
         )}
       </div>
@@ -311,7 +337,7 @@ export function AdminElo() {
             <div className="adm-table-wrap">
               <table className="adm-table">
                 <thead><tr><th>Conversation</th><th>Customer</th><th>Channel</th><th>Date</th><th>Status</th><th></th></tr></thead>
-                <tbody>{shownConvos.map(c => (
+                <tbody>{conversations.map(c => (
                   <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => openConversation(c)}>
                     <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{c.id}</b></td>
                     <td>
@@ -327,8 +353,16 @@ export function AdminElo() {
                   </tr>
                 ))}</tbody>
               </table>
-              {shownConvos.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No conversations match your filter.</div>}
-              <Pager {...convoPager} />
+              {conversations.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No conversations match your filter.</div>}
+              {convoMeta && convoMeta.last_page > 1 && (
+                <div className="row between" style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+                  <small className="muted">Page {convoMeta.current_page} of {convoMeta.last_page} ({convoMeta.total} total)</small>
+                  <div className="row" style={{ gap: 8 }}>
+                    <button className="adm-btn ghost" disabled={convoMeta.current_page <= 1} onClick={() => setConvoPage(p => Math.max(1, p - 1))}>Previous</button>
+                    <button className="adm-btn ghost" disabled={convoMeta.current_page >= convoMeta.last_page} onClick={() => setConvoPage(p => p + 1)}>Next</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -336,13 +370,13 @@ export function AdminElo() {
 
       {section === 'knowledge' && (
         <div className="panel cat-panel">
-          {!loaded ? <div className="adm-soon"><p>Loading knowledge base…</p></div> : shownDocs.length === 0 ? (
+          {!loaded ? <div className="adm-soon"><p>Loading knowledge base…</p></div> : docs.length === 0 ? (
             <div className="adm-soon"><div className="as-ic"><Icon name="edit" size={26} /></div><h3>No knowledge documents match</h3><p>Add one so Elo can ground its answers in real store policy and info.</p></div>
-          ) : shownDocs.map(doc => (
+          ) : docs.map(doc => (
             <div className="cat-parent-row" key={doc.id}>
               <div className="cat-icon"><Icon name="edit" size={19} /></div>
-              <div className="cat-main"><b>{doc.title}</b><small>{[doc.category, doc.slug].filter(Boolean).join(' · ')}</small></div>
-              <span className={'adm-pill ' + (doc.indexed ? 'ok' : 'muted')}>{doc.indexed ? 'Indexed' : 'Not indexed'}</span>
+              <div className="cat-main"><b>{doc.title}</b><small>{[doc.category, doc.slug, `v${doc.version}`, doc.token_count ? `${doc.token_count} tokens` : null].filter(Boolean).join(' · ')}</small></div>
+              <span className={'adm-pill ' + (doc.indexed ? 'ok' : 'muted')}>{doc.status}</span>
               <div className="adm-rowact">
                 <button title="Index now" onClick={() => indexDoc(doc)}><Icon name="refresh" size={15} /></button>
                 <button title="Edit document" onClick={() => setDocDraft(doc)}><Icon name="edit" size={15} /></button>
@@ -350,7 +384,15 @@ export function AdminElo() {
               </div>
             </div>
           ))}
-          {loaded && docs.length > 0 && <Pager {...docPager} />}
+          {docMeta && docMeta.last_page > 1 && (
+            <div className="row between" style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+              <small className="muted">Page {docMeta.current_page} of {docMeta.last_page} ({docMeta.total} total)</small>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="adm-btn ghost" disabled={docMeta.current_page <= 1} onClick={() => setDocPage(p => Math.max(1, p - 1))}>Previous</button>
+                <button className="adm-btn ghost" disabled={docMeta.current_page >= docMeta.last_page} onClick={() => setDocPage(p => p + 1)}>Next</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -363,6 +405,11 @@ export function AdminElo() {
           </div>
           <div className="adm-field-row" style={{ marginBottom: 14 }}>
             <label className="adm-field"><span>High-reasoning model</span><input disabled={!canManageSettings} value={settingsDraft.high_reasoning_model} onChange={e => setSettingsDraft(c => ({ ...c, high_reasoning_model: e.target.value }))} placeholder="Default" /></label>
+            <label className="adm-field"><span>Driver</span><input disabled value={settings?.driver ?? 'openrouter'} /></label>
+          </div>
+          <div className="adm-field-row" style={{ marginBottom: 14 }}>
+            <label className="adm-field"><span>Max tokens</span><input disabled value={settings?.max_tokens ?? '1024'} /></label>
+            <label className="adm-field"><span>Context window</span><input disabled value={settings?.context_window ?? '10'} /></label>
             <label className="adm-field"><span>Max tool iterations</span><input disabled value={settings?.max_tool_iterations ?? '5'} /></label>
           </div>
           {settings?.web_greeting && (
@@ -387,6 +434,9 @@ export function AdminElo() {
           <div className="adm-list" style={{ marginBottom: 4 }}>
             <div className="adm-li"><div className="adm-li-main"><b>Customer</b><small>{convoDraft.convo.customer}{convoDraft.convo.email ? ` · ${convoDraft.convo.email}` : ''}</small></div></div>
             <div className="adm-li"><div className="adm-li-main"><b>Channel</b><small style={{ textTransform: 'capitalize' }}>{convoDraft.detail?.channel || convoDraft.convo.channel || 'web'}</small></div></div>
+            {convoDraft.detail?.support_ticket_number && (
+              <div className="adm-li"><div className="adm-li-main"><b>Support ticket</b><small>{convoDraft.detail.support_ticket_number}</small></div></div>
+            )}
           </div>
 
           <div className="adm-field">
@@ -418,6 +468,19 @@ export function AdminElo() {
                         {isUser ? 'Customer' : (msg.role || 'Elo AI')}
                       </div>
                       <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content || ''}</div>
+                      {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
+                        <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                          {msg.attachments.map((att, ai) => {
+                            const url = typeof att === 'string' ? att : (att?.url || att?.path || '');
+                            const isImg = /\.(png|jpe?g|webp|gif)(\?|$)/i.test(url) || String(att?.mime_type || '').startsWith('image/');
+                            return isImg && url ? (
+                              <img key={ai} src={url} alt="Attachment" style={{ maxWidth: 160, maxHeight: 120, borderRadius: 8, objectFit: 'cover' }} />
+                            ) : url ? (
+                              <a key={ai} href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, textDecoration: 'underline', color: isUser ? '#fff' : 'var(--accent)' }}>Attachment {ai + 1}</a>
+                            ) : null;
+                          })}
+                        </div>
+                      )}
                       {msg.created_at && (
                         <div style={{ fontSize: 10.5, opacity: 0.7, marginTop: 4 }}>{fmtDate(msg.created_at)}</div>
                       )}

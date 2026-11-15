@@ -4,11 +4,11 @@ import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
-import { Thumb, REAL_IMG, Placeholder, Stars, QtyStepper, Breadcrumbs, SectionHead, ProductCard, EmptyState } from '@/components/ui/Shared';
+import { Thumb, REAL_IMG, Placeholder, Stars, QtyStepper, Breadcrumbs, SectionHead, ProductCard, EmptyState, DiscountTimer } from '@/components/ui/Shared';
 import { ShareButton } from '@/components/share/Share';
 import { VideoStage, VID_POSTER, VIDEOS } from '@/components/video/Video';
 import { CATEGORIES, naira, byId, bySlug, byCat, effectivePrice } from '@/lib/data';
-import { productsApi } from '@/lib/api/endpoints';
+import { productsApi, reviewsApi } from '@/lib/api/endpoints';
 import { comboKey, groupsFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
 
 function mapProductDetails(product) {
@@ -40,6 +40,10 @@ function mapProductDetails(product) {
     price: Number(product.price) || 0,
     was: Number(product.compare_at_price) || 0,
     off: Number(product.discount_percentage) || 0,
+    discountActive: Boolean(product.discount_active),
+    discountStartsAt: product.discount_starts_at || null,
+    discountEndsAt: product.discount_ends_at || null,
+    discountRemainingSeconds: product.discount_remaining_seconds != null ? Number(product.discount_remaining_seconds) : null,
     stock: Number(product.stock) || 0,
     desc: product.description || '',
     description: product.description || '',
@@ -142,7 +146,7 @@ function ReviewBreakdown({ product }) {
 }
 
 export function ProductPage({ id }) {
-  const { go, addToCart, toggleWish, wish, catalogLoading } = useStore();
+  const { go, addToCart, toggleWish, wish, catalogLoading, isAuthenticated, toast } = useStore();
   const catalogProduct = bySlug(id) || byId(id);
   const [productDetails, setProductDetails] = useState(null);
   const [detailLoading, setDetailLoading] = useState(true);
@@ -160,6 +164,52 @@ export function ProductPage({ id }) {
   const [selected, setSelected] = useState({});
   const [qty, setQty] = useState(1);
   const [tab, setTab] = useState('desc');
+  const [reviewsList, setReviewsList] = useState([]);
+  const [reviewsLoaded, setReviewsLoaded] = useState(false);
+  const [revDraft, setRevDraft] = useState({ rating: 5, title: '', comment: '' });
+  const [revSaving, setRevSaving] = useState(false);
+
+  useEffect(() => {
+    if (tab !== 'reviews' || !product?.id) return;
+    let cancelled = false;
+    reviewsApi.list(product.id, { per_page: 20 })
+      .then((res) => {
+        if (cancelled) return;
+        const items = res?.items ?? res?.data?.items ?? res?.data ?? [];
+        setReviewsList(Array.isArray(items) ? items : []);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setReviewsLoaded(true); });
+    return () => { cancelled = true; };
+  }, [tab, product?.id]);
+
+  const submitReview = async (e) => {
+    e.preventDefault();
+    if (!revDraft.comment.trim()) { toast('Write a short review first', 'error'); return; }
+    setRevSaving(true);
+    try {
+      const created = await reviewsApi.create(product.id, {
+        rating: Number(revDraft.rating) || 5,
+        title: revDraft.title.trim() || undefined,
+        comment: revDraft.comment.trim(),
+      });
+      const item = created?.data ?? created;
+      if (item) setReviewsList((prev) => [item, ...prev]);
+      setRevDraft({ rating: 5, title: '', comment: '' });
+      toast('Review submitted!');
+    } catch (err) {
+      toast(err?.message || 'Could not submit review', 'error');
+    } finally {
+      setRevSaving(false);
+    }
+  };
+
+  const markHelpful = async (revId) => {
+    try {
+      await reviewsApi.helpful(revId);
+      setReviewsList((prev) => prev.map((r) => (r.id === revId ? { ...r, helpful_count: Number(r.helpful_count || 0) + 1 } : r)));
+    } catch {}
+  };
   useEffect(() => {
     if (!id) { setDetailLoading(false); return; }
 
@@ -257,9 +307,21 @@ export function ProductPage({ id }) {
             <span className="row" style={{ gap: 5, color: comboOutOfStock ? 'var(--red)' : 'var(--success)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13 }}><Icon name="check" size={14} stroke={3} /> {comboOutOfStock ? 'Out of stock for this option' : product.stock > 0 ? 'In stock' : 'Out of stock'}</span>
           </div>
 
-          <div className="pdp-price">
+          <div className="pdp-price" style={{ flexWrap: 'wrap', gap: 10 }}>
             <span className="now">{naira(price)}</span>
-            {product.was > price && <><span className="was">{naira(product.was)}</span><span className="badge badge-sale">Save {naira(product.was - price)}</span></>}
+            {product.was > price && (
+              <>
+                <span className="was">{naira(product.was)}</span>
+                <span className="badge badge-sale">-{product.off || Math.round(((product.was - price) / product.was) * 100)}%</span>
+                <span className="badge badge-sale">Save {naira(product.was - price)}</span>
+              </>
+            )}
+            {(product.discountEndsAt || product.discount_ends_at) && (
+              <DiscountTimer
+                endsAt={product.discountEndsAt || product.discount_ends_at}
+                remainingSeconds={product.discountRemainingSeconds ?? product.discount_remaining_seconds}
+              />
+            )}
           </div>
 
           {variants.length ? variants.map(g => (
@@ -342,7 +404,7 @@ export function ProductPage({ id }) {
               <ul className="feat-list">
                 <li><Icon name="check" size={16} stroke={3} /> Genuine product with official manufacturer warranty</li>
                 <li><Icon name="check" size={16} stroke={3} /> Inspected & quality-checked before dispatch</li>
-                <li><Icon name="check" size={16} stroke={3} /> Pay on delivery available in select cities</li>
+                <li><Icon name="check" size={16} stroke={3} /> Secure card &amp; bank transfer payments</li>
               </ul>
             </div>
           )}
@@ -359,7 +421,42 @@ export function ProductPage({ id }) {
           {tab === 'reviews' && (
             <div className="reviews">
               <ReviewBreakdown product={product} />
-              <EmptyState icon="star" title="No reviews yet" body="Reviews aren't connected yet — check back once they're live." />
+              {isAuthenticated ? (
+                <form className="card" onSubmit={submitReview} style={{ padding: 18, marginBottom: 18 }}>
+                  <h4 style={{ marginBottom: 10 }}>Write a review</h4>
+                  <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button key={n} type="button" className={'chip' + (revDraft.rating >= n ? ' on' : '')} onClick={() => setRevDraft((s) => ({ ...s, rating: n }))}>{n} ★</button>
+                    ))}
+                  </div>
+                  <input className="input" style={{ marginBottom: 10 }} placeholder="Headline (optional)" value={revDraft.title} onChange={(e) => setRevDraft((s) => ({ ...s, title: e.target.value }))} />
+                  <textarea className="input" rows={3} style={{ marginBottom: 10 }} placeholder="Share your experience with this product…" value={revDraft.comment} onChange={(e) => setRevDraft((s) => ({ ...s, comment: e.target.value }))} />
+                  <button type="submit" className="btn btn-primary btn-sm" disabled={revSaving}>{revSaving ? 'Submitting…' : 'Submit review'}</button>
+                </form>
+              ) : (
+                <p className="muted" style={{ marginBottom: 14, fontSize: 13.5 }}><button type="button" className="link-btn" style={{ display: 'inline' }} onClick={() => go('auth', 'signin')}>Sign in</button> to leave a verified review.</p>
+              )}
+              {!reviewsLoaded ? (
+                <p className="muted">Loading reviews…</p>
+              ) : reviewsList.length === 0 ? (
+                <EmptyState icon="star" title="No reviews yet" body="Be the first to share your thoughts on this product." />
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {reviewsList.map((r) => (
+                    <div key={r.id} className="card" style={{ padding: 16 }}>
+                      <div className="row between" style={{ marginBottom: 6 }}>
+                        <div><b>{r.author_name || r.user?.username || 'Verified buyer'}</b> · <span style={{ color: 'var(--gold)' }}>{'★'.repeat(Number(r.rating || 5))}</span></div>
+                        <small className="muted">{r.created_at ? new Date(r.created_at).toLocaleDateString() : ''}</small>
+                      </div>
+                      {r.title && <div style={{ fontWeight: 600, marginBottom: 4 }}>{r.title}</div>}
+                      <p className="muted" style={{ fontSize: 14 }}>{r.comment || r.body}</p>
+                      <div className="row" style={{ marginTop: 10 }}>
+                        <button type="button" className="link-btn" onClick={() => markHelpful(r.id)}>Helpful ({r.helpful_count || 0})</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -11,7 +11,7 @@ import { useStore } from '@/components/store/StoreProvider';
 import { naira, PRODUCTS, CATEGORIES } from '@/lib/data';
 import { getVariants, setVariants, applyStoredVariants } from '@/lib/variantsStore';
 import { cartesianCombos, defaultSku, groupsFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
-import { productsApi, categoriesApi, adminProductsApi, sourcingApi, adminOrdersApi, adminPromotionsApi } from '@/lib/api/endpoints';
+import { productsApi, categoriesApi, adminProductsApi, sourcingApi, adminOrdersApi, adminPromotionsApi, adminInventoryApi } from '@/lib/api/endpoints';
 import { hasPermission } from '@/lib/auth/permissions';
 import { messageFrom } from '@/lib/api/errors';
 import { Kpi } from '@/components/charts/Charts';
@@ -83,6 +83,11 @@ export const mapAdminProduct = (p) => {
     name: p.name,
     brand: p.brand || '',
     price: Number(p.price) || 0,
+    was: Number(p.compare_at_price) || 0,
+    discountActive: Boolean(p.discount_active),
+    discountPercentage: Number(p.discount_percentage) || 0,
+    discountStartsAt: p.discount_starts_at || null,
+    discountEndsAt: p.discount_ends_at || null,
     stock: p.stock ?? 0,
     category: p.category?.slug || 'all',
     status: p.status || 'draft',
@@ -279,7 +284,15 @@ export function AdminProducts({ editId }) {
             <tr key={p.id}>
               <td><div className="adm-prod"><span className="adm-prod-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></span><div><b>{p.name.split(',')[0]}</b><small>{p.brand ? p.brand + ' · ' : ''}{p.slug}</small></div></div></td>
               <td>{CATEGORIES.find(x => x.slug === p.category)?.name || p.category}</td>
-              <td><b>{naira(p.price)}</b></td>
+              <td>
+                <b>{naira(p.price)}</b>
+                {p.was > p.price && (
+                  <div className="row" style={{ gap: 6, marginTop: 2 }}>
+                    <small className="muted" style={{ textDecoration: 'line-through' }}>{naira(p.was)}</small>
+                    <span className="adm-pill warn" style={{ fontSize: 10.5, padding: '1px 6px' }}>-{p.discountPercentage || Math.round(((p.was - p.price) / p.was) * 100)}%</span>
+                  </div>
+                )}
+              </td>
               <td>{p.stock}</td>
               <td>{p.variants?.length
                 ? <span className="adm-pill ok">{p.variants.map(g => g.name).filter(Boolean).join(', ') || `${p.variants.length} set`}</span>
@@ -380,7 +393,7 @@ function VariantGroupRow({ group, onChange, onRemove }) {
         ))}
         {group.options.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>No options yet</span>}
       </div>
-      <p className="muted" style={{ fontSize: 11.5, marginBottom: 10, marginTop: -4 }}>Leave an option's price blank to use the product's base price when it's selected.</p>
+      <p className="muted" style={{ fontSize: 11.5, marginBottom: 10, marginTop: -4 }}>Leave an option&apos;s price blank to use the product&apos;s base price when it&apos;s selected.</p>
       <div className="adm-field-row" style={{ alignItems: 'flex-end' }}>
         <label className="adm-field" style={{ flex: 1 }}>
           <span>{group.type === 'color' ? 'Add colour' : 'Add option'}</span>
@@ -419,6 +432,18 @@ export function ProductEditDrawer({ draft, onClose, onSave }) {
   const addToast = useAdminToast();
   const [f, setF] = useState({ ...draft, variants: draft.variants || [], variantStock: draft.variantStock || {} });
   const [pricingBusy, setPricingBusy] = useState(false);
+  const toLocalDt = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const [discMode, setDiscMode] = useState('pct');
+  const [discValue, setDiscValue] = useState(() => (draft._raw?.discount_percentage > 0 ? String(draft._raw.discount_percentage) : ''));
+  const [discStartsAt, setDiscStartsAt] = useState(() => toLocalDt(draft._raw?.discount_starts_at));
+  const [discEndsAt, setDiscEndsAt] = useState(() => toLocalDt(draft._raw?.discount_ends_at));
+  const [discBusy, setDiscBusy] = useState(false);
   const initialSource = draft._raw?.sources?.[0] || null;
   const [pricingInputs, setPricingInputs] = useState({
     supplier_price: initialSource?.supplier_price || '',
@@ -538,6 +563,98 @@ export function ProductEditDrawer({ draft, onClose, onSave }) {
                 <label className="adm-field"><span>{sourced ? 'Approved / proposed price (₦)' : 'Price (₦)'}</span><input type="number" value={f.price} onChange={e => set('price', e.target.value)} disabled={sourced} />{sourced && <small className="muted">Managed by supplier pricing below.</small>}</label>
                 <label className="adm-field"><span>Stock</span><input type="number" value={f._stock} onChange={e => set('_stock', e.target.value)} /></label>
               </div>
+
+              {f.id && f.id !== 'new' && (
+                <section className="adm-supplier-card">
+                  <div className="adm-supplier-head">
+                    <div>
+                      <b>Price discount &amp; timer</b>
+                      <small className="muted" style={{ display: 'block', marginTop: 2 }}>
+                        {f._raw?.discount_active
+                          ? `Active: ${naira(Number(f.price))} (slashed from ${naira(Number(f._raw?.compare_at_price || f.price))}) · ${f._raw?.discount_ends_at ? 'Ends ' + new Date(f._raw.discount_ends_at).toLocaleString() : 'No expiry (infinite)'}`
+                          : 'Slash the selling price by percentage or fixed amount, with optional start & end timer.'}
+                      </small>
+                    </div>
+                    {f._raw?.discount_active && <span className="adm-pill ok">-{f._raw?.discount_percentage || 0}% OFF</span>}
+                  </div>
+                  <div className="adm-field-row">
+                    <label className="adm-field">
+                      <span>Discount type</span>
+                      <select value={discMode} onChange={e => setDiscMode(e.target.value)}>
+                        <option value="pct">Percentage (%)</option>
+                        <option value="price">Slashed price (₦)</option>
+                      </select>
+                    </label>
+                    <label className="adm-field">
+                      <span>{discMode === 'pct' ? 'Discount (%)' : 'New buying price (₦)'}</span>
+                      <input type="number" min="1" step="0.01" value={discValue} onChange={e => setDiscValue(e.target.value)} placeholder={discMode === 'pct' ? 'e.g. 20' : 'e.g. 40000'} />
+                    </label>
+                  </div>
+                  <div className="adm-field-row">
+                    <label className="adm-field">
+                      <span>Starts at (optional)</span>
+                      <input type="datetime-local" value={discStartsAt} onChange={e => setDiscStartsAt(e.target.value)} />
+                    </label>
+                    <label className="adm-field">
+                      <span>Ends at (blank = infinite)</span>
+                      <input type="datetime-local" value={discEndsAt} onChange={e => setDiscEndsAt(e.target.value)} />
+                    </label>
+                  </div>
+                  <div className="adm-supplier-actions">
+                    <button
+                      type="button"
+                      className="adm-btn ghost"
+                      disabled={discBusy || !discValue}
+                      onClick={async () => {
+                        const num = Number(discValue);
+                        if (!num || num <= 0) { addToast('Enter a valid discount value'); return; }
+                        setDiscBusy(true);
+                        try {
+                          const payload = discMode === 'pct' ? { discount_percentage: num } : { discounted_price: num };
+                          if (discStartsAt) payload.discount_starts_at = new Date(discStartsAt).toISOString();
+                          if (discEndsAt) payload.discount_ends_at = new Date(discEndsAt).toISOString();
+                          const res = await adminProductsApi.applyDiscount(f.id, payload);
+                          const updated = res?.data ?? res;
+                          setF(curr => ({ ...curr, price: Number(updated?.price ?? curr.price), _raw: updated || curr._raw }));
+                          addToast('Discount applied');
+                        } catch (err) {
+                          addToast(messageFrom(err));
+                        } finally {
+                          setDiscBusy(false);
+                        }
+                      }}
+                    >
+                      {discBusy ? 'Applying…' : 'Apply discount'}
+                    </button>
+                    {f._raw?.discount_active && (
+                      <button
+                        type="button"
+                        className="adm-btn ghost"
+                        style={{ color: 'var(--red)' }}
+                        disabled={discBusy}
+                        onClick={async () => {
+                          setDiscBusy(true);
+                          try {
+                            const res = await adminProductsApi.removeDiscount(f.id);
+                            const updated = res?.data ?? res;
+                            setDiscValue('');
+                            setDiscStartsAt('');
+                            setDiscEndsAt('');
+                            setF(curr => ({ ...curr, price: Number(updated?.price ?? curr.price), _raw: updated || curr._raw }));
+                            addToast('Discount removed');
+                          } catch (err) {
+                            addToast(messageFrom(err));
+                          } finally {
+                            setDiscBusy(false);
+                          }
+                        }}
+                      >
+                        Remove discount
+                      </button>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {sourced && (
                 <section className="adm-supplier-card">
@@ -988,32 +1105,72 @@ function CouponModal({ draft, onClose, onSave }) {
 /* ---------- INVENTORY ---------- */
 export function AdminInventory() {
   const addToast = useAdminToast();
-  // Reads the storefront's PRODUCTS directly below (not AdminProducts' own
-  // adminProductsApi-backed `items` state) — subscribes to context so it
-  // re-renders once the async catalog load populates it, same reasoning as
-  // ShopPage/HomePage's useStore() calls.
   useStore();
   const highlight = useSearchParams().get('highlight');
   useHighlight(highlight);
   const [q, setQ] = useState('');
   const [stat, setStat] = useState('All');
   const [sort, setSort] = useState('stock-low');
+  const [invItems, setInvItems] = useState(null);
+
+  const loadInventory = useCallback(async () => {
+    try {
+      const res = await adminInventoryApi.list({ per_page: 200 });
+      const list = res?.items ?? res?.data?.items ?? res?.data ?? [];
+      if (Array.isArray(list) && list.length > 0) {
+        setInvItems(list.map((it) => ({
+          id: it.product_id ?? it.id,
+          name: it.name || it.product_name || `Product #${it.product_id ?? it.id}`,
+          slug: it.sku || it.slug || String(it.product_id ?? it.id),
+          stock: Number(it.stock ?? it.quantity ?? it.available_stock ?? 0),
+          threshold: Number(it.low_stock_threshold ?? 6),
+        })));
+      }
+    } catch {
+      // Fallback to store PRODUCTS if /admin/inventory fails
+    }
+  }, []);
+
+  useEffect(() => { loadInventory(); }, [loadInventory]);
+
+  const sourceList = invItems || PRODUCTS;
   const stk = (p) => p.stock ?? 0;
-  const statusOf = (s) => s === 0 ? 'Out of stock' : s < 6 ? 'Low stock' : 'In stock';
-  let low = PRODUCTS.filter(p => (!q || p.name.toLowerCase().includes(q.toLowerCase()) || p.slug.toLowerCase().includes(q.toLowerCase())) && (stat === 'All' || statusOf(stk(p)) === stat));
+  const statusOf = (p) => {
+    const s = stk(p);
+    const th = p.threshold ?? 6;
+    return s === 0 ? 'Out of stock' : s < th ? 'Low stock' : 'In stock';
+  };
+  let low = sourceList.filter(p => (!q || p.name.toLowerCase().includes(q.toLowerCase()) || String(p.slug || '').toLowerCase().includes(q.toLowerCase())) && (stat === 'All' || statusOf(p) === stat));
   low = [...low].sort((a, b) => {
     if (sort === 'stock-high') return stk(b) - stk(a);
     if (sort === 'name-az') return a.name.localeCompare(b.name);
     return stk(a) - stk(b);
   });
   const { shown: invShown, pagerProps: invPager } = usePager(low, q + stat + sort);
+
+  const adjustStock = async (p) => {
+    const raw = window.prompt(`Adjust stock for ${p.name} (enter positive or negative integer):`, '10');
+    if (raw == null) return;
+    const delta = parseInt(raw, 10);
+    if (!delta || Number.isNaN(delta)) { addToast('Enter a valid non-zero number'); return; }
+    try {
+      await adminInventoryApi.adjustProduct(p.id, { quantity_delta: delta, reason: 'Admin inventory adjustment' });
+      addToast(`Stock adjusted by ${delta > 0 ? '+' : ''}${delta}`);
+      await loadInventory();
+    } catch (err) {
+      addToast(messageFrom(err));
+    }
+  };
+
   return (
     <>
-      <AdmHead title="Inventory" sub="Stock levels & alerts" />
+      <AdmHead title="Inventory" sub="Stock levels & alerts">
+        <button className="adm-btn ghost" onClick={loadInventory}><Icon name="refresh" size={14} /> Refresh</button>
+      </AdmHead>
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
-        <Kpi ic="package" tint="#0438B6" label="SKUs tracked" val={PRODUCTS.length} delta="" up />
-        <Kpi ic="info" tint="#F5A623" label="Low stock" val={PRODUCTS.filter(p => statusOf(stk(p)) === 'Low stock').length} delta="" up />
-        <Kpi ic="close" tint="#E5484D" label="Out of stock" val={PRODUCTS.filter(p => statusOf(stk(p)) === 'Out of stock').length} delta="" up />
+        <Kpi ic="package" tint="#0438B6" label="SKUs tracked" val={sourceList.length} delta="" up />
+        <Kpi ic="info" tint="#F5A623" label="Low stock" val={sourceList.filter(p => statusOf(p) === 'Low stock').length} delta="" up />
+        <Kpi ic="close" tint="#E5484D" label="Out of stock" val={sourceList.filter(p => statusOf(p) === 'Out of stock').length} delta="" up />
       </div>
       <div className="adm-filters">
         <div className="adm-mini-search"><Icon name="search" size={16} className="muted" /><input placeholder="Search products or SKU…" value={q} onChange={e => setQ(e.target.value)} /></div>
@@ -1026,11 +1183,11 @@ export function AdminInventory() {
         <div className="panel-h" style={{ padding: '18px 20px 0' }}><h3>Stock levels</h3></div>
         <div className="adm-table-wrap"><table className="adm-table">
           <thead><tr><th>Product</th><th>SKU</th><th>In stock</th><th>Status</th><th></th></tr></thead>
-          <tbody>{invShown.map((p) => { const s = stk(p); return (
+          <tbody>{invShown.map((p) => { const s = stk(p); const st = statusOf(p); return (
             <tr key={p.id} data-hlkey={p.name}><td><div className="adm-prod"><span className="adm-prod-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></span><div><b>{p.name.split(',')[0]}</b></div></div></td>
-              <td className="muted">{p.slug.slice(0, 12).toUpperCase()}</td><td>{s}</td>
-              <td><span className={'adm-pill ' + (s === 0 ? 'bad' : s < 6 ? 'warn' : 'ok')}>{statusOf(s)}</span></td>
-              <td><div className="adm-rowact"><button title="Restock" onClick={() => addToast('Restock order placed')}><Icon name="plus" size={15} /></button></div></td></tr>
+              <td className="muted">{String(p.slug || '').slice(0, 12).toUpperCase()}</td><td>{s}</td>
+              <td><span className={'adm-pill ' + (s === 0 ? 'bad' : st === 'Low stock' ? 'warn' : 'ok')}>{st}</span></td>
+              <td><div className="adm-rowact"><button title="Adjust stock" onClick={() => adjustStock(p)}><Icon name="plus" size={15} /></button></div></td></tr>
           ); })}</tbody>
         </table>{low.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No products match your filters.</div>}<Pager {...invPager} /></div>
       </div>

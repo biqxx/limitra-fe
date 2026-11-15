@@ -1,8 +1,9 @@
 'use client';
 /* LIMITRA, Careers — ported from legacy/pages-careers.jsx */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
+import { careersApi } from '@/lib/api/endpoints';
 import { EmptyState } from '@/components/ui/Shared';
 import { FField, Modal, Dropdown } from '@/components/forms/Shared';
 
@@ -48,8 +49,11 @@ const DEPT_ICON = {
 function ApplyJobForm({ job, onDone }) {
   const { toast } = useStore();
   const [f, setF] = useState({ name:'', email:'', phone:'', link:'', note:'' });
+  const [cvFile, setCvFile] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [errs, setErrs] = useState({});
-  const submit = e => {
+  const fileRef = useRef(null);
+  const submit = async e => {
     e.preventDefault();
     const er = {};
     if (!f.name.trim()) er.name = 'Enter your full name';
@@ -57,8 +61,24 @@ function ApplyJobForm({ job, onDone }) {
     if (f.phone.replace(/\D/g, '').length < 10) er.phone = 'Enter a valid phone number';
     setErrs(er);
     if (Object.keys(er).length) return;
-    toast('Application submitted, we’ll be in touch!');
-    onDone();
+    setSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append('name', f.name.trim());
+      fd.append('email', f.email.trim());
+      fd.append('phone', f.phone.trim());
+      if (f.link.trim()) fd.append('portfolio_url', f.link.trim());
+      if (f.note.trim()) fd.append('cover_letter', f.note.trim());
+      if (cvFile) fd.append('resume', cvFile);
+      if (job.id === 'open') await careersApi.applyOpen(fd);
+      else await careersApi.apply(job.id, fd);
+      toast('Application submitted, we’ll be in touch!');
+      onDone();
+    } catch (err) {
+      toast(err?.message || 'Could not submit application', 'error');
+    } finally {
+      setSaving(false);
+    }
   };
   return (
     <form onSubmit={submit}>
@@ -73,32 +93,59 @@ function ApplyJobForm({ job, onDone }) {
         </div>
         <div className="field" style={{ gridColumn: '1 / -1' }}>
           <label>Résumé / CV</label>
-          <div className="cv-drop"><Icon name="download" size={18} /> Drag &amp; drop your CV, or <span className="link-btn" style={{ display: 'inline' }}>browse</span> <small className="muted" style={{ display: 'block', marginTop: 4 }}>PDF or DOCX, max 5MB</small></div>
+          <div className="cv-drop" onClick={() => fileRef.current?.click()} style={{ cursor: 'pointer' }}>
+            <input ref={fileRef} type="file" accept=".pdf,.doc,.docx" hidden onChange={(e) => setCvFile(e.target.files?.[0] || null)} />
+            <Icon name="download" size={18} /> {cvFile ? <b>{cvFile.name}</b> : <>Drag &amp; drop your CV, or <span className="link-btn" style={{ display: 'inline' }}>browse</span></>}
+            <small className="muted" style={{ display: 'block', marginTop: 4 }}>PDF or DOCX, max 5MB</small>
+          </div>
         </div>
       </div>
       <div className="modal-foot">
-        <button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>
-        <button type="submit" className="btn btn-primary">Submit application</button>
+        <button type="button" className="btn btn-ghost" onClick={onDone} disabled={saving}>Cancel</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Submitting…' : 'Submit application'}</button>
       </div>
     </form>
   );
 }
 
 export function CareersPage() {
-  const { toast } = useStore();
+  const [jobsList, setJobsList] = useState(JOBS);
   const [q, setQ] = useState('');
   const [dept, setDept] = useState('All departments');
   const [type, setType] = useState('All types');
   const [applyJob, setApplyJob] = useState(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    careersApi.jobs({ per_page: 50 })
+      .then((res) => {
+        if (cancelled) return;
+        const items = res?.items ?? res?.data?.items ?? res?.data ?? [];
+        if (Array.isArray(items) && items.length > 0) {
+          setJobsList(items.map((j) => ({
+            id: j.id,
+            title: j.title,
+            dept: j.department || j.dept || 'General',
+            loc: j.location || j.loc || 'Lagos',
+            type: j.employment_type || j.type || 'Full-time',
+            level: j.level || 'Mid–Senior',
+            posted: j.created_at ? new Date(j.created_at).toLocaleDateString() : 'Open',
+            blurb: j.summary || j.description || '',
+          })));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const types = ['All types', 'Full-time', 'Part-time', 'Contract', 'Remote', 'Hybrid'];
   const counts = useMemo(() => {
-    const m = {}; JOBS.forEach(j => { m[j.dept] = (m[j.dept] || 0) + 1; }); return m;
-  }, []);
+    const m = {}; jobsList.forEach(j => { m[j.dept] = (m[j.dept] || 0) + 1; }); return m;
+  }, [jobsList]);
 
   const results = useMemo(() => {
     const term = q.trim().toLowerCase();
-    return JOBS.filter(j =>
+    return jobsList.filter(j =>
       (dept === 'All departments' || j.dept === dept) &&
       (type === 'All types'
         || (type === 'Remote' && /remote/i.test(j.loc))
@@ -106,7 +153,7 @@ export function CareersPage() {
         || j.type === type) &&
       (!term || (j.title + ' ' + j.dept + ' ' + j.loc + ' ' + j.blurb).toLowerCase().includes(term))
     );
-  }, [q, dept, type]);
+  }, [q, dept, type, jobsList]);
 
   const benefits = [
     ['dollar', 'Competitive pay & equity', 'Market-leading salary, performance bonus and share options so you own a piece of what you build.'],
@@ -217,7 +264,7 @@ export function CareersPage() {
             <b>Don’t see the right role?</b>
             <span className="muted">We’re always meeting great people. Send us your CV and we’ll reach out when something fits.</span>
           </div>
-          <button className="btn btn-outline" onClick={() => toast('Open application, drop your CV any time!')}>Send open application</button>
+          <button className="btn btn-outline" onClick={() => setApplyJob({ id: 'open', title: 'Open Application', dept: 'General', loc: 'Lagos / Remote', type: 'Full-time' })}>Send open application</button>
         </div>
       </div>
 

@@ -7,7 +7,7 @@ import { SocialMark } from '@/components/ui/SocialMark';
 import { Breadcrumbs, EmptyState, ProductCard } from '@/components/ui/Shared';
 import { Modal, AddressForm, CardForm, CardBrandMark, Field } from '@/components/forms/Shared';
 import { naira, SOCIAL_GLYPHS, byId } from '@/lib/data';
-import { profileApi, ordersApi, favoritesApi, sharedWishlistsApi, supportTicketsApi } from '@/lib/api/endpoints';
+import { profileApi, ordersApi, favoritesApi, sharedWishlistsApi, supportTicketsApi, privacyApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
 // GET /orders and /orders/{id} have no documented response shape (generic
@@ -145,13 +145,13 @@ function fmtDate(d) {
 }
 
 function Dashboard() {
-  const { go, wish, referral, user } = useStore();
+  const { go, wish, walletBalance, user } = useStore();
   const { orders, loaded } = useOrders();
   const stats = [
     ['package', 'Total orders', orders.length, 'orders'],
     ['truck', 'In transit', orders.filter(o => o.status === 'in_transit' || o.status === 'shipped').length, 'orders'],
     ['heart', 'Wishlist', wish.length, 'wishlist'],
-    ['limcash', 'Lim Cash', naira(referral.credit), 'referrals'],
+    ['limcash', 'Lim Cash', naira(walletBalance), 'referrals'],
   ];
   const firstName = (displayName(user).split(' ')[0]) || 'there';
   const recent = orders.slice(0, 3);
@@ -609,15 +609,51 @@ function Profile() {
 
       <div className="acct-panel" style={{ maxWidth: 560, marginTop: 20 }}>
         <h3 style={{ marginBottom: 6 }}>Password</h3>
-        <p className="muted" style={{ fontSize: 13.5, marginBottom: 16 }}>Last changed 3 months ago.</p>
+        <p className="muted" style={{ fontSize: 13.5, marginBottom: 16 }}>Update your password or reset access.</p>
         <button className="btn btn-outline btn-sm" onClick={() => go('auth', 'forgot')}>Change password</button>
+      </div>
+
+      <div className="acct-panel" style={{ maxWidth: 560, marginTop: 20 }}>
+        <h3 style={{ marginBottom: 6 }}>Privacy &amp; Data</h3>
+        <p className="muted" style={{ fontSize: 13.5, marginBottom: 16 }}>Download a copy of your account data or request account deletion.</p>
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={async () => {
+              try {
+                const res = await privacyApi.exportData();
+                const expId = res?.id ?? res?.data?.id;
+                toast(expId ? `Data export #${expId} queued — check your email.` : 'Data export requested.');
+              } catch (err) {
+                toast(messageFrom(err));
+              }
+            }}
+          >
+            Export my data
+          </button>
+          <button
+            className="btn btn-outline btn-sm"
+            style={{ color: 'var(--red)', borderColor: 'var(--red)' }}
+            onClick={async () => {
+              if (!window.confirm('Request permanent account deletion? You can cancel this before it processes.')) return;
+              try {
+                await privacyApi.requestDeletion({ reason: 'User requested via account settings' });
+                toast('Account deletion request submitted.');
+              } catch (err) {
+                toast(messageFrom(err));
+              }
+            }}
+          >
+            Request account deletion
+          </button>
+        </div>
       </div>
     </>
   );
 }
 
 function Referrals() {
-  const { referral, REFERRAL_REWARD, toast, go } = useStore();
+  const { referral, walletBalance, REFERRAL_REWARD, toast, go } = useStore();
   const link = 'limitra.ng/r/' + referral.code;
   const completed = referral.referrals.filter(r => r.status === 'Completed').length;
   const enc = encodeURIComponent;
@@ -636,7 +672,7 @@ function Referrals() {
       <div className="ref-grid">
         <div className="ref-balance">
           <span className="rb-label"><img src="/assets/limcash.png" alt="" className="limcash-ic sm" /> Lim Cash</span>
-          <span className="rb-amount">{naira(referral.credit)}</span>
+          <span className="rb-amount">{naira(walletBalance)}</span>
           <span className="rb-note">Applied automatically at checkout</span>
           <button className="btn btn-block btn-light-on-navy" onClick={() => go('shop', 'all')} style={{ marginTop: 16 }}>Shop &amp; redeem</button>
         </div>
@@ -675,7 +711,7 @@ function Referrals() {
                 <span className="ref-av">{r.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}</span>
                 <div className="ref-row-main"><b>{r.name}</b><small className="muted">{r.date}</small></div>
                 <StatusPill status={r.status === 'Completed' ? 'Delivered' : 'Processing'} />
-                <b className="ref-reward">{r.reward > 0 ? '+' + naira(r.reward) : ','}</b>
+                <b className="ref-reward">{r.reward > 0 ? '+' + naira(r.reward) : 'Pending'}</b>
               </div>
             ))}
           </div>
@@ -955,7 +991,7 @@ export function HelpPage({ section }) {
           <div className="help-search">
             <Icon name="search" size={20} className="muted" />
             <input className="sb-input" placeholder="Search help articles…" value={q} onChange={e => setQ(e.target.value)} />
-            <button className="sb-btn">Search</button>
+            <button className="sb-btn" type="button" onClick={() => document.getElementById('help-faq')?.scrollIntoView({ behavior: 'smooth' })}>Search</button>
           </div>
         </div>
       </div>
@@ -963,18 +999,18 @@ export function HelpPage({ section }) {
       <div className="wrap">
         <div className="help-cats">
           {cats.map(([ic, t, sub]) => (
-            <button key={t} className="help-cat card" onClick={() => go('help')}>
+            <button key={t} className="help-cat card" onClick={() => { setQ(t.split(' ')[0]); document.getElementById('help-faq')?.scrollIntoView({ behavior: 'smooth' }); }}>
               <span className="help-cat-ic"><Icon name={ic} size={22} /></span>
               <b>{t}</b><small className="muted">{sub}</small>
             </button>
           ))}
         </div>
 
-        <div className="help-faq">
+        <div className="help-faq" id="help-faq">
           <h2 style={{ fontSize: 26, marginBottom: 6, textAlign: 'center' }}>Frequently asked questions</h2>
           <p className="muted" style={{ textAlign: 'center', marginBottom: 30 }}>Quick answers to the questions we hear most.</p>
           <div className="faq-list">
-            {faqs.map(([qq, a], i) => (
+            {faqs.filter(([qq, a]) => !q.trim() || qq.toLowerCase().includes(q.toLowerCase()) || a.toLowerCase().includes(q.toLowerCase())).map(([qq, a], i) => (
               <div key={i} className={'faq-item' + (open === i ? ' open' : '')}>
                 <button className="faq-q" onClick={() => setOpen(open === i ? -1 : i)}>
                   <span>{qq}</span>

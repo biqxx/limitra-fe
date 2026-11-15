@@ -7,7 +7,7 @@ import { naira, byId, REAL_IMG, slugify, setCategories, setSubcats, setProducts,
 import { applyStoredVariants } from '@/lib/variantsStore';
 import { routeFor, parseRoute } from '@/lib/routes';
 import { getToken, clearTokens } from '@/lib/auth';
-import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi } from '@/lib/api/endpoints';
+import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi, referralsApi } from '@/lib/api/endpoints';
 import { hasAnyAdminAccess } from '@/lib/auth/permissions';
 import { messageFrom } from '@/lib/api/errors';
 
@@ -55,16 +55,23 @@ export function StoreProvider({ children }) {
      (remoteCart/favorites below) takes over as the source of truth instead;
      the backend has no guest/anonymous cart support (its routes require auth). */
   const [localCart, setLocalCart] = useState([]);
-  const localCartRef = useRef(localCart); localCartRef.current = localCart;
+  const localCartRef = useRef(localCart);
   const [localWish, setLocalWish] = useState([]);
-  const localWishRef = useRef(localWish); localWishRef.current = localWish;
+  const localWishRef = useRef(localWish);
   const [remoteCart, setRemoteCart] = useState(null); // raw cartApi cart object, signed-in users only
-  const remoteCartRef = useRef(remoteCart); remoteCartRef.current = remoteCart;
+  const remoteCartRef = useRef(remoteCart);
   const [favorites, setFavorites] = useState([]); // [{id, product_id, ...}], signed-in users only
-  const favoritesRef = useRef(favorites); favoritesRef.current = favorites;
+  const favoritesRef = useRef(favorites);
   const [addresses, setAddresses] = useState([]);
   const [cards, setCards] = useState([]);
-  const cardsRef = useRef(cards); cardsRef.current = cards;
+  const cardsRef = useRef(cards);
+  useEffect(() => {
+    localCartRef.current = localCart;
+    localWishRef.current = localWish;
+    remoteCartRef.current = remoteCart;
+    favoritesRef.current = favorites;
+    cardsRef.current = cards;
+  }, [localCart, localWish, remoteCart, favorites, cards]);
   const [toasts, setToasts] = useState([]);
   const [query, setQuery] = useState('');
   const [searchHistory, setSearchHistory] = useState([]);
@@ -192,6 +199,21 @@ export function StoreProvider({ children }) {
      (or null) directly so a caller like AuthPage can route on `role` right away
      instead of reading back a `user` that may not have re-rendered into its
      closure yet. */
+  const loadReferral = useCallback(async () => {
+    try {
+      const res = await referralsApi.me();
+      const d = res?.data ?? res;
+      if (d) {
+        setReferral((prev) => ({
+          ...prev,
+          code: d.code || d.referral_code || prev.code,
+          credit: Number(d.credit ?? d.total_earned ?? prev.credit ?? 0),
+          referrals: Array.isArray(d.referrals) ? d.referrals : Array.isArray(d.invitations) ? d.invitations : prev.referrals,
+        }));
+      }
+    } catch (e) {}
+  }, []);
+
   const refreshUser = useCallback(async () => {
     if (!getToken()) { setUser(null); setRemoteCart(null); setFavorites([]); setAddresses([]); setWallet(null); setAuthLoading(false); return null; }
     try {
@@ -207,6 +229,7 @@ export function StoreProvider({ children }) {
         loadCartAndFavorites(),
         loadAddresses(),
         loadWallet(),
+        loadReferral(),
       ]);
       return resolved;
     } catch (e) {
@@ -215,7 +238,7 @@ export function StoreProvider({ children }) {
     } finally {
       setAuthLoading(false);
     }
-  }, [loadCartAndFavorites, loadAddresses, loadWallet]);
+  }, [loadCartAndFavorites, loadAddresses, loadWallet, loadReferral]);
   useEffect(() => { refreshUser(); }, [refreshUser]);
 
   const logout = useCallback(async () => {
@@ -278,6 +301,10 @@ export function StoreProvider({ children }) {
         price: Number(p.price) || 0,
         was: Number(p.compare_at_price) || 0,
         off: Number(p.discount_percentage) || 0,
+        discountActive: Boolean(p.discount_active),
+        discountStartsAt: p.discount_starts_at || null,
+        discountEndsAt: p.discount_ends_at || null,
+        discountRemainingSeconds: p.discount_remaining_seconds != null ? Number(p.discount_remaining_seconds) : null,
         stock,
         category: cat?.slug || p.category?.slug || 'all',
         subcategoryName: p.subcategory?.name || null,
@@ -409,6 +436,13 @@ export function StoreProvider({ children }) {
      assumed the route wasn't deployed). Errors are toasted AND rethrown so the
      calling form (AddressForm) can turn field-level errors into inline messages
      and keep its modal open instead of silently closing on failure. */
+  /* toasts */
+  const toast = useCallback((msg, kind = 'ok') => {
+    const id = ++tid.current;
+    setToasts(t => [...t, { id, msg, kind }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 2600);
+  }, []);
+
   const saveAddress = useCallback(async (data) => {
     const { id, ...rest } = data;
     const payload = { ...rest, is_default: !!rest.is_default };
@@ -466,14 +500,7 @@ export function StoreProvider({ children }) {
     toast(data.id && cardsRef.current.some(c => c.id === data.id) ? 'Card updated' : 'Card saved');
   }, []);
   const removeCard = useCallback((id) => { setCards(list => list.filter(c => c.id !== id)); toast('Card removed'); }, []);
-  const setPrimaryCard = useCallback((id) => { setCards(list => list.map(c => ({ ...c, primary: c.id === id }))); toast('Default card updated'); }, []);
-
-  /* toasts */
-  const toast = useCallback((msg, kind = 'ok') => {
-    const id = ++tid.current;
-    setToasts(t => [...t, { id, msg, kind }]);
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 2600);
-  }, []);
+  const setPrimaryCard = useCallback((id) => { setCards(list => list.map(c => ({ ...c, primary: c.id === id }))); toast('Default card updated'); }, [toast]);
 
   /* cart ops — guests stay fully local; signed-in users hit the real backend and
      re-fetch the active cart afterward rather than trust each endpoint's response
@@ -646,13 +673,19 @@ export function StoreProvider({ children }) {
      against a couple of plausible field names, and needs live verification once
      /products (and therefore real cart items) actually exist. */
   const remoteCartItems = remoteCart?.items || remoteCart?.cart_items || [];
+  useEffect(() => {
+    remoteCartItems.forEach((it) => {
+      const pid = it.product_id ?? it.product?.id;
+      const p = it.product;
+      const firstImg = Array.isArray(p?.images) ? p.images[0] : null;
+      const imageUrl = typeof firstImg === 'string' ? firstImg : firstImg?.url || firstImg?.path;
+      if (pid && imageUrl && !REAL_IMG[pid]) REAL_IMG[pid] = imageUrl;
+    });
+  }, [remoteCartItems]);
   const cart = isAuthenticated
     ? remoteCartItems.map(it => {
         const pid = it.product_id ?? it.product?.id;
         const p = it.product;
-        const firstImg = Array.isArray(p?.images) ? p.images[0] : null;
-        const imageUrl = typeof firstImg === 'string' ? firstImg : firstImg?.url || firstImg?.path;
-        if (pid && imageUrl && !REAL_IMG[pid]) REAL_IMG[pid] = imageUrl;
         const opts = it.selected_options && typeof it.selected_options === 'object' ? it.selected_options : {};
         const variants = Object.fromEntries(
           Object.entries(opts).map(([k, v]) => [k, typeof v === 'object' && v !== null ? v : { label: String(v) }])
@@ -670,6 +703,9 @@ export function StoreProvider({ children }) {
             brand: p.brand || '',
             price: Number(p.price) || 0,
             was: Number(p.compare_at_price) || 0,
+            off: Number(p.discount_percentage) || 0,
+            discountActive: Boolean(p.discount_active),
+            discountEndsAt: p.discount_ends_at || null,
             stock: Number(p.stock) || 0,
             tint: CAT_TINTS[0],
           } : null,

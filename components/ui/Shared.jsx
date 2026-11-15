@@ -34,6 +34,54 @@ export function Stars({ value = 0, size = 13 }) {
   );
 }
 
+export function DiscountTimer({ endsAt, remainingSeconds, compact }) {
+  const targetMs = endsAt ? new Date(endsAt).getTime() : null;
+  const computeLeft = () => {
+    if (targetMs && !Number.isNaN(targetMs)) return Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
+    if (remainingSeconds != null) return Math.max(0, Number(remainingSeconds));
+    return null;
+  };
+  const [secs, setSecs] = useState(computeLeft);
+
+  useEffect(() => {
+    setSecs(computeLeft());
+    if (!targetMs && remainingSeconds == null) return;
+    const id = setInterval(() => {
+      setSecs((prev) => {
+        if (targetMs && !Number.isNaN(targetMs)) return Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
+        return prev != null && prev > 0 ? prev - 1 : 0;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endsAt, remainingSeconds]);
+
+  if (secs == null || secs <= 0) return null;
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  const text = d > 0 ? `${d}d ${pad(h)}h ${pad(m)}m` : `${pad(h)}:${pad(m)}:${pad(s)}`;
+
+  return (
+    <span
+      className="badge"
+      style={{
+        background: 'rgba(229, 72, 77, 0.12)',
+        color: 'var(--red)',
+        fontSize: compact ? 11 : 12,
+        fontWeight: 700,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+      }}
+    >
+      <Icon name="clock" size={compact ? 11 : 13} /> {compact ? text : `Ends in ${text}`}
+    </span>
+  );
+}
+
 export function Price({ now, was, size }) {
   return (
     <span className="pc-price" style={size ? { fontSize: size } : null}>
@@ -81,6 +129,11 @@ export function ProductCard({ product, compact }) {
           <span className="pc-rate"><Stars value={product.rating} /> {product.rating} · {product.reviews.toLocaleString()}</span>
         )}
         <Price now={product.price} was={product.was} />
+        {(product.discountEndsAt || product.discount_ends_at) && (
+          <div style={{ marginTop: 4 }}>
+            <DiscountTimer endsAt={product.discountEndsAt || product.discount_ends_at} remainingSeconds={product.discountRemainingSeconds ?? product.discount_remaining_seconds} compact />
+          </div>
+        )}
       </div>
       {quick && <QuickView product={product} onClose={() => setQuick(false)} />}
     </article>
@@ -119,6 +172,11 @@ function QuickView({ product, onClose }) {
           <h3 className="qv-name">{product.name}</h3>
           <div className="qv-rate"><Stars value={product.rating} /> <span className="muted">{product.rating} · {product.reviews.toLocaleString()} reviews</span></div>
           <Price now={product.price} was={product.was} />
+          {(product.discountEndsAt || product.discount_ends_at) && (
+            <div style={{ marginTop: 6 }}>
+              <DiscountTimer endsAt={product.discountEndsAt || product.discount_ends_at} remainingSeconds={product.discountRemainingSeconds ?? product.discount_remaining_seconds} />
+            </div>
+          )}
           <p className="qv-desc">{productBlurb(product)}</p>
           <div className="qv-actions">
             <button className="btn btn-primary" onClick={() => { addToCart(product); onClose(); }}><Icon name="cart" size={17} /> Add to cart</button>

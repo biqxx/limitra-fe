@@ -11,8 +11,8 @@ import { ordersApi, checkoutApi, paymentsApi, promotionsApi, deliveryApi, pickup
 import { messageFrom } from '@/lib/api/errors';
 
 // Real payment_method values the backend accepts (POST /checkout/quote) — the
-// UI's own radio values (card/transfer/cod) map to these at submit time.
-const PAYMENT_METHOD_API = { card: 'card', transfer: 'bank_transfer', cod: 'cash_on_delivery' };
+// UI's own radio values (card/transfer) map to these at submit time.
+const PAYMENT_METHOD_API = { card: 'card', transfer: 'bank_transfer' };
 
 const SHIP_FEE = 3500;
 const FREE_SHIP = 150000;
@@ -489,12 +489,6 @@ export function CheckoutPage() {
       // payment.
       await clearCart();
 
-      if (apiMethod === 'cash_on_delivery') {
-        setOrderId(newOrderId ?? idemKey);
-        toast('Order placed successfully!');
-        return;
-      }
-
       const callbackUrl = new URL('/checkout', window.location.origin);
       if (newOrderId) callbackUrl.searchParams.set('order_id', newOrderId);
       // Response shape isn't documented (generic SuccessResponse) — read a
@@ -646,7 +640,7 @@ export function CheckoutPage() {
             <div className="co-card card">
               <h3 className="co-h">Payment method</h3>
               <div className="radio-cards">
-                {[['card', 'card', 'Credit / Debit card', 'Visa, Mastercard, Verve'], ['transfer', 'dollar', 'Bank transfer', 'Pay by direct bank transfer'], ['cod', 'truck', 'Pay on delivery', 'Cash or POS at your door']].map(([val, ic, t, sub]) => (
+                {[['card', 'card', 'Credit / Debit card', 'Visa, Mastercard, Verve'], ['transfer', 'dollar', 'Bank transfer', 'Pay by direct bank transfer']].map(([val, ic, t, sub]) => (
                   <label key={val} className={'radio-card' + (payMethod === val ? ' on' : '')}>
                     <input type="radio" name="pay" checked={payMethod === val} onChange={() => setPayMethod(val)} />
                     <span className="rc-radio" />
@@ -662,7 +656,6 @@ export function CheckoutPage() {
               {payMethod === 'transfer' && (
                 <div className="co-note" style={{ marginTop: 18 }}><Icon name="info" size={17} />You’ll get the account details to transfer to once you place your order.</div>
               )}
-              {payMethod === 'cod' && <div className="co-note"><Icon name="info" size={17} />Have the exact amount ready. Our rider accepts cash and card on delivery.</div>}
             </div>
           )}
 
@@ -677,7 +670,7 @@ export function CheckoutPage() {
               </div>
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="card" size={16} /> Payment</span><button className="link-btn" onClick={() => setStep(1)}>Edit</button></div>
-                <p>{{ card: 'Credit / Debit card', transfer: 'Bank transfer', cod: 'Pay on delivery' }[payMethod]}</p>
+                <p>{{ card: 'Credit / Debit card', transfer: 'Bank transfer' }[payMethod] || 'Credit / Debit card'}</p>
               </div>
               <div className="review-block">
                 <div className="rb-head"><span><Icon name="bag" size={16} /> {cart.reduce((s, i) => s + i.qty, 0)} items</span><button className="link-btn" onClick={() => go('cart')}>Edit cart</button></div>

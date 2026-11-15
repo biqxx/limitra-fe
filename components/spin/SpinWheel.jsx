@@ -2,6 +2,7 @@
 /* LIMITRA, Spin & Win signup reward wheel — ported from legacy/spin.jsx */
 import { useState, useEffect } from 'react';
 import { useStore } from '@/components/store/StoreProvider';
+import { rewardsApi } from '@/lib/api/endpoints';
 import { naira } from '@/lib/data';
 
 /* prize segments, value drives checkout discount; weight drives probability */
@@ -30,14 +31,14 @@ function Confetti({ on }) {
   return (
     <div className="confetti" aria-hidden="true">
       {bits.map((_, i) => (
-        <span key={i} style={{ left: (i / 60 * 100) + '%', background: cols[i % cols.length], animationDelay: (Math.random() * 0.6) + 's', animationDuration: (1.8 + Math.random() * 1.6) + 's', transform: `rotate(${Math.random() * 360}deg)` }} />
+        <span key={i} style={{ left: (i / 60 * 100) + '%', background: cols[i % cols.length], animationDelay: (((i * 37) % 60) / 100) + 's', animationDuration: (1.8 + ((i * 19) % 16) / 10) + 's', transform: `rotate(${(i * 53) % 360}deg)` }} />
       ))}
     </div>
   );
 }
 
 export function SpinWheel({ onClose }) {
-  const { claimSpin, toast, go } = useStore();
+  const { claimSpin, isAuthenticated, toast, go } = useStore();
   const [spinning, setSpinning] = useState(false);
   const [rot, setRot] = useState(0);
   const [result, setResult] = useState(null);
@@ -50,18 +51,38 @@ export function SpinWheel({ onClose }) {
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
   }, [result, spinning, onClose]);
 
-  const spin = () => {
+  const spin = async () => {
     if (spinning || result) return;
     setSpinning(true);
-    const idx = SPIN_PRIZES.findIndex(p => p.value === 5000 && p.kind === 'fixed');
-    // rotate so the CHOSEN prize lands under the top pointer.
-    // (+2 segment / 90° calibration so the visual segment matches the awarded prize)
+    let idx = weightedPick(SPIN_PRIZES);
+    let serverPrize = null;
+    if (isAuthenticated) {
+      try {
+        const res = await rewardsApi.spin();
+        const rw = res?.reward ?? res?.data?.reward ?? res?.data ?? res;
+        if (rw) {
+          serverPrize = rw;
+          const matchIdx = SPIN_PRIZES.findIndex((p) =>
+            (rw.label && p.label.toLowerCase() === String(rw.label).toLowerCase()) ||
+            (rw.value != null && Number(p.value) === Number(rw.value))
+          );
+          if (matchIdx >= 0) idx = matchIdx;
+        }
+      } catch (err) {
+        if (err?.status === 422 || err?.status === 409) {
+          toast(err?.message || 'You have already used your spin', 'error');
+          setSpinning(false);
+          return;
+        }
+      }
+    }
     const visualIdx = (idx - 2 + n) % n;
     const target = 360 * 6 + (360 - (visualIdx * seg + seg / 2));
     setRot(target);
     setTimeout(() => {
-      const prize = SPIN_PRIZES[idx];
-      const code = claimSpin(prize);
+      const basePrize = SPIN_PRIZES[idx];
+      const prize = serverPrize ? { ...basePrize, label: serverPrize.label || basePrize.label, code: serverPrize.code || serverPrize.coupon_code } : basePrize;
+      const code = prize.code || claimSpin(prize);
       setResult({ ...prize, code });
       setSpinning(false);
     }, 4200);
