@@ -279,7 +279,7 @@ function permKey(p) {
 function RoleDrawer({ role, permissionsList, onSaved, onClose }) {
   const addToast = useAdminToast();
   const isNew = !role?.id;
-  const [name, setName] = useState(role?.name || '');
+  const [name, setName] = useState(role?.display_name || role?.name || '');
   const [description, setDescription] = useState(role?.description || '');
   const [selectedPerms, setSelectedPerms] = useState(() => new Set((role?.permissions || []).map(permKey)));
   const [members, setMembers] = useState([]);
@@ -307,10 +307,16 @@ function RoleDrawer({ role, permissionsList, onSaved, onClose }) {
 
   const saveRole = async () => {
     if (!name.trim()) { addToast('Enter a role name'); return; }
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!/^[a-z][a-z0-9_]*$/.test(slug)) {
+      addToast('Role name must start with a letter');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
-        name: name.trim(),
+        name: isNew ? slug : (role?.name || slug),
+        display_name: name.trim(),
         description: description.trim() || null,
         permissions: [...selectedPerms],
       };

@@ -296,7 +296,7 @@ function StaffManageDrawer({ user, roles = [], onAction, onClose }) {
                   options={[
                     { value: 'staff', label: 'Staff' },
                     { value: 'admin', label: 'Admin' },
-                    { value: 'customer', label: 'Customer (demote)' },
+                    { value: 'user', label: 'Customer (demote)' },
                   ]}
                   onChange={(val) => setSelectedRole(val)}
                 />
