@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
-import { naira } from '@/lib/format';
+import { naira } from '@/lib/data';
 import { adminTransactionsApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { AdmHead, EmptyState, SkeletonRows } from './AdminShared';
@@ -220,3 +220,4 @@ export function AdminTransactions() {
     </div>
   );
 }
+
