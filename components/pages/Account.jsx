@@ -871,8 +871,8 @@ function AccountWallet() {
     setBusy(true);
     try {
       const callbackUrl = typeof window !== 'undefined'
-        ? `${window.location.origin}/account/wallet`
-        : 'https://limitra.com.ng/account/wallet';
+        ? `${window.location.origin}/payment/callback?kind=deposit`
+        : 'https://limitra.com.ng/payment/callback?kind=deposit';
       const res = await walletApi.initializeDeposit({
         amount: val,
         method: 'card',
@@ -881,8 +881,11 @@ function AccountWallet() {
       const dep = res?.deposit || res;
       const url = dep?.authorization_url || dep?.url;
       const ref = dep?.reference;
-      if (url) window.open(url, '_blank', 'noopener');
-      else if (ref) await walletApi.verifyDeposit(ref);
+      if (url) {
+        window.location.href = url;
+        return;
+      }
+      if (ref) await walletApi.verifyDeposit(ref);
       toast('Deposit initialized');
       await load();
     } catch (err) {

@@ -506,7 +506,8 @@ export function CheckoutPage() {
       // payment.
       await clearCart();
 
-      const callbackUrl = new URL('/checkout', window.location.origin);
+      const callbackUrl = new URL('/payment/callback', window.location.origin);
+      callbackUrl.searchParams.set('kind', 'order');
       if (newOrderId) callbackUrl.searchParams.set('order_id', newOrderId);
       // Response shape isn't documented (generic SuccessResponse) — read a
       // hosted-page redirect URL defensively under any plausible field name.
