@@ -210,7 +210,14 @@ export function StoreProvider({ children }) {
   const loadWallet = useCallback(async () => {
     try { setWallet(await walletApi.get()); } catch (e) { setWallet(null); }
   }, []);
-  const walletBalance = Number(wallet?.balance ?? wallet?.data?.balance ?? 0);
+  const walletBalance = Number(
+    wallet?.balances?.total
+    ?? wallet?.balances?.cash
+    ?? wallet?.balance
+    ?? wallet?.data?.balances?.total
+    ?? wallet?.data?.balance
+    ?? 0
+  );
 
   /* real session — resolves who's signed in from a stored JWT.
      lib/api/endpoints.js: authApi.me() (id/username/email/role) + profileApi.get()
