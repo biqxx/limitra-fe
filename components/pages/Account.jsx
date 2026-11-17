@@ -841,7 +841,28 @@ function AccountWallet() {
       setTxs(Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []);
     } catch {}
   };
-  useEffect(() => { load(); loadWallet?.(); }, [loadWallet]);
+  useEffect(() => {
+    load();
+    loadWallet?.();
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('reference') || params.get('trxref');
+    if (ref) {
+      walletApi.verifyDeposit(ref)
+        .then(() => {
+          toast('Deposit verified');
+          load();
+          loadWallet?.();
+        })
+        .catch((err) => toast(messageFrom(err)))
+        .finally(() => {
+          const clean = new URL(window.location.href);
+          clean.searchParams.delete('reference');
+          clean.searchParams.delete('trxref');
+          window.history.replaceState({}, '', clean.pathname + clean.search);
+        });
+    }
+  }, [loadWallet, toast]);
 
   const deposit = async (e) => {
     e.preventDefault();
@@ -849,10 +870,19 @@ function AccountWallet() {
     if (!val || val < 100) { toast('Enter at least ₦100'); return; }
     setBusy(true);
     try {
-      const res = await walletApi.initializeDeposit({ amount: val });
-      const url = res?.authorization_url || res?.url;
+      const callbackUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}/account/wallet`
+        : 'https://limitra.com.ng/account/wallet';
+      const res = await walletApi.initializeDeposit({
+        amount: val,
+        method: 'card',
+        callback_url: callbackUrl,
+      });
+      const dep = res?.deposit || res;
+      const url = dep?.authorization_url || dep?.url;
+      const ref = dep?.reference;
       if (url) window.open(url, '_blank', 'noopener');
-      else if (res?.reference) await walletApi.verifyDeposit(res.reference);
+      else if (ref) await walletApi.verifyDeposit(ref);
       toast('Deposit initialized');
       await load();
     } catch (err) {
