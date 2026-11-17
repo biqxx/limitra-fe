@@ -38,7 +38,7 @@ function normalizeOrder(o) {
     status,
     date: o.created_at ?? o.date ?? o.placed_at,
     itemCount,
-    total: Number(o.total ?? o.total_amount ?? o.grand_total ?? o.amount ?? 0),
+    total: Number(o.order_total ?? (Number(o.total ?? o.total_amount ?? o.grand_total ?? o.amount ?? 0) + Number(o.credit_total ?? 0))),
     raw: o,
   };
 }

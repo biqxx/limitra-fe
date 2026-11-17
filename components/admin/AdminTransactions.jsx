@@ -13,6 +13,7 @@ const TYPES = [
   ['deposit', 'Deposits'],
   ['payment', 'Payments'],
   ['order', 'Orders'],
+  ['promo', 'Coupons & Promos'],
   ['refund', 'Refunds'],
 ];
 
@@ -32,7 +33,8 @@ const TYPE_BADGE = {
   deposit: 'ok',
   payment: 'info',
   order: 'muted',
-  refund: 'warn',
+  promo: 'warn',
+  refund: 'err',
 };
 
 const fmtDate = (iso) => {
@@ -180,7 +182,14 @@ export function AdminTransactions() {
                       )}
                     </td>
                     <td>
-                      <b>{naira(Number(tx.amount || 0))}</b>
+                      {(() => {
+                        const amt = Number(tx.amount || 0);
+                        return (
+                          <b style={amt < 0 ? { color: 'var(--danger, #dc2626)' } : undefined}>
+                            {amt < 0 ? `−${naira(Math.abs(amt))}` : naira(amt)}
+                          </b>
+                        );
+                      })()}
                       {Number(tx.wallet_credit || 0) > 0 && (
                         <div className="muted" style={{ fontSize: 11.5 }}>
                           Includes {naira(Number(tx.wallet_credit))} wallet credit

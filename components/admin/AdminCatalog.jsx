@@ -45,7 +45,7 @@ function normalizeAdminOrder(o) {
     customer,
     date: o.created_at ?? o.date,
     itemCount,
-    total: Number(o.total ?? o.total_amount ?? o.grand_total ?? o.amount ?? 0),
+    total: Number(o.order_total ?? (Number(o.total ?? o.total_amount ?? o.grand_total ?? o.amount ?? 0) + Number(o.credit_total ?? 0))),
     raw: o,
   };
 }
@@ -851,8 +851,14 @@ function InvoiceModal({ order, onClose }) {
           <p className="muted" style={{ fontSize: 13, margin: '10px 0' }}>Itemized breakdown isn’t available yet.</p>
           <div className="inv-totals">
             <div><span className="muted">Subtotal</span><span>{naira(sub)}</span></div>
+            {Number(order.raw?.discount_total || 0) > 0 && (
+              <div><span className="muted">Coupon / Promo</span><span style={{ color: 'var(--danger, #dc2626)' }}>−{naira(Number(order.raw.discount_total))}</span></div>
+            )}
             <div><span className="muted">Shipping</span><span>{ship === 0 ? 'Free' : naira(ship)}</span></div>
-            <div className="inv-grand"><span>Total</span><b>{naira(order.total)}</b></div>
+            {Number(order.raw?.credit_total || 0) > 0 && (
+              <div><span className="muted">Wallet credit applied</span><span>−{naira(Number(order.raw.credit_total))}</span></div>
+            )}
+            <div className="inv-grand"><span>Order Value</span><b>{naira(order.total)}</b></div>
           </div>
           <div className="adm-drawer-foot">
             <button className="adm-btn ghost" onClick={onClose}>Close</button>

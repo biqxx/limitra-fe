@@ -85,7 +85,7 @@ export function AdminOverview() {
     return () => { cancelled = true; };
   }, []);
 
-  const revenue = Number(dash?.total_revenue ?? dash?.revenue ?? orders.filter((o) => o.status !== 'cancelled' && o.status !== 'refunded').reduce((s, o) => s + Number(o.total ?? o.total_amount ?? 0), 0));
+  const revenue = Number(dash?.total_revenue ?? dash?.revenue ?? orders.filter((o) => o.status !== 'cancelled' && o.status !== 'refunded').reduce((s, o) => s + Number(o.order_total ?? (Number(o.total ?? o.total_amount ?? 0) + Number(o.credit_total ?? 0))), 0));
   const totalOrders = Number(dash?.total_orders ?? orders.length);
   const totalCustomers = Number(dash?.total_customers ?? dash?.customers_count ?? 0);
   const totalProducts = Number(dash?.total_products ?? PRODUCTS.length);
@@ -143,7 +143,7 @@ export function AdminOverview() {
                     </div>
                   </td>
                   <td data-label="Status"><span className={'adm-pill ' + (STATUS_CLS[stLabel] || 'muted')}>{stLabel}</span></td>
-                  <td data-label="Total"><b>{naira(Number(o.total ?? o.total_amount ?? 0))}</b></td>
+                  <td data-label="Total"><b>{naira(Number(o.order_total ?? (Number(o.total ?? o.total_amount ?? 0) + Number(o.credit_total ?? 0))))}</b></td>
                 </tr>
               );
             })}</tbody>
