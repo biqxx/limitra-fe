@@ -28,6 +28,13 @@ const STATUS_BADGE = {
   refunded: 'info',
 };
 
+const TYPE_BADGE = {
+  deposit: 'ok',
+  payment: 'info',
+  order: 'muted',
+  refund: 'warn',
+};
+
 const fmtDate = (iso) => {
   if (!iso) return '—';
   try {
@@ -47,6 +54,7 @@ export function AdminTransactions() {
   const toast = useAdminToast();
   const [type, setType] = useState('all');
   const [q, setQ] = useState('');
+  const [submittedQ, setSubmittedQ] = useState('');
   const [page, setPage] = useState(1);
   const [items, setItems] = useState([]);
   const [pagination, setPagination] = useState(null);
@@ -57,7 +65,7 @@ export function AdminTransactions() {
     try {
       const res = await adminTransactionsApi.list({
         type,
-        q: q.trim() || undefined,
+        q: submittedQ.trim() || undefined,
         page,
         per_page: 50,
       });
@@ -68,7 +76,7 @@ export function AdminTransactions() {
     } finally {
       setLoading(false);
     }
-  }, [type, q, page, toast]);
+  }, [type, submittedQ, page, toast]);
 
   useEffect(() => {
     load();
@@ -77,7 +85,7 @@ export function AdminTransactions() {
   const lastPage = Number(pagination?.last_page || 1);
 
   return (
-    <div className="adm-page">
+    <>
       <AdmHead
         title="Transactions"
         sub="Unified ledger of wallet deposits, Paystack payments, orders (including wallet credit offsets), and refunds."
@@ -87,40 +95,35 @@ export function AdminTransactions() {
         </button>
       </AdmHead>
 
-      <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
-        <div className="row between" style={{ gap: 12, flexWrap: 'wrap' }}>
-          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-            {TYPES.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                className={`adm-btn ${type === key ? 'primary' : 'ghost'}`}
-                onClick={() => { setType(key); setPage(1); }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <form
-            className="row"
-            style={{ gap: 8 }}
-            onSubmit={(e) => { e.preventDefault(); setPage(1); load(); }}
+      <div className="adm-filters">
+        <form
+          className="adm-mini-search"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setPage(1);
+            setSubmittedQ(q);
+          }}
+        >
+          <Icon name="search" size={16} className="muted" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search reference, order #, or email…"
+          />
+        </form>
+        {TYPES.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={'adm-chip' + (type === key ? ' on' : '')}
+            onClick={() => { setType(key); setPage(1); }}
           >
-            <input
-              className="adm-in"
-              style={{ minWidth: 240 }}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search reference, order #, or email…"
-            />
-            <button className="adm-btn ghost" type="submit">
-              <Icon name="search" size={15} />
-            </button>
-          </form>
-        </div>
+            {label}
+          </button>
+        ))}
       </div>
 
-      <div className="panel">
+      <div className="panel" style={{ padding: 0 }}>
         {loading ? (
           <SkeletonRows rows={8} />
         ) : items.length === 0 ? (
@@ -130,8 +133,8 @@ export function AdminTransactions() {
             description="No matching deposits, payments, orders, or refunds."
           />
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="adm-tbl">
+          <div className="adm-table-wrap">
+            <table className="adm-table">
               <thead>
                 <tr>
                   <th>Type</th>
@@ -147,12 +150,12 @@ export function AdminTransactions() {
                 {items.map((tx) => (
                   <tr key={tx.id}>
                     <td>
-                      <span className="badge badge-soft" style={{ textTransform: 'capitalize' }}>
+                      <span className={`adm-pill ${TYPE_BADGE[tx.type] || 'muted'}`} style={{ textTransform: 'capitalize' }}>
                         {tx.type}
                       </span>
                     </td>
                     <td>
-                      <b>{tx.reference}</b>
+                      <b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>{tx.reference}</b>
                       {tx.order_number && tx.type !== 'order' && (
                         <div className="muted" style={{ fontSize: 12 }}>Order {tx.order_number}</div>
                       )}
@@ -185,7 +188,7 @@ export function AdminTransactions() {
                       )}
                     </td>
                     <td>
-                      <span className={`adm-pill ${STATUS_BADGE[tx.status] || 'warn'}`}>
+                      <span className={`adm-pill ${STATUS_BADGE[tx.status] || 'muted'}`}>
                         {tx.status || 'unknown'}
                       </span>
                     </td>
@@ -217,7 +220,6 @@ export function AdminTransactions() {
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
-
