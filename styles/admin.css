@@ -655,23 +655,137 @@ tr.row-flash { box-shadow: inset 3px 0 0 var(--primary); }
 .adm-per-page { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); font-family: var(--font-display); font-weight: 600; }
 .adm-per-page select { border: 1.5px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); padding: 5px 8px; font-size: 12.5px; font-weight: 700; font-family: inherit; cursor: pointer; }
 
-/* ============ Admin Polish & Design System Enhancements ============ */
-.kpi, .panel, .prc-kpi, .prc-section {
-  box-shadow: 0 1px 2px rgba(10, 18, 40, .04);
+/* ============ Admin Polish & Design System Enhancements (ui-ux-pro-max + ui-styling) ============ */
+.adm {
+  background:
+    radial-gradient(1200px 520px at 85% -8%, color-mix(in srgb, var(--primary) 6%, transparent), transparent 65%),
+    radial-gradient(900px 420px at 15% 105%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 60%),
+    var(--bg-subtle);
+  scroll-padding-top: 84px;
+}
+[data-theme="dark"] .adm {
+  background:
+    radial-gradient(1100px 480px at 85% -8%, color-mix(in srgb, var(--primary) 12%, transparent), transparent 65%),
+    radial-gradient(900px 420px at 15% 105%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+    var(--bg);
+}
+
+/* Sidebar & topbar glassmorphism */
+.adm-side {
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(14px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+.adm-side::-webkit-scrollbar { width: 5px; }
+.adm-side::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
+.adm-top {
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: 0 1px 0 var(--border), 0 4px 18px rgba(10, 18, 40, .03);
+}
+.adm-link {
+  position: relative;
+  transition: background .15s var(--ease), color .15s var(--ease), box-shadow .18s var(--ease), transform .15s var(--ease);
+}
+.adm-link.on {
+  background: linear-gradient(135deg, var(--primary), var(--navy-600));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 28%, transparent);
+}
+.adm-link:not(.on):hover { transform: translateX(2px); }
+
+/* Header & Segmented Tabs */
+.adm-h h1 { font-weight: 800; letter-spacing: -.025em; line-height: 1.15; }
+.adm-h-actions { flex-wrap: wrap; }
+.adm-tabs {
+  display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  padding: 4px; border-radius: var(--r-pill);
+  background: var(--surface-2); border: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.adm-tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 15px; border-radius: var(--r-pill);
+  font-family: var(--font-display); font-weight: 700; font-size: 13px;
+  color: var(--text-muted); cursor: pointer;
+  transition: background .15s var(--ease), color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.adm-tab:hover { color: var(--text); }
+.adm-tab.active {
+  background: var(--surface); color: var(--primary);
+  box-shadow: var(--shadow-xs), inset 0 0 0 1px var(--border);
+}
+
+/* Cards, KPIs & Panels */
+.kpi, .panel, .prc-kpi, .prc-section, .cat-kpis > div {
+  box-shadow: var(--shadow-xs);
   transition: border-color .16s var(--ease), box-shadow .18s var(--ease), transform .18s var(--ease);
 }
-.kpi:hover, .prc-kpi:hover {
-  border-color: var(--border-2);
-  box-shadow: 0 6px 18px rgba(10, 18, 40, .06);
-  transform: translateY(-1px);
+.kpi { position: relative; overflow: hidden; }
+.kpi::after {
+  content: ''; position: absolute; inset: 0 0 auto 0; height: 2px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--primary) 55%, transparent), color-mix(in srgb, var(--accent) 45%, transparent));
+  opacity: 0; transition: opacity .18s var(--ease);
 }
+.kpi:hover::after { opacity: 1; }
+.kpi:hover, .prc-kpi:hover, .cat-kpis > div:hover {
+  border-color: var(--border-2);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.kpi-ic { box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent); }
 .kpi-val, .prc-kpi b, .adm-table td, .adm-li b { font-variant-numeric: tabular-nums; }
-.adm-link.on { box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 26%, transparent); }
-.adm-pill { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.adm-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .85; flex: none; }
-.adm-h h1 { letter-spacing: -.02em; }
-.adm-table th { background: color-mix(in srgb, var(--surface-2) 65%, var(--surface)); }
+
+/* Buttons, Chips & Filter Bars */
+.adm-btn, .adm-chip, .adm-icon-btn, .adm-rowact button, .adm-cal-h button, .adm-cal-day, .pg, .cms-tab { cursor: pointer; }
+.adm-btn {
+  transition: filter .15s var(--ease), background .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease), box-shadow .15s var(--ease);
+}
+.adm-btn.primary { box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 24%, transparent); }
+.adm-btn.primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 32%, transparent); }
+.adm-btn.ghost:hover:not(:disabled) { background: var(--surface-2); }
+.adm-chip { transition: background .14s var(--ease), border-color .14s var(--ease), color .14s var(--ease), box-shadow .14s var(--ease); }
+.adm-chip:hover:not(.on) { border-color: var(--border-2); color: var(--text); }
+.adm-chip.on { box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 22%, transparent); }
+.adm-mini-search { transition: border-color .15s var(--ease), box-shadow .15s var(--ease); }
+.adm-mini-search:focus-within, .adm-search:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+
+/* Tables, Pills & Row Actions */
+.adm-table th {
+  background: color-mix(in srgb, var(--surface-2) 72%, var(--surface));
+  font-size: 11px; letter-spacing: .06em; padding: 11px 13px;
+}
+.adm-table td { padding: 14px 13px; }
 .adm-table tbody tr { transition: background .12s var(--ease); }
+.adm-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 3.5%, var(--surface)); }
+.adm-pill {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 20%, transparent);
+}
+.adm-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .85; flex: none; }
+.adm-rowact button {
+  background: var(--surface);
+  transition: background .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease), transform .12s var(--ease);
+}
+.adm-rowact button:hover { background: var(--primary-soft); transform: translateY(-1px); }
+.adm-rowact button.del:hover { background: rgba(229, 72, 77, .1); }
+
+/* Drawers & Modals */
+.adm-drawer-h, .role-modal-h {
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+}
+.adm-drawer-f, .role-modal-f {
+  background: color-mix(in srgb, var(--surface-2) 35%, var(--surface));
+}
+
+/* Accessible Focus Rings (WCAG) */
+.adm :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.adm-search input:focus-visible, .adm-mini-search input:focus-visible, .adm-cmd-in input:focus-visible {
+  outline: none;
+}
 
 /* ⌘K Command Palette */
 .adm-cmd-btn {
@@ -727,3 +841,13 @@ tr.row-flash { box-shadow: inset 3px 0 0 var(--primary); }
 /* Live health pulse */
 @keyframes admPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(1.25); } }
 .adm-live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: admPulse 2s infinite; }
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .adm *, .adm *::before, .adm *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -11,7 +11,7 @@ const quicksand = Quicksand({
 });
 
 export const metadata = {
-  title: 'Limitra, Premium Tech Marketplace',
+  title: 'Limitra, Premium Marketplace',
 };
 
 export default function RootLayout({ children }) {
