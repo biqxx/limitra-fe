@@ -610,7 +610,13 @@ export function CheckoutPage() {
                   <Icon name="info" size={17} />{deliveryError}
                 </div>
               )}
-              {deliveryOptions.length === 0 && pickupLocations.length === 0 && !deliveryLoading && !pickupLoading ? (
+              {activeAddr && (!activeAddr.redstar_city_code || !activeAddr.redstar_town_id) && !deliveryLoading ? (
+                <div className="co-note" style={{ marginBottom: 10 }}>
+                  <Icon name="info" size={17} />
+                  <span>This saved address needs a Red Star city and delivery town before shipping can be calculated.</span>
+                  <button type="button" className="link-btn" onClick={() => setAddrModal(activeAddr)} style={{ marginLeft: 8 }}>Update address</button>
+                </div>
+              ) : deliveryOptions.length === 0 && pickupLocations.length === 0 && !deliveryLoading && !pickupLoading ? (
                 <p className="muted">No delivery options are available for this address.</p>
               ) : (
                 <div className="radio-cards">
