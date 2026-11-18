@@ -826,10 +826,7 @@ function fmtOrderDate(d) {
   return isNaN(dt) ? String(d) : `${dt.getDate()} ${MONTHS_SHORT[dt.getMonth()]} ${dt.getFullYear()}`;
 }
 
-function InvoiceModal({ order, onClose }) {
-  const addToast = useAdminToast();
-  const [docMode, setDocMode] = useState('receipt'); // 'receipt' | 'label'
-  const [paperWidth, setPaperWidth] = useState('80mm');
+function useOrderDetail(order) {
   const [detail, setDetail] = useState(order?.raw || null);
   const [loading, setLoading] = useState(true);
 
@@ -849,43 +846,38 @@ function InvoiceModal({ order, onClose }) {
     return () => { cancelled = true; };
   }, [order]);
 
-  const receiptOrder = detail || order.raw || {};
-  const previewHtml = docMode === 'label'
-    ? buildShippingLabelHtml(receiptOrder)
-    : buildThermalReceiptHtml(receiptOrder, paperWidth);
+  return { detail: detail || order?.raw || {}, loading };
+}
+
+function InvoiceModal({ order, onClose }) {
+  const addToast = useAdminToast();
+  const [paperWidth, setPaperWidth] = useState('80mm');
+  const { detail: receiptOrder, loading } = useOrderDetail(order);
+  const previewHtml = buildThermalReceiptHtml(receiptOrder, paperWidth);
 
   return (
     <>
       <div className="adm-drawer-scrim" onClick={onClose} />
-      <div className="adm-modal inv-modal" role="dialog" aria-label="Order Printables">
+      <div className="adm-modal inv-modal" role="dialog" aria-label="Thermal Receipt">
         <div className="adm-drawer-h">
-          <h3>{docMode === 'label' ? 'Shipping Label' : 'Thermal Receipt'} · #{order.id}</h3>
+          <h3>Thermal Receipt · #{order.id}</h3>
           <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
         </div>
         <div className="adm-drawer-body">
           <div className="row between" style={{ marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+            <span className="muted" style={{ fontSize: 12.5 }}>POS thermal roll format (monospace, monochrome, 0mm margin)</span>
             <div className="row" style={{ gap: 6 }}>
-              <button type="button" className={`adm-chip${docMode === 'receipt' ? ' on' : ''}`} onClick={() => setDocMode('receipt')}>
-                Thermal Receipt
-              </button>
-              <button type="button" className={`adm-chip${docMode === 'label' ? ' on' : ''}`} onClick={() => setDocMode('label')}>
-                Shipping Label (4×6″)
-              </button>
+              {['80mm', '58mm'].map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  className={`adm-chip${paperWidth === w ? ' on' : ''}`}
+                  onClick={() => setPaperWidth(w)}
+                >
+                  {w}
+                </button>
+              ))}
             </div>
-            {docMode === 'receipt' && (
-              <div className="row" style={{ gap: 6 }}>
-                {['80mm', '58mm'].map((w) => (
-                  <button
-                    key={w}
-                    type="button"
-                    className={`adm-chip${paperWidth === w ? ' on' : ''}`}
-                    onClick={() => setPaperWidth(w)}
-                  >
-                    {w}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           {loading ? (
@@ -893,11 +885,11 @@ function InvoiceModal({ order, onClose }) {
           ) : (
             <div style={{ display: 'flex', justifyContent: 'center', background: 'var(--surface-2)', padding: 14, borderRadius: 8, border: '1px solid var(--border)' }}>
               <iframe
-                title={`${docMode}-${order.id}`}
+                title={`receipt-${order.id}`}
                 srcDoc={previewHtml}
                 style={{
-                  width: docMode === 'label' ? 380 : (paperWidth === '58mm' ? 230 : 320),
-                  height: docMode === 'label' ? 520 : 440,
+                  width: paperWidth === '58mm' ? 230 : 320,
+                  height: 440,
                   border: '1px solid #d4d4d8',
                   background: '#ffffff',
                 }}
@@ -911,23 +903,79 @@ function InvoiceModal({ order, onClose }) {
               className="adm-btn ghost"
               disabled={loading}
               onClick={() => {
-                if (docMode === 'label') {
-                  downloadShippingLabel(receiptOrder);
-                  addToast(`Shipping label #${order.id} downloaded`);
-                } else {
-                  downloadThermalReceipt(receiptOrder, paperWidth);
-                  addToast(`Receipt #${order.id} (${paperWidth}) downloaded`);
-                }
+                downloadThermalReceipt(receiptOrder, paperWidth);
+                addToast(`Receipt #${order.id} (${paperWidth}) downloaded`);
               }}
             >
-              <Icon name="download" size={15} /> {docMode === 'label' ? 'Download Label' : `Download (${paperWidth})`}
+              <Icon name="download" size={15} /> Download ({paperWidth})
             </button>
             <button
               className="adm-btn primary"
               disabled={loading}
-              onClick={() => (docMode === 'label' ? printShippingLabel(receiptOrder) : printThermalReceipt(receiptOrder, paperWidth))}
+              onClick={() => printThermalReceipt(receiptOrder, paperWidth)}
             >
-              {docMode === 'label' ? 'Print Shipping Label' : 'Print Thermal Receipt'}
+              Print Thermal Receipt
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ShippingLabelModal({ order, onClose }) {
+  const addToast = useAdminToast();
+  const { detail: labelOrder, loading } = useOrderDetail(order);
+  const labelHtml = buildShippingLabelHtml(labelOrder);
+
+  return (
+    <>
+      <div className="adm-drawer-scrim" onClick={onClose} />
+      <div className="adm-modal inv-modal" role="dialog" aria-label="Shipping Label">
+        <div className="adm-drawer-h">
+          <h3>Shipping Label · #{order.id}</h3>
+          <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
+        </div>
+        <div className="adm-drawer-body">
+          <div className="row between" style={{ marginBottom: 12, gap: 8 }}>
+            <span className="muted" style={{ fontSize: 12.5 }}>4×6″ (100×150mm) thermal shipping label</span>
+          </div>
+
+          {loading ? (
+            <p className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>Loading shipping address &amp; tracking…</p>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'center', background: 'var(--surface-2)', padding: 14, borderRadius: 8, border: '1px solid var(--border)' }}>
+              <iframe
+                title={`shipping-label-${order.id}`}
+                srcDoc={labelHtml}
+                style={{
+                  width: 380,
+                  height: 520,
+                  border: '1px solid #d4d4d8',
+                  background: '#ffffff',
+                }}
+              />
+            </div>
+          )}
+
+          <div className="adm-drawer-foot">
+            <button className="adm-btn ghost" onClick={onClose}>Close</button>
+            <button
+              className="adm-btn ghost"
+              disabled={loading}
+              onClick={() => {
+                downloadShippingLabel(labelOrder);
+                addToast(`Shipping label #${order.id} downloaded`);
+              }}
+            >
+              <Icon name="download" size={15} /> Download Label
+            </button>
+            <button
+              className="adm-btn primary"
+              disabled={loading}
+              onClick={() => printShippingLabel(labelOrder)}
+            >
+              Print Shipping Label
             </button>
           </div>
         </div>
@@ -968,6 +1016,7 @@ export function AdminOrders() {
   const [orders, setOrders] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState('All');
+  const [shippingLabel, setShippingLabel] = useState(null);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('recent');
   const [invoice, setInvoice] = useState(null);
@@ -1060,7 +1109,8 @@ export function AdminOrders() {
                   <td>{o.customer}</td><td className="muted">{fmtOrderDate(o.date)}</td><td>{o.itemCount}</td><td><b>{naira(o.total)}</b></td>
                   <td><span className={'adm-pill ' + (ORDER_STATUS_CLS[o.status] || 'muted')}>{ORDER_STATUS_LABEL[o.status] || o.status}</span></td>
                   <td><div className="adm-rowact">
-                    <button title="View invoice" onClick={() => setInvoice(o)}><Icon name="eye" size={15} /></button>
+                    <button title="Thermal receipt / invoice" onClick={() => setInvoice(o)}><Icon name="eye" size={15} /></button>
+                    <button title="Shipping label" onClick={() => setShippingLabel(o)}><Icon name="tag" size={15} /></button>
                     <button title="Update status" onClick={() => setStatusDraft({ order: o, status: STATUS_UPDATE_OPTIONS[0], note: '' })}><Icon name="edit" size={15} /></button>
                     <button title="Mark as shipped" onClick={() => setShipDraft({ order: o, courier: '', tracking_number: '' })}><Icon name="truck" size={15} /></button>
                     <button title="Refund" onClick={() => setRefundDraft({ order: o, amount: o.total, method: 'original_payment', reason: '' })}><Icon name="dollar" size={15} /></button>
@@ -1074,6 +1124,7 @@ export function AdminOrders() {
         )}
       </div>
       {invoice && <InvoiceModal order={invoice} onClose={() => setInvoice(null)} />}
+      {shippingLabel && <ShippingLabelModal order={shippingLabel} onClose={() => setShippingLabel(null)} />}
 
       {statusDraft && (
         <OrderDrawer title={`Update status · #${statusDraft.order.id}`} saving={saving} canSave={!!statusDraft.note.trim()} onClose={() => setStatusDraft(null)} onSave={submitStatus} saveLabel="Update status">
