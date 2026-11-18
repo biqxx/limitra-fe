@@ -17,7 +17,7 @@ import { messageFrom } from '@/lib/api/errors';
 import { Kpi } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
 import { AdmHead, Pager, usePager, AdmSelect, AdmDate, useHighlight } from './AdminShared';
-import { buildThermalReceiptHtml, printThermalReceipt, downloadThermalReceipt } from './ThermalReceipt';
+import { buildThermalReceiptHtml, printThermalReceipt, downloadThermalReceipt, buildShippingLabelHtml, printShippingLabel, downloadShippingLabel } from './ThermalReceipt';
 
 // Confirmed by the spec's own enum (GET /admin/orders' `status` param) — unlike
 // most of this API, these request/response shapes look real, though still
@@ -828,6 +828,7 @@ function fmtOrderDate(d) {
 
 function InvoiceModal({ order, onClose }) {
   const addToast = useAdminToast();
+  const [docMode, setDocMode] = useState('receipt'); // 'receipt' | 'label'
   const [paperWidth, setPaperWidth] = useState('80mm');
   const [detail, setDetail] = useState(order?.raw || null);
   const [loading, setLoading] = useState(true);
@@ -849,31 +850,42 @@ function InvoiceModal({ order, onClose }) {
   }, [order]);
 
   const receiptOrder = detail || order.raw || {};
-  const receiptHtml = buildThermalReceiptHtml(receiptOrder, paperWidth);
+  const previewHtml = docMode === 'label'
+    ? buildShippingLabelHtml(receiptOrder)
+    : buildThermalReceiptHtml(receiptOrder, paperWidth);
 
   return (
     <>
       <div className="adm-drawer-scrim" onClick={onClose} />
-      <div className="adm-modal inv-modal" role="dialog" aria-label="Thermal Receipt">
+      <div className="adm-modal inv-modal" role="dialog" aria-label="Order Printables">
         <div className="adm-drawer-h">
-          <h3>Thermal Receipt · #{order.id}</h3>
+          <h3>{docMode === 'label' ? 'Shipping Label' : 'Thermal Receipt'} · #{order.id}</h3>
           <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
         </div>
         <div className="adm-drawer-body">
           <div className="row between" style={{ marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
-            <span className="muted" style={{ fontSize: 12.5 }}>POS thermal roll format (monospace, monochrome, 0mm margin)</span>
             <div className="row" style={{ gap: 6 }}>
-              {['80mm', '58mm'].map((w) => (
-                <button
-                  key={w}
-                  type="button"
-                  className={`adm-chip${paperWidth === w ? ' on' : ''}`}
-                  onClick={() => setPaperWidth(w)}
-                >
-                  {w}
-                </button>
-              ))}
+              <button type="button" className={`adm-chip${docMode === 'receipt' ? ' on' : ''}`} onClick={() => setDocMode('receipt')}>
+                Thermal Receipt
+              </button>
+              <button type="button" className={`adm-chip${docMode === 'label' ? ' on' : ''}`} onClick={() => setDocMode('label')}>
+                Shipping Label (4×6″)
+              </button>
             </div>
+            {docMode === 'receipt' && (
+              <div className="row" style={{ gap: 6 }}>
+                {['80mm', '58mm'].map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    className={`adm-chip${paperWidth === w ? ' on' : ''}`}
+                    onClick={() => setPaperWidth(w)}
+                  >
+                    {w}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -881,11 +893,11 @@ function InvoiceModal({ order, onClose }) {
           ) : (
             <div style={{ display: 'flex', justifyContent: 'center', background: 'var(--surface-2)', padding: 14, borderRadius: 8, border: '1px solid var(--border)' }}>
               <iframe
-                title={`Receipt ${order.id}`}
-                srcDoc={receiptHtml}
+                title={`${docMode}-${order.id}`}
+                srcDoc={previewHtml}
                 style={{
-                  width: paperWidth === '58mm' ? 230 : 320,
-                  height: 440,
+                  width: docMode === 'label' ? 380 : (paperWidth === '58mm' ? 230 : 320),
+                  height: docMode === 'label' ? 520 : 440,
                   border: '1px solid #d4d4d8',
                   background: '#ffffff',
                 }}
@@ -899,18 +911,23 @@ function InvoiceModal({ order, onClose }) {
               className="adm-btn ghost"
               disabled={loading}
               onClick={() => {
-                downloadThermalReceipt(receiptOrder, paperWidth);
-                addToast(`Receipt #${order.id} (${paperWidth}) downloaded`);
+                if (docMode === 'label') {
+                  downloadShippingLabel(receiptOrder);
+                  addToast(`Shipping label #${order.id} downloaded`);
+                } else {
+                  downloadThermalReceipt(receiptOrder, paperWidth);
+                  addToast(`Receipt #${order.id} (${paperWidth}) downloaded`);
+                }
               }}
             >
-              <Icon name="download" size={15} /> Download ({paperWidth})
+              <Icon name="download" size={15} /> {docMode === 'label' ? 'Download Label' : `Download (${paperWidth})`}
             </button>
             <button
               className="adm-btn primary"
               disabled={loading}
-              onClick={() => printThermalReceipt(receiptOrder, paperWidth)}
+              onClick={() => (docMode === 'label' ? printShippingLabel(receiptOrder) : printThermalReceipt(receiptOrder, paperWidth))}
             >
-              Print Thermal Receipt
+              {docMode === 'label' ? 'Print Shipping Label' : 'Print Thermal Receipt'}
             </button>
           </div>
         </div>
