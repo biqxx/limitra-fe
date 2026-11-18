@@ -243,21 +243,14 @@ export function buildShippingLabelHtml(rawOrder) {
     orderNo,
     addr,
     customerName,
-    customerPhone,
     addressParts,
     deliveryMethod,
-    items,
   } = extractOrderMeta(rawOrder);
 
   const tracking = rawOrder?.tracking || {};
   const courier = (tracking.courier || deliveryMethod || 'STANDARD').toUpperCase();
   const waybill = tracking.tracking_number || orderNo;
-  const totalQty = items.reduce((s, it) => s + Number(it.quantity || 1), 0) || Number(rawOrder?.items_count || 1);
   const cityBadge = addr.redstar_city_code || addr.city || addr.state || 'NG';
-
-  const itemSummary = items.length
-    ? items.map((it) => `${Number(it.quantity || 1)}x ${esc(it.name || it.product_name || 'Item')}`).join('<br />')
-    : `${totalQty} item(s)`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -337,7 +330,6 @@ export function buildShippingLabelHtml(rawOrder) {
 
     <div class="hdr">SHIP TO:</div>
     <div class="to-name">${esc(customerName)}</div>
-    ${customerPhone ? `<div class="to-addr">TEL: ${esc(customerPhone)}</div>` : ''}
     <div class="to-addr">${addressParts.length ? esc(addressParts.join(', ')) : 'No delivery address'}</div>
 
     <div class="hr"></div>
@@ -350,15 +342,6 @@ export function buildShippingLabelHtml(rawOrder) {
       <div style="text-align:right">
         <div class="hdr">METHOD / COURIER</div>
         <div><b>${esc(courier)}</b></div>
-      </div>
-    </div>
-
-    <div class="dash"></div>
-
-    <div class="row">
-      <div>
-        <div class="hdr">ITEMS (${totalQty})</div>
-        <div class="small">${itemSummary}</div>
       </div>
     </div>
 
