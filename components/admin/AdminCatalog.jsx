@@ -830,23 +830,23 @@ function useOrderDetail(order) {
   const [detail, setDetail] = useState(order?.raw || null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
+  const reload = useCallback(async () => {
     setLoading(true);
-    adminOrdersApi.get(order.id)
-      .then((res) => {
-        if (!cancelled) setDetail(res?.data || res || order.raw);
-      })
-      .catch(() => {
-        if (!cancelled) setDetail(order.raw);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
+    try {
+      const res = await adminOrdersApi.get(order.id);
+      setDetail(res?.data || res || order.raw);
+    } catch {
+      setDetail(order.raw);
+    } finally {
+      setLoading(false);
+    }
   }, [order]);
 
-  return { detail: detail || order?.raw || {}, loading };
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { detail: detail || order?.raw || {}, loading, reload };
 }
 
 function InvoiceModal({ order, onClose }) {
@@ -923,10 +923,26 @@ function InvoiceModal({ order, onClose }) {
   );
 }
 
-function ShippingLabelModal({ order, onClose }) {
+function ShippingLabelModal({ order, onClose, onDispatched }) {
   const addToast = useAdminToast();
-  const { detail: labelOrder, loading } = useOrderDetail(order);
+  const { detail: labelOrder, loading, reload } = useOrderDetail(order);
+  const [dispatching, setDispatching] = useState(false);
   const labelHtml = buildShippingLabelHtml(labelOrder);
+  const hasTracking = !!labelOrder?.tracking?.tracking_number;
+
+  const registerRedStar = async () => {
+    setDispatching(true);
+    try {
+      await adminOrdersApi.shipRedStar(order.id, {});
+      addToast(`Order #${order.id} registered with Red Star Logistics`);
+      await reload();
+      onDispatched?.();
+    } catch (error) {
+      addToast(messageFrom(error));
+    } finally {
+      setDispatching(false);
+    }
+  };
 
   return (
     <>
@@ -937,8 +953,20 @@ function ShippingLabelModal({ order, onClose }) {
           <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
         </div>
         <div className="adm-drawer-body">
-          <div className="row between" style={{ marginBottom: 12, gap: 8 }}>
-            <span className="muted" style={{ fontSize: 12.5 }}>4×6″ (100×150mm) thermal shipping label</span>
+          <div className="row between" style={{ marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              4×6″ (100×150mm) thermal shipping label · {hasTracking ? `RedStar ID: ${labelOrder.tracking.tracking_number}` : 'Not yet registered with Red Star'}
+            </span>
+            {!loading && !hasTracking && (
+              <button
+                type="button"
+                className="adm-btn primary"
+                disabled={dispatching}
+                onClick={registerRedStar}
+              >
+                <Icon name="truck" size={14} /> {dispatching ? 'Registering…' : 'Register with Red Star'}
+              </button>
+            )}
           </div>
 
           {loading ? (
@@ -1124,7 +1152,7 @@ export function AdminOrders() {
         )}
       </div>
       {invoice && <InvoiceModal order={invoice} onClose={() => setInvoice(null)} />}
-      {shippingLabel && <ShippingLabelModal order={shippingLabel} onClose={() => setShippingLabel(null)} />}
+      {shippingLabel && <ShippingLabelModal order={shippingLabel} onClose={() => setShippingLabel(null)} onDispatched={loadOrders} />}
 
       {statusDraft && (
         <OrderDrawer title={`Update status · #${statusDraft.order.id}`} saving={saving} canSave={!!statusDraft.note.trim()} onClose={() => setStatusDraft(null)} onSave={submitStatus} saveLabel="Update status">
@@ -1139,7 +1167,31 @@ export function AdminOrders() {
 
       {shipDraft && (
         <OrderDrawer title={`Mark as shipped · #${shipDraft.order.id}`} saving={saving} canSave={!!(shipDraft.courier.trim() && shipDraft.tracking_number.trim())} onClose={() => setShipDraft(null)} onSave={submitShip} saveLabel="Mark as shipped">
-          <label className="adm-field"><span>Courier</span><input value={shipDraft.courier} onChange={e => setShipDraft(c => ({ ...c, courier: e.target.value }))} placeholder="e.g. GIG Logistics" autoFocus /></label>
+          <div className="panel" style={{ padding: 12, marginBottom: 14, background: 'var(--surface-2)' }}>
+            <div className="row between" style={{ gap: 10, flexWrap: 'wrap' }}>
+              <div>
+                <b>Red Star Logistics</b>
+                <div className="muted" style={{ fontSize: 12 }}>Register shipment with Red Star &amp; generate tracking ID automatically.</div>
+              </div>
+              <button
+                type="button"
+                className="adm-btn primary"
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await adminOrdersApi.shipRedStar(shipDraft.order.id, {});
+                    toast('Order dispatched to Red Star Logistics');
+                    setShipDraft(null);
+                    await loadOrders();
+                  } catch (error) { toast(messageFrom(error)); } finally { setSaving(false); }
+                }}
+              >
+                <Icon name="truck" size={14} /> Dispatch via Red Star
+              </button>
+            </div>
+          </div>
+          <label className="adm-field"><span>Courier (manual override)</span><input value={shipDraft.courier} onChange={e => setShipDraft(c => ({ ...c, courier: e.target.value }))} placeholder="e.g. Red Star Express" autoFocus /></label>
           <label className="adm-field"><span>Tracking number</span><input value={shipDraft.tracking_number} onChange={e => setShipDraft(c => ({ ...c, tracking_number: e.target.value }))} /></label>
         </OrderDrawer>
       )}

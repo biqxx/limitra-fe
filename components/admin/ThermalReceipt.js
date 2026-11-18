@@ -249,8 +249,8 @@ export function buildShippingLabelHtml(rawOrder) {
   } = extractOrderMeta(rawOrder);
 
   const tracking = rawOrder?.tracking || {};
-  const courier = (tracking.courier || deliveryMethod || 'STANDARD').toUpperCase();
-  const waybill = tracking.tracking_number || orderNo;
+  const redstarTrackingId = tracking.tracking_number || '';
+  const courier = (tracking.courier || deliveryMethod || 'RED STAR EXPRESS').toUpperCase();
   const cityBadge = addr.redstar_city_code || addr.city || addr.state || 'NG';
 
   return `<!DOCTYPE html>
@@ -350,9 +350,12 @@ export function buildShippingLabelHtml(rawOrder) {
     <div class="hr"></div>
 
     <div class="barcode-box">
-      <div class="hdr">${tracking.tracking_number ? 'WAYBILL / TRACKING #' : 'ORDER REFERENCE'}</div>
-      <div class="barcode-bars">*${esc(waybill)}*</div>
-      <div class="small">${esc(fmtDateTime(rawOrder?.created_at))}</div>
+      <div class="hdr">REDSTAR TRACKING ID</div>
+      ${redstarTrackingId
+        ? `<div class="barcode-bars">*${esc(redstarTrackingId)}*</div>
+           <div><b>${esc(redstarTrackingId)}</b></div>`
+        : `<div class="bold" style="padding:4px 0;">NOT REGISTERED WITH RED STAR</div>`}
+      <div class="small">${esc(orderNo)} · ${esc(fmtDateTime(rawOrder?.created_at))}</div>
     </div>
   </div>
 </body>
