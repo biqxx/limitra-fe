@@ -17,6 +17,7 @@ import { messageFrom } from '@/lib/api/errors';
 import { Kpi } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
 import { AdmHead, Pager, usePager, AdmSelect, AdmDate, useHighlight } from './AdminShared';
+import { buildThermalReceiptHtml, printThermalReceipt, downloadThermalReceipt } from './ThermalReceipt';
 
 // Confirmed by the spec's own enum (GET /admin/orders' `status` param) — unlike
 // most of this API, these request/response shapes look real, though still
@@ -827,42 +828,90 @@ function fmtOrderDate(d) {
 
 function InvoiceModal({ order, onClose }) {
   const addToast = useAdminToast();
-  // Itemized line data isn't exposed yet — show the real total only, not a fabricated breakdown.
-  const sub = order.total;
-  const ship = 0;
+  const [paperWidth, setPaperWidth] = useState('80mm');
+  const [detail, setDetail] = useState(order?.raw || null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    adminOrdersApi.get(order.id)
+      .then((res) => {
+        if (!cancelled) setDetail(res?.data || res || order.raw);
+      })
+      .catch(() => {
+        if (!cancelled) setDetail(order.raw);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [order]);
+
+  const receiptOrder = detail || order.raw || {};
+  const receiptHtml = buildThermalReceiptHtml(receiptOrder, paperWidth);
+
   return (
     <>
       <div className="adm-drawer-scrim" onClick={onClose} />
-      <div className="adm-modal inv-modal" role="dialog" aria-label="Invoice">
+      <div className="adm-modal inv-modal" role="dialog" aria-label="Thermal Receipt">
         <div className="adm-drawer-h">
-          <h3>Invoice · #{order.id}</h3>
+          <h3>Thermal Receipt · #{order.id}</h3>
           <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
         </div>
         <div className="adm-drawer-body">
-          <div className="inv-top">
-            <div className="inv-brand"><img src="/assets/logo.png" alt="Limitra" className="inv-logo" /><small className="muted">Lagos, Nigeria · support@limitra.com.ng</small></div>
-            <div className="inv-meta">
-              <div><span className="muted">Order</span><b>#{order.id}</b></div>
-              <div><span className="muted">Date</span><b>{fmtOrderDate(order.date)}</b></div>
-              <div><span className="muted">Status</span><span className={'adm-pill ' + (ORDER_STATUS_CLS[order.status] || 'muted')}>{ORDER_STATUS_LABEL[order.status] || order.status}</span></div>
+          <div className="row between" style={{ marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+            <span className="muted" style={{ fontSize: 12.5 }}>POS thermal roll format (monospace, monochrome, 0mm margin)</span>
+            <div className="row" style={{ gap: 6 }}>
+              {['80mm', '58mm'].map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  className={`adm-chip${paperWidth === w ? ' on' : ''}`}
+                  onClick={() => setPaperWidth(w)}
+                >
+                  {w}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="inv-billto"><span className="muted">Billed to</span><b>{order.customer}</b></div>
-          <p className="muted" style={{ fontSize: 13, margin: '10px 0' }}>Itemized breakdown isn’t available yet.</p>
-          <div className="inv-totals">
-            <div><span className="muted">Subtotal</span><span>{naira(sub)}</span></div>
-            {Number(order.raw?.discount_total || 0) > 0 && (
-              <div><span className="muted">Coupon / Promo</span><span style={{ color: 'var(--danger, #dc2626)' }}>−{naira(Number(order.raw.discount_total))}</span></div>
-            )}
-            <div><span className="muted">Shipping</span><span>{ship === 0 ? 'Free' : naira(ship)}</span></div>
-            {Number(order.raw?.credit_total || 0) > 0 && (
-              <div><span className="muted">Wallet credit applied</span><span>−{naira(Number(order.raw.credit_total))}</span></div>
-            )}
-            <div className="inv-grand"><span>Order Value</span><b>{naira(order.total)}</b></div>
-          </div>
+
+          {loading ? (
+            <p className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>Loading order items &amp; delivery details…</p>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'center', background: 'var(--surface-2)', padding: 14, borderRadius: 8, border: '1px solid var(--border)' }}>
+              <iframe
+                title={`Receipt ${order.id}`}
+                srcDoc={receiptHtml}
+                style={{
+                  width: paperWidth === '58mm' ? 230 : 320,
+                  height: 440,
+                  border: '1px solid #d4d4d8',
+                  background: '#ffffff',
+                }}
+              />
+            </div>
+          )}
+
           <div className="adm-drawer-foot">
             <button className="adm-btn ghost" onClick={onClose}>Close</button>
-            <button className="adm-btn primary" onClick={() => addToast('Invoice #' + order.id + ' downloaded (PDF)')}><Icon name="download" size={15} /> Download PDF</button>
+            <button
+              className="adm-btn ghost"
+              disabled={loading}
+              onClick={() => {
+                downloadThermalReceipt(receiptOrder, paperWidth);
+                addToast(`Receipt #${order.id} (${paperWidth}) downloaded`);
+              }}
+            >
+              <Icon name="download" size={15} /> Download ({paperWidth})
+            </button>
+            <button
+              className="adm-btn primary"
+              disabled={loading}
+              onClick={() => printThermalReceipt(receiptOrder, paperWidth)}
+            >
+              Print Thermal Receipt
+            </button>
           </div>
         </div>
       </div>
