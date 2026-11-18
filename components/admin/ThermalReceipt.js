@@ -243,6 +243,7 @@ export function buildShippingLabelHtml(rawOrder) {
     orderNo,
     addr,
     customerName,
+    customerPhone,
     addressParts,
     deliveryMethod,
   } = extractOrderMeta(rawOrder);
@@ -330,6 +331,7 @@ export function buildShippingLabelHtml(rawOrder) {
 
     <div class="hdr">SHIP TO:</div>
     <div class="to-name">${esc(customerName)}</div>
+    ${customerPhone ? `<div class="to-addr">TEL: ${esc(customerPhone)}</div>` : ''}
     <div class="to-addr">${addressParts.length ? esc(addressParts.join(', ')) : 'No delivery address'}</div>
 
     <div class="hr"></div>
