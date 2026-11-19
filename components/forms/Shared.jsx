@@ -62,16 +62,22 @@ export function Field({ label, value, onChange, err, placeholder, type = 'text',
   );
 }
 
-export function FSelect({ label, value, onChange, options, span }) {
+export function FSelect({ label, value, onChange, options, span, err, disabled, placeholder }) {
   return (
     <div className="field" style={{ gridColumn: span === 'full' ? '1 / -1' : 'auto' }}>
       <label>{label}</label>
-      <div className="sort-wrap" style={{ height: 49, borderRadius: 'var(--r-sm)', width: '100%' }}>
-        <select className="sort-sel" style={{ width: '100%' }} value={value} onChange={e => onChange(e.target.value)}>
-          {options.map(o => <option key={o}>{o}</option>)}
+      <div className={'sort-wrap' + (err ? ' err' : '')} style={{ height: 49, borderRadius: 'var(--r-sm)', width: '100%' }}>
+        <select className="sort-sel" style={{ width: '100%' }} value={value} onChange={e => onChange(e.target.value)} disabled={disabled}>
+          {placeholder != null && <option value="">{placeholder}</option>}
+          {options.map((o) => {
+            const val = typeof o === 'object' ? o.value : o;
+            const lbl = typeof o === 'object' ? o.label : o;
+            return <option key={val} value={val}>{lbl}</option>;
+          })}
         </select>
         <Icon name="chevdown" size={15} className="muted sort-chev" />
       </div>
+      {err && <span className="err-msg">{err}</span>}
     </div>
   );
 }
@@ -199,9 +205,7 @@ export function AddressForm({ initial, onSave, onCancel }) {
   return (
     <form onSubmit={submit}>
       {f.type === 'delivery' && locError && (
-        <div className="adm-alert err" style={{ marginBottom: 12 }}>
-          <Icon name="info" size={16} /> Red Star locations unavailable: {locError}
-        </div>
+        <FormAlert>Red Star locations unavailable: {locError}</FormAlert>
       )}
       <div className="form-grid">
         <FSelect label="Address type" value={f.type === 'billing' ? 'Billing' : 'Delivery'} onChange={v => set('type', v === 'Billing' ? 'billing' : 'delivery')} options={['Delivery', 'Billing']} />
@@ -212,34 +216,24 @@ export function AddressForm({ initial, onSave, onCancel }) {
         <FField label="Address line 2 (optional)" span="full" value={f.line2 || ''} onChange={v => set('line2', v)} placeholder="Apartment, suite, etc." />
         {f.type === 'delivery' ? (
           <>
-            <div className="fld">
-              <label>Red Star city</label>
-              <select
-                value={f.redstar_city_code}
-                onChange={e => onCityChange(e.target.value)}
-                disabled={locLoading}
-              >
-                <option value="">{locLoading ? 'Loading cities…' : 'Select Red Star city'}</option>
-                {cities.map(c => (
-                  <option key={c.abbr} value={c.abbr}>{c.name} ({c.abbr})</option>
-                ))}
-              </select>
-              {errs.redstar_city_code && <small className="fld-err">{errs.redstar_city_code}</small>}
-            </div>
-            <div className="fld">
-              <label>Red Star delivery town</label>
-              <select
-                value={f.redstar_town_id}
-                onChange={e => onTownChange(e.target.value)}
-                disabled={!f.redstar_city_code || towns.length === 0}
-              >
-                <option value="">{!f.redstar_city_code ? 'Select a city first' : towns.length === 0 ? 'Loading towns…' : 'Select delivery town'}</option>
-                {towns.map(t => (
-                  <option key={t.id} value={String(t.id)}>{t.name}</option>
-                ))}
-              </select>
-              {errs.redstar_town_id && <small className="fld-err">{errs.redstar_town_id}</small>}
-            </div>
+            <FSelect
+              label="Red Star city"
+              value={f.redstar_city_code}
+              onChange={onCityChange}
+              disabled={locLoading}
+              placeholder={locLoading ? 'Loading cities…' : 'Select Red Star city'}
+              options={cities.map(c => ({ value: c.abbr, label: `${c.name} (${c.abbr})` }))}
+              err={errs.redstar_city_code}
+            />
+            <FSelect
+              label="Red Star delivery town"
+              value={f.redstar_town_id}
+              onChange={onTownChange}
+              disabled={!f.redstar_city_code || towns.length === 0}
+              placeholder={!f.redstar_city_code ? 'Select a city first' : towns.length === 0 ? 'Loading towns…' : 'Select delivery town'}
+              options={towns.map(t => ({ value: String(t.id), label: t.name }))}
+              err={errs.redstar_town_id}
+            />
           </>
         ) : (
           <>
