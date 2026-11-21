@@ -200,10 +200,10 @@ export function CartPage() {
             }
             return (
               <div className="cart-item" key={it.key}>
-                <div className="ci-thumb" onClick={() => go('product', p.id)}><Thumb product={p} src={REAL_IMG[p.id]} /></div>
+                <div className="ci-thumb" onClick={() => go('product', p.slug || p.id)}><Thumb product={p} src={REAL_IMG[p.id]} /></div>
                 <div className="ci-info">
                   <span className="pc-brand">{p.brand}</span>
-                  <h4 onClick={() => go('product', p.id)} style={{ cursor: 'pointer' }}>{p.name}</h4>
+                  <h4 onClick={() => go('product', p.slug || p.id)} style={{ cursor: 'pointer' }}>{p.name}</h4>
                   <div className="ci-meta">
                     {Object.entries(it.variants || {}).map(([g, v]) => (
                       <span className="ci-tag" key={g}>{v.hex && <i style={{ background: v.hex }} />}{v.label}</span>
@@ -610,7 +610,13 @@ export function CheckoutPage() {
                   <Icon name="info" size={17} />{deliveryError}
                 </div>
               )}
-              {deliveryOptions.length === 0 && pickupLocations.length === 0 && !deliveryLoading && !pickupLoading ? (
+              {activeAddr && (!activeAddr.redstar_city_code || !activeAddr.redstar_town_id) && !deliveryLoading ? (
+                <div className="co-note" style={{ marginBottom: 10 }}>
+                  <Icon name="info" size={17} />
+                  <span>This saved address needs a Red Star city and delivery town before shipping can be calculated.</span>
+                  <button type="button" className="link-btn" onClick={() => setAddrModal(activeAddr)} style={{ marginLeft: 8 }}>Update address</button>
+                </div>
+              ) : deliveryOptions.length === 0 && pickupLocations.length === 0 && !deliveryLoading && !pickupLoading ? (
                 <p className="muted">No delivery options are available for this address.</p>
               ) : (
                 <div className="radio-cards">

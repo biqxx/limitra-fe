@@ -1,6 +1,5 @@
-import { AffMicrostore } from '@/components/affiliate/Affiliate';
+import { redirect } from 'next/navigation';
 
 export default function Page() {
-  return <AffMicrostore />;
+  redirect('/microstore/dashboard');
 }
-

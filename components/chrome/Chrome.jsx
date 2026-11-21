@@ -721,7 +721,7 @@ export function Footer() {
   ['Shop', [['Phones & Tablets', () => go('shop', 'phones')], ['Computers & Accessories', () => go('shop', 'computing')], ['Electronics', () => go('shop', 'electronics')], ['Women’s Fashion', () => go('shop', 'womens')], ['All deals', () => go('shop', 'deals')]]],
   ['Account', [['My account', () => go('account')], ['Orders', () => go('orders')], ['Wishlist', () => go('wishlist')], ['Track order', () => go('orders')], isAdmin ? ['Go to admin', () => router.push('/admin')] : isAffiliate ? ['Go to dashboard', () => router.push('/affiliate/dashboard')] : isAuthenticated ? ['Sign out', async () => { await logout(); go('auth', 'signin'); }] : ['Sign in', () => go('auth', 'signin')]]],
   ['Support', [['Help center', () => go('help')], ['About us', () => go('about')], ['Videos', () => go('videos')], ['Channels', () => go('channels')], ['Contact us', () => go('help', 'contact')]]],
-  ['Earn from Limitra', [['Limitra MicroStores', () => go('microstores')], ['Limitra Celebrity Stores', () => go('celebrityStores')], ['Become an Affiliate', () => go('affiliate')], ['Affiliate dashboard', () => router.push('/affiliate/dashboard')], ['Careers', () => go('careers')]]]];
+  ['Earn from Limitra', [['Limitra MicroStores', () => go('microstores')], ['MicroStore Dashboard', () => router.push('/microstore/dashboard')], ['Limitra Celebrity Stores', () => go('celebrityStores')], ['Become an Affiliate', () => go('affiliate')], ['Affiliate dashboard', () => router.push('/affiliate/dashboard')], ['Careers', () => go('careers')]]]];
 
   return (
     <footer className="site-foot">

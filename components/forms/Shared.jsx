@@ -4,7 +4,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { cardBrand as dataCardBrand } from '@/lib/data';
-import { fieldErrorsFrom } from '@/lib/api/errors';
+import { redstarApi } from '@/lib/api/endpoints';
+import { fieldErrorsFrom, messageFrom } from '@/lib/api/errors';
 
 export const NG_STATES = ['Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Enugu', 'Kaduna', 'Delta'];
 
@@ -51,26 +52,32 @@ export function FField({ label, value, onChange, err, placeholder, type = 'text'
 }
 
 /* originally legacy/pages-cart.jsx's Field, reused as-is by pages-account.jsx */
-export function Field({ label, value, onChange, err, placeholder, type = 'text', half, full }) {
+export function Field({ label, value, onChange, err, placeholder, type = 'text', min, half, full }) {
   return (
     <div className="field" style={{ gridColumn: full ? '1 / -1' : half ? 'auto' : '1 / -1' }}>
       <label>{label}</label>
-      <input className={'input' + (err ? ' err' : '')} type={type} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
+      <input className={'input' + (err ? ' err' : '')} type={type} min={min} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
       {err && <span className="err-msg">{err}</span>}
     </div>
   );
 }
 
-export function FSelect({ label, value, onChange, options, span }) {
+export function FSelect({ label, value, onChange, options, span, err, disabled, placeholder }) {
   return (
     <div className="field" style={{ gridColumn: span === 'full' ? '1 / -1' : 'auto' }}>
       <label>{label}</label>
-      <div className="sort-wrap" style={{ height: 49, borderRadius: 'var(--r-sm)', width: '100%' }}>
-        <select className="sort-sel" style={{ width: '100%' }} value={value} onChange={e => onChange(e.target.value)}>
-          {options.map(o => <option key={o}>{o}</option>)}
+      <div className={'sort-wrap' + (err ? ' err' : '')} style={{ height: 49, borderRadius: 'var(--r-sm)', width: '100%' }}>
+        <select className="sort-sel" style={{ width: '100%' }} value={value} onChange={e => onChange(e.target.value)} disabled={disabled}>
+          {placeholder != null && <option value="">{placeholder}</option>}
+          {options.map((o) => {
+            const val = typeof o === 'object' ? o.value : o;
+            const lbl = typeof o === 'object' ? o.label : o;
+            return <option key={val} value={val}>{lbl}</option>;
+          })}
         </select>
         <Icon name="chevdown" size={15} className="muted sort-chev" />
       </div>
+      {err && <span className="err-msg">{err}</span>}
     </div>
   );
 }
@@ -92,27 +99,103 @@ export function AddressForm({ initial, onSave, onCancel }) {
   // schema turned out to be stale and the backend rejects it outright. This
   // matches what PATCH /addresses/{id} documents instead. country must be a
   // 2-letter ISO code ("NG"), also undocumented but confirmed live.
-  const [f, setF] = useState(() => initial || {
+  const [f, setF] = useState(() => ({
     type: 'delivery', recipient_name: '', phone: '', line1: '', line2: '', city: '',
-    landmark: '', state: 'Lagos', postal_code: '', is_default: false,
-  });
+    landmark: '', state: 'Lagos', postal_code: '', redstar_city_code: '', redstar_town_id: '', is_default: false,
+    ...(initial || {}),
+    redstar_city_code: initial?.redstar_city_code || '',
+    redstar_town_id: initial?.redstar_town_id ? String(initial.redstar_town_id) : '',
+  }));
   const [errs, setErrs] = useState({});
   const [saving, setSaving] = useState(false);
+  const [cities, setCities] = useState([]);
+  const [towns, setTowns] = useState([]);
+  const [locLoading, setLocLoading] = useState(false);
+  const [locError, setLocError] = useState('');
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+
+  useEffect(() => {
+    if (f.type !== 'delivery') return;
+    let cancelled = false;
+    setLocLoading(true);
+    setLocError('');
+    redstarApi.cities()
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res) ? res : (res?.data || []);
+        setCities(list.filter(c => c?.abbr && c?.name));
+      })
+      .catch((err) => {
+        if (!cancelled) setLocError(messageFrom(err, 'Unable to load Red Star delivery cities.'));
+      })
+      .finally(() => {
+        if (!cancelled) setLocLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [f.type]);
+
+  useEffect(() => {
+    if (f.type !== 'delivery' || !f.redstar_city_code) {
+      setTowns([]);
+      return;
+    }
+    let cancelled = false;
+    redstarApi.towns(f.redstar_city_code)
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res) ? res : (res?.data || []);
+        setTowns(list.filter(t => t?.id != null && t?.name));
+      })
+      .catch((err) => {
+        if (!cancelled) setLocError(messageFrom(err, 'Unable to load Red Star delivery towns.'));
+      });
+    return () => { cancelled = true; };
+  }, [f.type, f.redstar_city_code]);
+
+  const onCityChange = (abbr) => {
+    const selectedCity = cities.find(c => String(c.abbr) === String(abbr));
+    setF(s => ({
+      ...s,
+      redstar_city_code: abbr,
+      redstar_town_id: '',
+      state: selectedCity?.name || s.state,
+    }));
+  };
+
+  const onTownChange = (townId) => {
+    const selectedTown = towns.find(t => String(t.id) === String(townId));
+    setF(s => ({
+      ...s,
+      redstar_town_id: townId,
+      city: selectedTown?.name || s.city,
+    }));
+  };
+
   const submit = async e => {
     e.preventDefault();
     const er = {};
     if (!f.recipient_name.trim()) er.recipient_name = 'Recipient name is required';
     if (!f.phone.trim()) er.phone = 'Phone number is required';
     if (!f.line1.trim()) er.line1 = 'Street address is required';
-    if (!f.city.trim()) er.city = 'City is required';
-    if (!f.state.trim()) er.state = 'State is required';
+    if (f.type === 'delivery') {
+      if (!f.redstar_city_code) er.redstar_city_code = 'Red Star delivery city is required';
+      if (!f.redstar_town_id) er.redstar_town_id = 'Red Star delivery town is required';
+    } else {
+      if (!f.city.trim()) er.city = 'City is required';
+      if (!f.state.trim()) er.state = 'State is required';
+    }
     if (!f.postal_code.trim()) er.postal_code = 'Postal code is required';
     setErrs(er);
     if (Object.keys(er).length) return;
     setSaving(true);
     try {
-      await onSave({ ...f, country: 'NG' });
+      const payload = {
+        ...f,
+        country: 'NG',
+        redstar_city_code: f.type === 'delivery' ? f.redstar_city_code : null,
+        redstar_town_id: f.type === 'delivery' && f.redstar_town_id ? Number(f.redstar_town_id) : null,
+      };
+      await onSave(payload);
     } catch (err) {
       setErrs(fieldErrorsFrom(err));
     } finally {
@@ -121,6 +204,9 @@ export function AddressForm({ initial, onSave, onCancel }) {
   };
   return (
     <form onSubmit={submit}>
+      {f.type === 'delivery' && locError && (
+        <FormAlert>Red Star locations unavailable: {locError}</FormAlert>
+      )}
       <div className="form-grid">
         <FSelect label="Address type" value={f.type === 'billing' ? 'Billing' : 'Delivery'} onChange={v => set('type', v === 'Billing' ? 'billing' : 'delivery')} options={['Delivery', 'Billing']} />
         <FField label="Postal code" value={f.postal_code} onChange={v => set('postal_code', v)} err={errs.postal_code} placeholder="100001" />
@@ -128,8 +214,33 @@ export function AddressForm({ initial, onSave, onCancel }) {
         <FField label="Phone number" type="tel" value={f.phone} onChange={v => set('phone', v)} err={errs.phone} placeholder="0800 000 0000" />
         <FField label="Address line 1" span="full" value={f.line1} onChange={v => set('line1', v)} err={errs.line1} placeholder="14 Admiralty Way, Lekki Phase 1" />
         <FField label="Address line 2 (optional)" span="full" value={f.line2 || ''} onChange={v => set('line2', v)} placeholder="Apartment, suite, etc." />
-        <FField label="City" value={f.city} onChange={v => set('city', v)} err={errs.city} placeholder="Lagos" />
-        <FSelect label="State" value={f.state} onChange={v => set('state', v)} options={NG_STATES} />
+        {f.type === 'delivery' ? (
+          <>
+            <FSelect
+              label="Red Star city"
+              value={f.redstar_city_code}
+              onChange={onCityChange}
+              disabled={locLoading}
+              placeholder={locLoading ? 'Loading cities…' : 'Select Red Star city'}
+              options={cities.map(c => ({ value: c.abbr, label: `${c.name} (${c.abbr})` }))}
+              err={errs.redstar_city_code}
+            />
+            <FSelect
+              label="Red Star delivery town"
+              value={f.redstar_town_id}
+              onChange={onTownChange}
+              disabled={!f.redstar_city_code || towns.length === 0}
+              placeholder={!f.redstar_city_code ? 'Select a city first' : towns.length === 0 ? 'Loading towns…' : 'Select delivery town'}
+              options={towns.map(t => ({ value: String(t.id), label: t.name }))}
+              err={errs.redstar_town_id}
+            />
+          </>
+        ) : (
+          <>
+            <FField label="City" value={f.city} onChange={v => set('city', v)} err={errs.city} placeholder="Lagos" />
+            <FSelect label="State" value={f.state} onChange={v => set('state', v)} options={NG_STATES} />
+          </>
+        )}
         <FField label="Landmark (optional)" span="full" value={f.landmark || ''} onChange={v => set('landmark', v)} placeholder="Near ..." />
       </div>
       <CheckRow checked={!!f.is_default} onChange={v => set('is_default', v)}>Set as default address</CheckRow>

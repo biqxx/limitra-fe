@@ -269,7 +269,17 @@ export function AdminCustomers() {
                         <div><b>{u.name || u.username || 'Unnamed'}</b><small>{u.email || '—'}</small></div>
                       </div>
                     </td>
-                    <td data-label="Role"><span className="adm-pill info" style={{ textTransform: 'capitalize' }}>{role}</span></td>
+                    <td data-label="Role">
+                      <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+                        {Array.isArray(u.roles) && u.roles.length > 0
+                          ? u.roles.map(r => (
+                              <span key={r.id || r.name} className={`adm-pill ${r.name === 'celebrity_store_owner' ? 'warn' : r.name === 'microstore_owner' ? 'ok' : 'info'}`}>
+                                {r.display_name || r.name}
+                              </span>
+                            ))
+                          : <span className="adm-pill info" style={{ textTransform: 'capitalize' }}>{role}</span>}
+                      </div>
+                    </td>
                     <td data-label="Orders">{u.orders_count ?? 0}</td>
                     <td data-label="Joined" className="muted">{formatDate(u.created_at)}</td>
                     <td data-label="Status"><span className={'adm-pill ' + (suspended ? 'bad' : 'ok')}>{suspended ? 'Suspended' : 'Active'}</span></td>

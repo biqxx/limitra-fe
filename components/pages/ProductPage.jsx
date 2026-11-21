@@ -9,7 +9,7 @@ import { ShareButton } from '@/components/share/Share';
 import { VideoStage, VID_POSTER, VIDEOS } from '@/components/video/Video';
 import { CATEGORIES, naira, byId, bySlug, byCat, effectivePrice } from '@/lib/data';
 import { productsApi, reviewsApi } from '@/lib/api/endpoints';
-import { comboKey, groupsFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
+import { comboKey, groupsFromFlatVariants, imageMapFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
 
 function mapProductDetails(product) {
   const imageUrls = Array.isArray(product.images)
@@ -25,6 +25,7 @@ function mapProductDetails(product) {
   const flatVariants = Array.isArray(product.variants) ? product.variants.filter(v => v && typeof v === 'object') : [];
   const variants = groupsFromFlatVariants(flatVariants);
   const variantStock = stockMapFromFlatVariants(flatVariants);
+  const variantImages = imageMapFromFlatVariants(flatVariants);
   const specs = Array.isArray(product.specifications)
     ? product.specifications.filter(spec => spec?.name).map(spec => [spec.name, spec.value ?? ''])
     : [];
@@ -55,24 +56,28 @@ function mapProductDetails(product) {
     specs,
     variants,
     variantStock,
+    variantImages,
   };
 }
 
-function Gallery({ product, variantKey }) {
+function Gallery({ product, variantKey, activeImages }) {
   const [active, setActive] = useState(0);
   const [zoom, setZoom] = useState(false);
   const [pos, setPos] = useState({ x: 50, y: 50 });
   const [lightbox, setLightbox] = useState(false);
   const isMobile = () => window.matchMedia('(max-width: 767px)').matches;
   const real = REAL_IMG[product.id];
-  const gImgs = Array.isArray(product.images) && product.images.length > 0
-    ? product.images
-    : (real ? [real] : null);
+  const gImgs = Array.isArray(activeImages) && activeImages.length > 0
+    ? activeImages
+    : (Array.isArray(product.images) && product.images.length > 0
+      ? product.images
+      : (real ? [real] : null));
   const angles = ['front', 'back', 'side', 'detail'];
   const thumbItems = gImgs || angles;
   const vid = (VIDEOS || []).find(v => (v.products || []).includes(product.id));
   const VIDEO_TAB = thumbItems.length; // index for the video view
-  useEffect(() => { if (active >= thumbItems.length) setActive(0); }, [variantKey, thumbItems.length, active]);
+  useEffect(() => { setActive(0); }, [variantKey]);
+  useEffect(() => { if (active >= thumbItems.length) setActive(0); }, [thumbItems.length, active]);
   const move = e => {
     if (isMobile()) return;
     const r = e.currentTarget.getBoundingClientRect();
@@ -283,6 +288,18 @@ export function ProductPage({ id }) {
   const comboStock = comboStockRec ? Number(comboStockRec.stock) || 0 : null;
   const comboOutOfStock = comboStock != null && comboStock <= 0;
   const outOfStock = comboOutOfStock || (!variants.length && product.stock <= 0);
+
+  const activeVariantImages = useMemo(() => {
+    const map = product.variantImages;
+    if (!map) return null;
+    const exact = map.byCombo?.[comboKey(selectedAttributes)];
+    if (Array.isArray(exact) && exact.length) return exact;
+    for (const [k, val] of Object.entries(selectedAttributes)) {
+      const optImgs = map.byOption?.[`${k.toLowerCase()}:${String(val).toLowerCase()}`];
+      if (Array.isArray(optImgs) && optImgs.length) return optImgs;
+    }
+    return null;
+  }, [product.variantImages, variantKey]);
   const buy = async (checkout) => {
     const selectedVariants = {};
     variants.forEach(g => {
@@ -304,7 +321,7 @@ export function ProductPage({ id }) {
       <Breadcrumbs items={[{ label: 'Home', to: ['home'] }, { label: CATEGORIES.find(c => c.slug === product.category)?.name, to: ['shop', product.category] }, { label: product.brand }]} />
 
       <div className="pdp">
-        <Gallery product={product} variantKey={variantKey} />
+        <Gallery product={product} variantKey={variantKey} activeImages={activeVariantImages} />
         <div className="pdp-info">
           <div className="row between">
             <span className="pc-brand" style={{ fontSize: 13 }}>{product.brand} · <span style={{ color: 'var(--text-muted)' }}>{product.store}</span></span>

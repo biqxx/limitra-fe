@@ -189,7 +189,7 @@ function ShopShell({ baseList, title, eyebrow, crumbLabel }) {
 export function ListCard({ product }) {
   const { go, addToCart, toggleWish, wish } = useStore();
   return (
-    <article className="list-card" onClick={() => go('product', product.id)}>
+    <article className="list-card" onClick={() => go('product', product.slug || product.id)}>
       <div className="lc-thumb"><Thumb product={product} src={REAL_IMG[product.id]} /></div>
       <div className="lc-body">
         <span className="pc-brand">{product.brand}</span>

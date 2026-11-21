@@ -17,6 +17,7 @@ import { messageFrom } from '@/lib/api/errors';
 import { Kpi } from '@/components/charts/Charts';
 import { useAdminToast } from './AdminToastContext';
 import { AdmHead, Pager, usePager, AdmSelect, AdmDate, useHighlight } from './AdminShared';
+import { buildThermalReceiptHtml, printThermalReceipt, downloadThermalReceipt, buildShippingLabelHtml, printShippingLabel, downloadShippingLabel } from './ThermalReceipt';
 
 // Confirmed by the spec's own enum (GET /admin/orders' `status` param) — unlike
 // most of this API, these request/response shapes look real, though still
@@ -628,8 +629,8 @@ export function ProductEditDrawer({ draft, onClose, onSave, onMutated }) {
               </div>
 
               <div className="adm-field-row">
-                <label className="adm-field"><span>{sourced ? 'Approved / proposed price (₦)' : 'Price (₦)'}</span><input type="number" value={f.price} onChange={e => set('price', e.target.value)} disabled={sourced} />{sourced && <small className="muted">Managed by supplier pricing below.</small>}</label>
-                <label className="adm-field"><span>Stock</span><input type="number" value={f._stock} onChange={e => set('_stock', e.target.value)} /></label>
+                <label className="adm-field"><span>{sourced ? 'Approved / proposed price (₦)' : 'Price (₦)'}</span><input type="number" min="0" step="0.01" value={f.price} onChange={e => set('price', e.target.value)} disabled={sourced} />{sourced && <small className="muted">Managed by supplier pricing below.</small>}</label>
+                <label className="adm-field"><span>Stock</span><input type="number" min="0" step="1" value={f._stock} onChange={e => set('_stock', e.target.value)} /></label>
               </div>
 
               {f.id && f.id !== 'new' && (
@@ -825,44 +826,185 @@ function fmtOrderDate(d) {
   return isNaN(dt) ? String(d) : `${dt.getDate()} ${MONTHS_SHORT[dt.getMonth()]} ${dt.getFullYear()}`;
 }
 
+function useOrderDetail(order) {
+  const [detail, setDetail] = useState(order?.raw || null);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await adminOrdersApi.get(order.id);
+      setDetail(res?.data || res || order.raw);
+    } catch {
+      setDetail(order.raw);
+    } finally {
+      setLoading(false);
+    }
+  }, [order]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { detail: detail || order?.raw || {}, loading, reload };
+}
+
 function InvoiceModal({ order, onClose }) {
   const addToast = useAdminToast();
-  // Itemized line data isn't exposed yet — show the real total only, not a fabricated breakdown.
-  const sub = order.total;
-  const ship = 0;
+  const [paperWidth, setPaperWidth] = useState('80mm');
+  const { detail: receiptOrder, loading } = useOrderDetail(order);
+  const previewHtml = buildThermalReceiptHtml(receiptOrder, paperWidth);
+
   return (
     <>
       <div className="adm-drawer-scrim" onClick={onClose} />
-      <div className="adm-modal inv-modal" role="dialog" aria-label="Invoice">
+      <div className="adm-modal inv-modal" role="dialog" aria-label="Thermal Receipt">
         <div className="adm-drawer-h">
-          <h3>Invoice · #{order.id}</h3>
+          <h3>Thermal Receipt · #{order.id}</h3>
           <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
         </div>
         <div className="adm-drawer-body">
-          <div className="inv-top">
-            <div className="inv-brand"><img src="/assets/logo.png" alt="Limitra" className="inv-logo" /><small className="muted">Lagos, Nigeria · support@limitra.com.ng</small></div>
-            <div className="inv-meta">
-              <div><span className="muted">Order</span><b>#{order.id}</b></div>
-              <div><span className="muted">Date</span><b>{fmtOrderDate(order.date)}</b></div>
-              <div><span className="muted">Status</span><span className={'adm-pill ' + (ORDER_STATUS_CLS[order.status] || 'muted')}>{ORDER_STATUS_LABEL[order.status] || order.status}</span></div>
+          <div className="row between" style={{ marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+            <span className="muted" style={{ fontSize: 12.5 }}>POS thermal roll format (monospace, monochrome, 0mm margin)</span>
+            <div className="row" style={{ gap: 6 }}>
+              {['80mm', '58mm'].map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  className={`adm-chip${paperWidth === w ? ' on' : ''}`}
+                  onClick={() => setPaperWidth(w)}
+                >
+                  {w}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="inv-billto"><span className="muted">Billed to</span><b>{order.customer}</b></div>
-          <p className="muted" style={{ fontSize: 13, margin: '10px 0' }}>Itemized breakdown isn’t available yet.</p>
-          <div className="inv-totals">
-            <div><span className="muted">Subtotal</span><span>{naira(sub)}</span></div>
-            {Number(order.raw?.discount_total || 0) > 0 && (
-              <div><span className="muted">Coupon / Promo</span><span style={{ color: 'var(--danger, #dc2626)' }}>−{naira(Number(order.raw.discount_total))}</span></div>
-            )}
-            <div><span className="muted">Shipping</span><span>{ship === 0 ? 'Free' : naira(ship)}</span></div>
-            {Number(order.raw?.credit_total || 0) > 0 && (
-              <div><span className="muted">Wallet credit applied</span><span>−{naira(Number(order.raw.credit_total))}</span></div>
-            )}
-            <div className="inv-grand"><span>Order Value</span><b>{naira(order.total)}</b></div>
-          </div>
+
+          {loading ? (
+            <p className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>Loading order items &amp; delivery details…</p>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'center', background: 'var(--surface-2)', padding: 14, borderRadius: 8, border: '1px solid var(--border)' }}>
+              <iframe
+                title={`receipt-${order.id}`}
+                srcDoc={previewHtml}
+                style={{
+                  width: paperWidth === '58mm' ? 230 : 320,
+                  height: 440,
+                  border: '1px solid #d4d4d8',
+                  background: '#ffffff',
+                }}
+              />
+            </div>
+          )}
+
           <div className="adm-drawer-foot">
             <button className="adm-btn ghost" onClick={onClose}>Close</button>
-            <button className="adm-btn primary" onClick={() => addToast('Invoice #' + order.id + ' downloaded (PDF)')}><Icon name="download" size={15} /> Download PDF</button>
+            <button
+              className="adm-btn ghost"
+              disabled={loading}
+              onClick={() => {
+                downloadThermalReceipt(receiptOrder, paperWidth);
+                addToast(`Receipt #${order.id} (${paperWidth}) downloaded`);
+              }}
+            >
+              <Icon name="download" size={15} /> Download ({paperWidth})
+            </button>
+            <button
+              className="adm-btn primary"
+              disabled={loading}
+              onClick={() => printThermalReceipt(receiptOrder, paperWidth)}
+            >
+              Print Thermal Receipt
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ShippingLabelModal({ order, onClose, onDispatched }) {
+  const addToast = useAdminToast();
+  const { detail: labelOrder, loading, reload } = useOrderDetail(order);
+  const [dispatching, setDispatching] = useState(false);
+  const labelHtml = buildShippingLabelHtml(labelOrder);
+  const hasTracking = !!labelOrder?.tracking?.tracking_number;
+
+  const registerRedStar = async () => {
+    setDispatching(true);
+    try {
+      await adminOrdersApi.shipRedStar(order.id, {});
+      addToast(`Order #${order.id} registered with Red Star Logistics`);
+      await reload();
+      onDispatched?.();
+    } catch (error) {
+      addToast(messageFrom(error));
+    } finally {
+      setDispatching(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="adm-drawer-scrim" onClick={onClose} />
+      <div className="adm-modal inv-modal" role="dialog" aria-label="Shipping Label">
+        <div className="adm-drawer-h">
+          <h3>Shipping Label · #{order.id}</h3>
+          <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
+        </div>
+        <div className="adm-drawer-body">
+          <div className="row between" style={{ marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              4×6″ (100×150mm) thermal shipping label · {hasTracking ? `RedStar ID: ${labelOrder.tracking.tracking_number}` : 'Not yet registered with Red Star'}
+            </span>
+            {!loading && !hasTracking && (
+              <button
+                type="button"
+                className="adm-btn primary"
+                disabled={dispatching}
+                onClick={registerRedStar}
+              >
+                <Icon name="truck" size={14} /> {dispatching ? 'Registering…' : 'Register with Red Star'}
+              </button>
+            )}
+          </div>
+
+          {loading ? (
+            <p className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>Loading shipping address &amp; tracking…</p>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'center', background: 'var(--surface-2)', padding: 14, borderRadius: 8, border: '1px solid var(--border)' }}>
+              <iframe
+                title={`shipping-label-${order.id}`}
+                srcDoc={labelHtml}
+                style={{
+                  width: 380,
+                  height: 520,
+                  border: '1px solid #d4d4d8',
+                  background: '#ffffff',
+                }}
+              />
+            </div>
+          )}
+
+          <div className="adm-drawer-foot">
+            <button className="adm-btn ghost" onClick={onClose}>Close</button>
+            <button
+              className="adm-btn ghost"
+              disabled={loading}
+              onClick={() => {
+                downloadShippingLabel(labelOrder);
+                addToast(`Shipping label #${order.id} downloaded`);
+              }}
+            >
+              <Icon name="download" size={15} /> Download Label
+            </button>
+            <button
+              className="adm-btn primary"
+              disabled={loading}
+              onClick={() => printShippingLabel(labelOrder)}
+            >
+              Print Shipping Label
+            </button>
           </div>
         </div>
       </div>
@@ -902,6 +1044,7 @@ export function AdminOrders() {
   const [orders, setOrders] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState('All');
+  const [shippingLabel, setShippingLabel] = useState(null);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('recent');
   const [invoice, setInvoice] = useState(null);
@@ -994,7 +1137,8 @@ export function AdminOrders() {
                   <td>{o.customer}</td><td className="muted">{fmtOrderDate(o.date)}</td><td>{o.itemCount}</td><td><b>{naira(o.total)}</b></td>
                   <td><span className={'adm-pill ' + (ORDER_STATUS_CLS[o.status] || 'muted')}>{ORDER_STATUS_LABEL[o.status] || o.status}</span></td>
                   <td><div className="adm-rowact">
-                    <button title="View invoice" onClick={() => setInvoice(o)}><Icon name="eye" size={15} /></button>
+                    <button title="Thermal receipt / invoice" onClick={() => setInvoice(o)}><Icon name="eye" size={15} /></button>
+                    <button title="Shipping label" onClick={() => setShippingLabel(o)}><Icon name="tag" size={15} /></button>
                     <button title="Update status" onClick={() => setStatusDraft({ order: o, status: STATUS_UPDATE_OPTIONS[0], note: '' })}><Icon name="edit" size={15} /></button>
                     <button title="Mark as shipped" onClick={() => setShipDraft({ order: o, courier: '', tracking_number: '' })}><Icon name="truck" size={15} /></button>
                     <button title="Refund" onClick={() => setRefundDraft({ order: o, amount: o.total, method: 'original_payment', reason: '' })}><Icon name="dollar" size={15} /></button>
@@ -1008,6 +1152,7 @@ export function AdminOrders() {
         )}
       </div>
       {invoice && <InvoiceModal order={invoice} onClose={() => setInvoice(null)} />}
+      {shippingLabel && <ShippingLabelModal order={shippingLabel} onClose={() => setShippingLabel(null)} onDispatched={loadOrders} />}
 
       {statusDraft && (
         <OrderDrawer title={`Update status · #${statusDraft.order.id}`} saving={saving} canSave={!!statusDraft.note.trim()} onClose={() => setStatusDraft(null)} onSave={submitStatus} saveLabel="Update status">
@@ -1022,7 +1167,31 @@ export function AdminOrders() {
 
       {shipDraft && (
         <OrderDrawer title={`Mark as shipped · #${shipDraft.order.id}`} saving={saving} canSave={!!(shipDraft.courier.trim() && shipDraft.tracking_number.trim())} onClose={() => setShipDraft(null)} onSave={submitShip} saveLabel="Mark as shipped">
-          <label className="adm-field"><span>Courier</span><input value={shipDraft.courier} onChange={e => setShipDraft(c => ({ ...c, courier: e.target.value }))} placeholder="e.g. GIG Logistics" autoFocus /></label>
+          <div className="panel" style={{ padding: 12, marginBottom: 14, background: 'var(--surface-2)' }}>
+            <div className="row between" style={{ gap: 10, flexWrap: 'wrap' }}>
+              <div>
+                <b>Red Star Logistics</b>
+                <div className="muted" style={{ fontSize: 12 }}>Register shipment with Red Star &amp; generate tracking ID automatically.</div>
+              </div>
+              <button
+                type="button"
+                className="adm-btn primary"
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await adminOrdersApi.shipRedStar(shipDraft.order.id, {});
+                    toast('Order dispatched to Red Star Logistics');
+                    setShipDraft(null);
+                    await loadOrders();
+                  } catch (error) { toast(messageFrom(error)); } finally { setSaving(false); }
+                }}
+              >
+                <Icon name="truck" size={14} /> Dispatch via Red Star
+              </button>
+            </div>
+          </div>
+          <label className="adm-field"><span>Courier (manual override)</span><input value={shipDraft.courier} onChange={e => setShipDraft(c => ({ ...c, courier: e.target.value }))} placeholder="e.g. Red Star Express" autoFocus /></label>
           <label className="adm-field"><span>Tracking number</span><input value={shipDraft.tracking_number} onChange={e => setShipDraft(c => ({ ...c, tracking_number: e.target.value }))} /></label>
         </OrderDrawer>
       )}

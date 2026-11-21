@@ -900,7 +900,7 @@ function AccountWallet() {
       <h1 style={{ fontSize: 26, marginBottom: 6 }}>Wallet &amp; Deposits</h1>
       <p className="muted" style={{ marginBottom: 18 }}>Balance: <b style={{ color: 'var(--text)' }}>{naira(walletBalance)}</b></p>
       <form className="acct-panel row" style={{ gap: 10, maxWidth: 460, marginBottom: 20, alignItems: 'flex-end' }} onSubmit={deposit}>
-        <Field label="Top-up amount (NGN)" type="number" value={amount} onChange={setAmount} />
+        <Field label="Top-up amount (NGN)" type="number" min="0" value={amount} onChange={setAmount} />
         <button className="btn btn-primary btn-sm" type="submit" disabled={busy}>{busy ? 'Processing…' : 'Deposit'}</button>
       </form>
       <div className="acct-panel">
