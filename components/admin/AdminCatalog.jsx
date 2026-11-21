@@ -610,6 +610,18 @@ export function ProductEditDrawer({ draft, onClose, onSave, onMutated }) {
                 }} />
                 {f._img && <span className="adm-img-replace"><Icon name="edit" size={13} /> Change photo</span>}
               </label>
+              {Array.isArray(f._raw?.images) && f._raw.images.length > 1 && (
+                <div className="adm-field">
+                  <span>All photos ({f._raw.images.length})</span>
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                    {f._raw.images.map((img, i) => {
+                      const src = typeof img === 'string' ? img : img?.url || img?.path;
+                      if (!src) return null;
+                      return <img key={img?.id ?? i} src={src} alt="" style={{ width: 54, height: 54, borderRadius: 'var(--r-md)', objectFit: 'cover', border: '1.5px solid var(--border)' }} />;
+                    })}
+                  </div>
+                </div>
+              )}
 
               <label className="adm-field"><span>Category</span>
                 <AdmSelect value={f.category} options={cats.map(c => ({ value: c.slug, label: c.name }))} onChange={v => set('category', v)} creatable onCreate={addCat} />
