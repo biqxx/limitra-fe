@@ -629,8 +629,8 @@ export function ProductEditDrawer({ draft, onClose, onSave, onMutated }) {
               </div>
 
               <div className="adm-field-row">
-                <label className="adm-field"><span>{sourced ? 'Approved / proposed price (₦)' : 'Price (₦)'}</span><input type="number" value={f.price} onChange={e => set('price', e.target.value)} disabled={sourced} />{sourced && <small className="muted">Managed by supplier pricing below.</small>}</label>
-                <label className="adm-field"><span>Stock</span><input type="number" value={f._stock} onChange={e => set('_stock', e.target.value)} /></label>
+                <label className="adm-field"><span>{sourced ? 'Approved / proposed price (₦)' : 'Price (₦)'}</span><input type="number" min="0" step="0.01" value={f.price} onChange={e => set('price', e.target.value)} disabled={sourced} />{sourced && <small className="muted">Managed by supplier pricing below.</small>}</label>
+                <label className="adm-field"><span>Stock</span><input type="number" min="0" step="1" value={f._stock} onChange={e => set('_stock', e.target.value)} /></label>
               </div>
 
               {f.id && f.id !== 'new' && (

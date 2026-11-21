@@ -52,11 +52,11 @@ export function FField({ label, value, onChange, err, placeholder, type = 'text'
 }
 
 /* originally legacy/pages-cart.jsx's Field, reused as-is by pages-account.jsx */
-export function Field({ label, value, onChange, err, placeholder, type = 'text', half, full }) {
+export function Field({ label, value, onChange, err, placeholder, type = 'text', min, half, full }) {
   return (
     <div className="field" style={{ gridColumn: full ? '1 / -1' : half ? 'auto' : '1 / -1' }}>
       <label>{label}</label>
-      <input className={'input' + (err ? ' err' : '')} type={type} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
+      <input className={'input' + (err ? ' err' : '')} type={type} min={min} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
       {err && <span className="err-msg">{err}</span>}
     </div>
   );

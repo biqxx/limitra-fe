@@ -18,7 +18,7 @@ const fn = naira;
 
 const FAFF_NAV = [
   ['Overview', [['dashboard', 'Dashboard', 'grid'], ['analytics', 'Performance', 'spark']]],
-  ['Promote', [['promote', 'Promotion Center', 'bag'], ['links', 'My Links', 'share'], ['microstore', 'My MicroStore', 'store'], ['resources', 'Marketing', 'gift']]],
+  ['Promote', [['promote', 'Promotion Center', 'bag'], ['links', 'My Links', 'share'], ['resources', 'Marketing', 'gift']]],
   ['Earnings', [['earnings', 'Earnings', 'dollar'], ['withdraw', 'Withdrawals', 'card'], ['referrals', 'Referrals', 'user'], ['promocodes', 'Promo Codes', 'tag']]],
   ['Community', [['leaderboard', 'Tier & Ranking', 'flame']]],
   ['Account', [['settings', 'Profile & Settings', 'lock']]],

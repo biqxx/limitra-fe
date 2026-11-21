@@ -114,7 +114,7 @@ export function AdminSpin() {
                 )}
               </div>
               <input className="cfg-name" value={p.name} onChange={e => upd(i, 'name', e.target.value)} placeholder="Reward name" />
-              <input className="cfg-val" type="number" value={p.weight} onChange={e => upd(i, 'weight', e.target.value)} />
+              <input className="cfg-val" type="number" min="0" value={p.weight} onChange={e => upd(i, 'weight', e.target.value)} />
               <span className="pct-tag">%</span>
               <button className="cfg-del" onClick={() => setPrizes(ps => ps.filter((_, j) => j !== i))} aria-label="Remove reward"><Icon name="trash" size={14} /></button>
             </div>
@@ -148,7 +148,7 @@ export function AdminSpin() {
           </div>
           <div className="adm-list">
             <div className="adm-li"><div className="adm-li-main"><b>Wheel enabled</b><small>Show on signup</small></div><Toggle checked={campaignActive} onChange={setCampaignActive} /></div>
-            <div className="adm-li"><div className="adm-li-main"><b>Coupon expiry</b><small>Days valid after win</small></div><input type="number" style={{ width: 70, textAlign: 'center', padding: 7, border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }} value={expiryDays} onChange={e => setExpiryDays(Number(e.target.value) || 7)} /></div>
+            <div className="adm-li"><div className="adm-li-main"><b>Coupon expiry</b><small>Days valid after win</small></div><input type="number" min="1" style={{ width: 70, textAlign: 'center', padding: 7, border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }} value={expiryDays} onChange={e => setExpiryDays(Number(e.target.value) || 7)} /></div>
             <div className="adm-li"><div className="adm-li-main"><b>One spin per account</b><small>Anti-abuse lock</small></div><Toggle defaultOn locked /></div>
           </div>
         </div>
