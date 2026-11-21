@@ -64,7 +64,7 @@ function compressImage(file) {
 const ELO_STORAGE_KEY = 'lim_elo_chat_v1';
 
 export function EloAI() {
-  const { go, addToCart, isAuthenticated } = useStore();
+  const { go, addToCart, toggleWish, wish, isAuthenticated } = useStore();
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [msgs, setMsgs] = useState([{ role: 'assistant', text: GREETING }]);
@@ -264,16 +264,41 @@ export function EloAI() {
                   {m.text && <span>{m.text}</span>}
                   {m.products && m.products.length > 0 && (
                     <div className="lucy-cards">
-                      {m.products.map(pid => { const p = byId(pid); if (!p) return null; return (
-                        <div className="lucy-card" key={pid}>
-                          <div className="lucy-card-thumb" onClick={() => { go('product', p.slug || p.id); setOpen(false); }}><Thumb product={p} src={REAL_IMG[p.id]} /></div>
-                          <div className="lucy-card-info">
-                            <b>{p.name}</b>
-                            <span className="lucy-card-price">{naira(p.price)}</span>
+                      {m.products.map(pid => {
+                        const p = byId(pid);
+                        if (!p) return null;
+                        const faved = wish.includes(p.id);
+                        const openProduct = () => { go('product', p.slug || p.id); setOpen(false); };
+                        return (
+                          <div className="lucy-card" key={pid} onClick={openProduct} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openProduct(); } }}>
+                            <div className="lucy-card-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></div>
+                            <div className="lucy-card-info">
+                              <b>{p.name}</b>
+                              <span className="lucy-card-price">{naira(p.price)}</span>
+                            </div>
+                            <div className="lucy-card-actions">
+                              <button
+                                type="button"
+                                className="lucy-card-icon primary"
+                                title="Add to cart"
+                                aria-label="Add to cart"
+                                onClick={e => { e.stopPropagation(); addToCart(p); }}
+                              >
+                                <Icon name="cart" size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                className={'lucy-card-icon fav' + (faved ? ' on' : '')}
+                                title={faved ? 'Remove from favourites' : 'Add to favourites'}
+                                aria-label={faved ? 'Remove from favourites' : 'Add to favourites'}
+                                onClick={e => { e.stopPropagation(); toggleWish(p.id); }}
+                              >
+                                <Icon name="heart" size={16} fill={faved ? 'currentColor' : 'none'} />
+                              </button>
+                            </div>
                           </div>
-                          <button className="lucy-card-cta" onClick={() => { addToCart(p, {}, 1); }}><Icon name="cart" size={15} /> Add to cart</button>
-                        </div>
-                      ); })}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
