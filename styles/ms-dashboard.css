@@ -1,0 +1,44 @@
+/* MicroStore owner dashboard — sits inside the normal site chrome (unlike the
+   isolated full-viewport .adm shell used by Admin/Affiliate), so this is a
+   plain in-flow sidebar layout rather than a 100vh grid. */
+
+.ms-dash { display: grid; grid-template-columns: 260px 1fr; gap: 28px; align-items: start; }
+
+.ms-dash-side {
+  position: sticky; top: 90px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: 18px; display: flex; flex-direction: column; gap: 16px;
+}
+
+.ms-dash-store { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.ms-dash-avatar {
+  width: 40px; height: 40px; border-radius: var(--r-sm); background: var(--surface-2);
+  display: grid; place-items: center; font-weight: 700; font-size: 13px; flex: none;
+}
+
+.ms-dash-nav { display: flex; flex-direction: column; gap: 2px; }
+.ms-dash-grp { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); margin: 14px 0 4px; }
+.ms-dash-grp:first-child { margin-top: 0; }
+.ms-dash-link {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 10px; border-radius: var(--r-sm); color: var(--text-muted); font-size: 14px; font-weight: 600;
+  transition: background .15s, color .15s;
+}
+.ms-dash-link:hover { background: var(--surface-2); color: var(--text); }
+.ms-dash-link.on { background: var(--primary); color: #fff; }
+
+.ms-dash-main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.ms-dash-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+.ms-dash-top h1 { font-size: 24px; }
+
+/* Thumb (components/ui/Shared.jsx) renders a bare <img> sized by its usual
+   .pcard .thumb context — outside that, the image has no intrinsic size
+   constraint and overflows its wrapper at full natural resolution. This
+   forces it to fill whatever fixed-size box it's dropped into instead. */
+.ms-thumb-fit { position: relative; overflow: hidden; }
+.ms-thumb-fit img, .ms-thumb-fit .ph { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+@media (max-width: 900px) {
+  .ms-dash { grid-template-columns: 1fr; }
+  .ms-dash-side { position: static; }
+}

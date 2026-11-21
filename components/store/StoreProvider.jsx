@@ -33,7 +33,7 @@ let _catalogPromise = null;
 function needsCatalogOnRoute(pathname) {
   if (!pathname || pathname.startsWith('/admin')) return false;
   if (pathname === '/') return true;
-  return ['/shop', '/deals', '/category', '/product', '/cart', '/wishlist', '/channels', '/microstores', '/store'].some(
+  return ['/shop', '/deals', '/category', '/product', '/cart', '/wishlist', '/channels', '/microstores', '/microstore', '/store'].some(
     prefix => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
 }

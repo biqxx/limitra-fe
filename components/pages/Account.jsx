@@ -6,7 +6,7 @@ import { useStore } from '@/components/store/StoreProvider';
 import { SocialMark } from '@/components/ui/SocialMark';
 import { Breadcrumbs, EmptyState, ProductCard } from '@/components/ui/Shared';
 import { Modal, AddressForm, CardForm, CardBrandMark, Field } from '@/components/forms/Shared';
-import { naira, SOCIAL_GLYPHS, byId } from '@/lib/data';
+import { naira, byId } from '@/lib/data';
 import {
   authApi, profileApi, ordersApi, favoritesApi, sharedWishlistsApi, supportTicketsApi,
   privacyApi, walletApi, returnsApi, notificationsApi, userPreferencesApi, referralsApi,
@@ -615,7 +615,7 @@ function Profile() {
             const m = CH_META[k]; const c = channels[k];
             return (
               <div key={k} className={'chan-row ' + m.cls + (c.connected ? ' on' : '')}>
-                <span className="chan-ic">{m.glyph ? <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={SOCIAL_GLYPHS[k]} /></svg> : <Icon name={m.icon} size={18} />}</span>
+                <span className="chan-ic">{m.glyph ? <SocialMark name={k} size={18} /> : <Icon name={m.icon} size={18} />}</span>
                 <div className="chan-info">
                   <b>{m.name}</b>
                   <small className="muted">{c.connected && c.value ? c.value : m.note}</small>

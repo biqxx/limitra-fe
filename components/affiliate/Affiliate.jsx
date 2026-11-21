@@ -1534,6 +1534,20 @@ function AffSettings() {
 }
 
 /* ============ MY MICROSTORE ============ */
+// GET /my-microstore's shape for the curated-products relation is
+// undocumented — try every plausible key a Laravel resource might use for it
+// instead of assuming `.products` is the only one (mirrors
+// components/microstore/Microstore.jsx's extractProducts).
+function extractMsProducts(s, raw) {
+  for (const obj of [s, raw]) {
+    for (const key of ['products', 'curated_products', 'store_products', 'microstore_products', 'items']) {
+      if (Array.isArray(obj?.[key])) return obj[key];
+    }
+  }
+  return [];
+}
+const msProductKeyOf = (p) => p.product_id ?? p.id;
+
 function AffMicrostore() {
   const affToast = useAffiliateToast();
   const [store, setStore] = useState(null);
@@ -1553,7 +1567,14 @@ function AffMicrostore() {
       setStore(s);
       setTitle(s?.name || s?.title || '');
       setTagline(s?.tagline || s?.bio || '');
-      setProducts(Array.isArray(s?.products) ? s.products : Array.isArray(res?.products) ? res.products : []);
+      // Merge rather than replace: if the server's GET omits the relation
+      // this must not wipe out products just optimistically added below.
+      const fetched = extractMsProducts(s, res);
+      setProducts((prev) => {
+        const byKey = new Map(prev.map((p) => [msProductKeyOf(p), p]));
+        fetched.forEach((p) => byKey.set(msProductKeyOf(p), p));
+        return Array.from(byKey.values());
+      });
     } catch (e) {
       affToast(messageFrom(e, 'Could not load your MicroStore'));
     } finally {
@@ -1568,7 +1589,7 @@ function AffMicrostore() {
     try {
       await myMicrostoreApi.update({ name: title.trim(), tagline: tagline.trim() });
       affToast('MicroStore updated');
-      await loadStore();
+      loadStore();
     } catch (e) {
       affToast(messageFrom(e));
     } finally {
@@ -1580,12 +1601,16 @@ function AffMicrostore() {
     e.preventDefault();
     if (!newProdId.trim()) return;
     setSaving(true);
+    const body = { product_id: Number(newProdId), custom_description: newNote.trim() || undefined };
     try {
-      await myMicrostoreApi.addProduct({ product_id: Number(newProdId), curator_note: newNote.trim() || undefined });
+      const res = await myMicrostoreApi.addProduct(body);
+      const created = res?.microstore_product || res?.product || res;
+      const item = (created && typeof created === 'object' && (created.product_id || created.id)) ? created : body;
+      setProducts((prev) => (prev.some((p) => msProductKeyOf(p) === msProductKeyOf(item)) ? prev : [...prev, item]));
       affToast('Product added to MicroStore');
       setNewProdId('');
       setNewNote('');
-      await loadStore();
+      loadStore();
     } catch (err) {
       affToast(messageFrom(err));
     } finally {
@@ -1593,21 +1618,25 @@ function AffMicrostore() {
     }
   };
 
-  const toggleFeatured = async (p) => {
+  const togglePinned = async (p) => {
+    const key = p.product_id || p.id;
+    setProducts((prev) => prev.map((x) => (msProductKeyOf(x) === key ? { ...x, is_pinned: !x.is_pinned } : x)));
     try {
-      await myMicrostoreApi.updateProduct(p.product_id || p.id, { is_featured: !p.is_featured });
+      await myMicrostoreApi.updateProduct(key, { is_pinned: !p.is_pinned });
       affToast('Updated product');
-      await loadStore();
+      loadStore();
     } catch (e) {
       affToast(messageFrom(e));
     }
   };
 
   const removeProd = async (p) => {
+    const key = p.product_id || p.id;
+    setProducts((prev) => prev.filter((x) => msProductKeyOf(x) !== key));
     try {
-      await myMicrostoreApi.removeProduct(p.product_id || p.id);
+      await myMicrostoreApi.removeProduct(key);
       affToast('Removed from MicroStore');
-      await loadStore();
+      loadStore();
     } catch (e) {
       affToast(messageFrom(e));
     }
@@ -1616,7 +1645,7 @@ function AffMicrostore() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <FHead title="My MicroStore" sub="Curate your storefront profile and featured catalog products." />
-      {loading ? <p className="muted">Loading MicroStore…</p> : !store ? (
+      {loading && !store ? <p className="muted">Loading MicroStore…</p> : !store ? (
         <div className="panel"><p className="muted">No MicroStore profile is active for this account yet.</p></div>
       ) : (
         <>
@@ -1632,7 +1661,7 @@ function AffMicrostore() {
             <div className="panel-h"><h3>Add Product to MicroStore</h3></div>
             <form className="adm-field-row" onSubmit={addProduct} style={{ alignItems: 'flex-end' }}>
               <label className="adm-field"><span>Product ID</span><input type="number" min="1" value={newProdId} onChange={e => setNewProdId(e.target.value)} placeholder="e.g. 12" /></label>
-              <label className="adm-field"><span>Curator note (optional)</span><input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Why you recommend it" /></label>
+              <label className="adm-field"><span>Description (optional)</span><input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Why you recommend it" /></label>
               <button className="adm-btn primary" type="submit" disabled={saving || !newProdId.trim()}>Add product</button>
             </form>
           </div>
@@ -1640,15 +1669,15 @@ function AffMicrostore() {
             <div className="panel-h" style={{ padding: '18px 20px 12px', marginBottom: 0 }}><h3>Curated Products ({products.length})</h3></div>
             <div className="adm-table-wrap">
               <table className="adm-table">
-                <thead><tr><th>Product</th><th>Price</th><th>Featured</th><th></th></tr></thead>
+                <thead><tr><th>Product</th><th>Price</th><th>Pinned</th><th></th></tr></thead>
                 <tbody>
                   {products.length === 0 ? (
                     <tr><td colSpan={4} className="muted" style={{ textAlign: 'center', padding: 24 }}>No curated products yet.</td></tr>
                   ) : products.map((p) => (
                     <tr key={p.id || p.product_id}>
-                      <td><b>{p.product?.name || p.name || `Product #${p.product_id || p.id}`}</b></td>
+                      <td><b>{p.custom_title || p.product?.name || p.name || `Product #${p.product_id || p.id}`}</b></td>
                       <td>{fn(Number(p.product?.price || p.price || 0))}</td>
-                      <td><button className={'adm-pill ' + (p.is_featured ? 'ok' : 'muted')} onClick={() => toggleFeatured(p)}>{p.is_featured ? 'Featured' : 'Standard'}</button></td>
+                      <td><button className={'adm-pill ' + (p.is_pinned ? 'ok' : 'muted')} onClick={() => togglePinned(p)}>{p.is_pinned ? 'Pinned' : 'Standard'}</button></td>
                       <td><div className="adm-rowact"><button className="del" title="Remove" onClick={() => removeProd(p)}><FIcon name="trash" size={15} /></button></div></td>
                     </tr>
                   ))}

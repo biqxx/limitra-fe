@@ -1,9 +1,19 @@
-/* Social glyph icon — originally defined inside legacy/pages-auth.jsx and reused by
-   pages-home, videos, pages-account, share; given a real shared home here. */
-import { SOCIAL_GLYPHS } from '@/lib/data';
+/* Social brand glyph — backed by react-icons (authentic brand marks) instead
+   of the previous hand-drawn SVG paths. Same <SocialMark name="X" size={N} />
+   API as before, so call sites are untouched. */
+import { FaFacebook, FaInstagram, FaWhatsapp, FaTiktok } from 'react-icons/fa';
+import { FaXTwitter } from 'react-icons/fa6';
+
+const I = {
+  X: FaXTwitter,
+  Facebook: FaFacebook,
+  Instagram: FaInstagram,
+  WhatsApp: FaWhatsapp,
+  TikTok: FaTiktok,
+};
 
 export function SocialMark({ name, size = 18 }) {
-  const d = (SOCIAL_GLYPHS || {})[name];
-  if (!d) return null;
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={d} /></svg>;
+  const Cmp = I[name];
+  if (!Cmp) return null;
+  return <Cmp size={size} color="currentColor" aria-hidden="true" />;
 }

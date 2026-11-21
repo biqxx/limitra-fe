@@ -1,80 +1,56 @@
 'use client';
 /* LIMITRA, MicroStore storefront — a single MicroStore Partner's shop page.
-   Demo content only (see lib/microstoresData.js) — these aren't real catalog
-   products, so tiles here don't add to cart or link to a real product page.
-   Reuses the real Shop page's FilterPanel/pagerList/priceSort (ShopPage.jsx)
-   for full feature parity (price range, brand, rating, offers, pagination)
-   instead of a cut-down copy. */
+   Wired to the real backend: microstoresApi.get(slug) for the store profile,
+   microstoresApi.products(slug) for its curated catalog. Curated items only
+   carry a product_id (+ curator note/featured flag) — each is resolved
+   against the already-loaded global PRODUCTS catalog (byId) to get the full
+   normalized shape ProductCard/ListCard expect (price, rating, badges, etc.),
+   same as every other product grid in the app, instead of a cut-down demo
+   shape. Follow/Chat have no backend yet (no follow or messaging endpoint
+   for MicroStores) so they stay honest placeholders. */
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
-import { Breadcrumbs, EmptyState, Placeholder, Stars, Price } from '@/components/ui/Shared';
+import { Breadcrumbs, EmptyState, ProductCard } from '@/components/ui/Shared';
 import { Dropdown } from '@/components/forms/Shared';
-import { FilterPanel, pagerList, priceSort } from '@/components/pages/ShopPage';
+import { FilterPanel, ListCard, pagerList, priceSort } from '@/components/pages/ShopPage';
 import { microstoresApi } from '@/lib/api/endpoints';
-import { storeBySlug } from '@/lib/microstoresData';
+import { byId } from '@/lib/data';
 
 const SORTS = [['relevance', 'Most relevant'], ['low', 'Price: low to high'], ['high', 'Price: high to low'], ['rating', 'Top rated'], ['new', 'Newest']];
 const PER_PAGE = 10;
-
-function useDemoNotice() {
-  const { toast } = useStore();
-  return () => toast('This is demo content — real products come from Limitra’s live catalog.');
-}
-
-function MsProductTile({ product }) {
-  const demoNotice = useDemoNotice();
-  return (
-    <article className="pcard" onClick={demoNotice} style={{ cursor: 'pointer' }}>
-      <div className="thumb">
-        <Placeholder product={{ tint: product.tint }} label={product.name.split(' ')[0]} />
-        <div className="thumb-badges">
-          {product.off > 0 && <span className="badge badge-sale">-{product.off}%</span>}
-          {product.badge === 'new' && <span className="badge badge-new">New</span>}
-          {product.badge === 'best' && <span className="badge badge-hot">Best seller</span>}
-        </div>
-        <button className="pc-add" title="Add to cart" onClick={e => { e.stopPropagation(); demoNotice(); }}><Icon name="plus" size={20} /></button>
-      </div>
-      <div className="pc-body">
-        <span className="pc-brand">{product.brand}</span>
-        <span className="pc-name">{product.name}</span>
-        <span className="pc-rate"><Stars value={product.rating} /> {product.rating} · {product.reviews.toLocaleString()}</span>
-        <Price now={product.price} was={product.was} />
-      </div>
-    </article>
-  );
-}
-
-function MsListTile({ product }) {
-  const demoNotice = useDemoNotice();
-  return (
-    <article className="list-card" onClick={demoNotice} style={{ cursor: 'pointer' }}>
-      <div className="lc-thumb"><Placeholder product={{ tint: product.tint }} label={product.name.split(' ')[0]} /></div>
-      <div className="lc-body">
-        <span className="pc-brand">{product.brand}</span>
-        <h4 style={{ fontSize: 17, margin: '4px 0 6px' }}>{product.name}</h4>
-        <span className="pc-rate" style={{ marginBottom: 8 }}><Stars value={product.rating} /> {product.rating} · {product.reviews.toLocaleString()} reviews</span>
-        {product.desc && <p className="muted" style={{ fontSize: 13.5, maxWidth: 520, textWrap: 'pretty' }}>{product.desc}</p>}
-      </div>
-      <div className="lc-buy">
-        <Price now={product.price} was={product.was} />
-        {product.stock > 0 && product.stock <= 5 && <span className="badge badge-soft" style={{ marginTop: 8 }}>Only {product.stock} left</span>}
-        {product.stock === 0 && <span className="badge badge-soft" style={{ marginTop: 8 }}>Out of stock</span>}
-        <button className="btn btn-ghost btn-sm" style={{ marginTop: 12 }} onClick={e => { e.stopPropagation(); demoNotice(); }}><Icon name="heart" size={15} /> Save</button>
-        <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={e => { e.stopPropagation(); demoNotice(); }}><Icon name="cart" size={16} /> Add to cart</button>
-      </div>
-    </article>
-  );
-}
 
 const EMPTY_FILTERS = { maxPrice: null, brands: [], minRating: 0, onSale: false, inStock: false };
 
 export function MicroStorePage({ slug }) {
   const { go, toast } = useStore();
-  const store = storeBySlug(slug);
+  const [store, setStore] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    if (slug) microstoresApi.trackClick(slug, { source: 'storefront' }).catch(() => {});
+    if (!slug) return;
+    let active = true;
+    setLoading(true);
+    setNotFound(false);
+    Promise.all([
+      microstoresApi.get(slug),
+      microstoresApi.products(slug, { per_page: 100 }).catch(() => null),
+    ]).then(([storeRes, productsRes]) => {
+      if (!active) return;
+      const s = storeRes?.microstore || storeRes;
+      if (!s) { setNotFound(true); setLoading(false); return; }
+      const curated = Array.isArray(productsRes) ? productsRes
+        : Array.isArray(productsRes?.items) ? productsRes.items
+        : Array.isArray(productsRes?.data) ? productsRes.data
+        : [];
+      setStore({ ...s, _curated: curated });
+      setLoading(false);
+    }).catch(() => {
+      if (active) { setNotFound(true); setLoading(false); }
+    });
+    microstoresApi.trackClick(slug, { source: 'storefront' }).catch(() => {});
+    return () => { active = false; };
   }, [slug]);
 
   const [q, setQ] = useState('');
@@ -85,13 +61,35 @@ export function MicroStorePage({ slug }) {
   const [page, setPage] = useState(1);
   const [drawer, setDrawer] = useState(false);
 
-  const products = useMemo(() => store?.products || [], [store]);
-  const cats = useMemo(() => ['all', ...new Set(products.map(p => p.category))], [products]);
-  const brands = useMemo(() => [...new Set(products.map(p => p.brand))].sort(), [products]);
-  const priceCap = useMemo(() => Math.max(100000, Math.ceil(Math.max(...products.map(p => p.price), 0) / 100000) * 100000), [products]);
+  // Resolve each curated item (product_id + curator_note/is_featured) against
+  // the already-loaded global catalog to get a full, normalized product —
+  // falls back to the API's own embedded `.product` object if a curated id
+  // isn't in the currently-loaded catalog page.
+  const products = useMemo(() => {
+    const curated = store?._curated || [];
+    return curated
+      .map((item) => {
+        const pid = item.product_id ?? item.id ?? item.product?.id;
+        const full = byId(pid);
+        if (full) return full;
+        const p = item.product;
+        if (!p) return null;
+        return {
+          id: p.id ?? pid, name: p.name || `Product #${pid}`, brand: p.brand || '',
+          price: Number(p.price || 0), was: p.was ? Number(p.was) : undefined,
+          off: Number(p.off || 0), rating: Number(p.rating || 0), reviews: Number(p.reviews || 0),
+          badges: p.badges || [], category: p.category, slug: p.slug, stock: p.stock ?? 1,
+        };
+      })
+      .filter(Boolean);
+  }, [store]);
+
+  const cats = useMemo(() => ['all', ...new Set(products.map((p) => p.category).filter(Boolean))], [products]);
+  const brands = useMemo(() => [...new Set(products.map((p) => p.brand).filter(Boolean))].sort(), [products]);
+  const priceCap = useMemo(() => Math.max(100000, Math.ceil(Math.max(...products.map((p) => p.price), 0) / 100000) * 100000), [products]);
 
   const filtered = useMemo(() => {
-    let r = products.filter(p =>
+    let r = products.filter((p) =>
       (cat === 'all' || p.category === cat) &&
       (!q || p.name.toLowerCase().includes(q.toLowerCase())) &&
       p.price <= (f.maxPrice ?? Infinity) &&
@@ -110,7 +108,11 @@ export function MicroStorePage({ slug }) {
   const activeCount = f.brands.length + (f.onSale ? 1 : 0) + (f.inStock ? 1 : 0) + (f.minRating ? 1 : 0) + (f.maxPrice != null ? 1 : 0);
   const clearAll = () => setF(EMPTY_FILTERS);
 
-  if (!store) {
+  if (loading) {
+    return <div className="page page-fade"><div className="wrap" style={{ padding: '60px 0' }}><p className="muted">Loading store…</p></div></div>;
+  }
+
+  if (notFound || !store) {
     return (
       <div className="page page-fade"><div className="wrap">
         <EmptyState icon="store" title="Store not found" body="This MicroStore doesn’t exist or may have been removed." action="Explore MicroStores" onAction={() => go('microstoresExplore')} />
@@ -118,32 +120,43 @@ export function MicroStorePage({ slug }) {
     );
   }
 
+  const name = store.name || 'MicroStore';
+  const tagline = store.tagline || '';
+  const description = store.bio || store.description || '';
+  const rating = store.rating ?? store.average_rating;
+  const reviewsCount = store.reviews_count ?? store.reviews;
+  const location = store.city || store.location || store.address;
+
   return (
     <div className="page page-fade">
       <section className="sec" style={{ paddingTop: 8, paddingBottom: 0 }}>
         <div className="wrap">
-          <div className="ms-store-banner" style={{ background: `linear-gradient(120deg, ${store.color}, ${store.color}cc)` }}>
-            <span className="ms-store-banner-avatar" style={{ background: store.color }}><Icon name="store" size={28} /></span>
+          <div className="ms-store-banner">
+            {store.banner_url && <div className="ms-store-banner-bgimg" style={{ backgroundImage: `url(${store.banner_url})` }} />}
+            <div className="ms-store-banner-fade" />
+            <span className="ms-store-banner-avatar">
+              {store.logo_url ? <img src={store.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Icon name="store" size={28} />}
+            </span>
             <div className="ms-store-banner-info">
-              <b>{store.name}</b>
-              <span>{store.tagline}</span>
-              <p>{store.description}</p>
+              <b>{name}</b>
+              {tagline && <span>{tagline}</span>}
+              {description && <p>{description}</p>}
               <div className="ms-store-banner-meta">
-                <span><Icon name="star" size={14} fill="#FFD166" /> {store.rating} ({store.reviews} reviews)</span>
+                {rating != null && <span><Icon name="star" size={14} fill="#FFD166" /> {Number(rating).toFixed(1)}{reviewsCount != null ? ` (${reviewsCount} reviews)` : ''}</span>}
                 {store.verified && <span><Icon name="shield" size={14} /> Verified Store</span>}
-                <span><Icon name="truck" size={14} /> Ships from {store.location}</span>
+                {location && <span><Icon name="truck" size={14} /> Ships from {location}</span>}
               </div>
-            </div>
-            <div className="ms-store-banner-cta">
-              <button className="btn" style={{ background: '#fff', color: 'var(--text)' }} onClick={() => toast('Following ' + store.name)}><Icon name="heart" size={16} /> Follow Store</button>
-              <button className="btn btn-ghost-light" onClick={() => toast('Chat isn’t connected yet')}><Icon name="chat" size={16} /> Chat with Store</button>
+              <div className="ms-store-banner-cta">
+                <button className="btn btn-primary" onClick={() => toast('Following stores isn’t available yet')}><Icon name="heart" size={16} /> Follow Store</button>
+                <button className="btn btn-ghost" onClick={() => toast('Chat isn’t connected yet')}><Icon name="chat" size={16} /> Chat with Store</button>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       <div className="wrap">
-        <Breadcrumbs items={[{ label: 'Home', to: ['home'] }, { label: 'MicroStores', to: ['microstoresExplore'] }, { label: store.name }]} />
+        <Breadcrumbs items={[{ label: 'Home', to: ['home'] }, { label: 'MicroStores', to: ['microstoresExplore'] }, { label: name }]} />
       </div>
 
       <section className="sec" style={{ paddingTop: 10 }}>
@@ -170,11 +183,11 @@ export function MicroStorePage({ slug }) {
             <aside className="shop-side">
               <div className="ms-search">
                 <Icon name="search" size={16} className="muted" />
-                <input className="input" placeholder={'Search ' + store.name + '…'} value={q} onChange={e => setQ(e.target.value)} />
+                <input className="input" placeholder={'Search ' + name + '…'} value={q} onChange={(e) => setQ(e.target.value)} />
               </div>
               <div className="filter-block">
                 <h5>Shop categories</h5>
-                {cats.map(c => (
+                {cats.map((c) => (
                   <label key={c} className="check">
                     <input type="radio" name="storecat" checked={cat === c} onChange={() => setCat(c)} />
                     <span className="cbox round"><Icon name="check" size={12} stroke={3} /></span>{c === 'all' ? 'All products' : <span style={{ textTransform: 'capitalize' }}>{c}</span>}
@@ -190,22 +203,22 @@ export function MicroStorePage({ slug }) {
 
             <div>
               {shown.length === 0 ? (
-                <EmptyState icon="search" title="No products match your filters" body="Try a different search or widen your filters." action={(q || cat !== 'all' || activeCount > 0) ? 'Clear filters' : undefined} onAction={() => { setQ(''); setCat('all'); clearAll(); }} />
+                <EmptyState icon="search" title={products.length === 0 ? 'No products curated yet' : 'No products match your filters'} body={products.length === 0 ? 'This MicroStore hasn’t added any products yet.' : 'Try a different search or widen your filters.'} action={(q || cat !== 'all' || activeCount > 0) ? 'Clear filters' : undefined} onAction={() => { setQ(''); setCat('all'); clearAll(); }} />
               ) : view === 'grid' ? (
-                <div className="shop-grid">{shown.map(p => <MsProductTile key={p.id} product={p} />)}</div>
+                <div className="shop-grid">{shown.map((p) => <ProductCard key={p.id} product={p} />)}</div>
               ) : (
-                <div className="list-grid">{shown.map(p => <MsListTile key={p.id} product={p} />)}</div>
+                <div className="list-grid">{shown.map((p) => <ListCard key={p.id} product={p} />)}</div>
               )}
 
               {pages > 1 && (
                 <div className="pager">
-                  <button className="pg" disabled={page === 1} onClick={() => setPage(p => p - 1)}><Icon name="chevleft" size={16} /></button>
+                  <button className="pg" disabled={page === 1} onClick={() => setPage((p) => p - 1)}><Icon name="chevleft" size={16} /></button>
                   {pagerList(page, pages).map((n, i) => (
                     n === '…'
                       ? <span key={'e' + i} className="pg-gap">…</span>
                       : <button key={n} className={'pg' + (page === n ? ' on' : '')} onClick={() => setPage(n)}>{n}</button>
                   ))}
-                  <button className="pg" disabled={page === pages} onClick={() => setPage(p => p + 1)}><Icon name="chevright" size={16} /></button>
+                  <button className="pg" disabled={page === pages} onClick={() => setPage((p) => p + 1)}><Icon name="chevright" size={16} /></button>
                 </div>
               )}
             </div>
@@ -213,19 +226,12 @@ export function MicroStorePage({ slug }) {
         </div>
       </section>
 
-      <div className={'scrim' + (drawer ? ' on' : '')} onClick={() => setDrawer(false)} />
-      <aside className={'drawer left' + (drawer ? ' on' : '')}>
-        <div className="drawer-head"><h3>Filters</h3><button className="icon-btn" onClick={() => setDrawer(false)}><Icon name="close" size={18} /></button></div>
-        <div className="drawer-body"><FilterPanel f={f} setF={setF} brands={brands} priceCap={priceCap} /></div>
-        <div className="drawer-foot"><button className="btn btn-primary btn-block" onClick={() => setDrawer(false)}>Show {filtered.length} results</button></div>
-      </aside>
-
       <section className="sec">
         <div className="wrap">
           <div className="ms-sell-banner">
             <span className="ms-sell-ic"><Icon name="store" size={22} /></span>
             <div><b>Want to sell on Limitra?</b><p>Start your own MicroStore, earn commissions and reach thousands of customers.</p></div>
-            <button className="btn btn-accent" onClick={() => go('microstores')}>Create your own MicroStore</button>
+            <button className="btn btn-accent" onClick={() => go('startMicrostore')}>Create your own MicroStore</button>
           </div>
         </div>
       </section>

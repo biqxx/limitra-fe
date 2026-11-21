@@ -128,8 +128,10 @@ export function AffiliatePage() {
         faqs={faqs}
         apply={{
           rateNote: 'Free to join · up to 5% commission on a rolling 90-day basis.',
-          codePrefix: 'LUCY',
           termsLabel: 'Affiliate',
+          program: 'affiliate',
+          signupRoute: 'becomeAffiliate',
+          signupLabel: 'Create your Affiliate account',
         }}
       />
 

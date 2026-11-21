@@ -5,7 +5,7 @@ import { Icon, Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { SocialMark } from '@/components/ui/SocialMark';
 import { FormAlert } from '@/components/forms/Shared';
-import { authApi } from '@/lib/api/endpoints';
+import { authApi, myMicrostoreApi } from '@/lib/api/endpoints';
 import { ApiError } from '@/lib/api/client';
 import { fieldErrorsFrom, messageFrom } from '@/lib/api/errors';
 import { hasAnyAdminAccess, hasAffiliateAccess, firstPermittedAdminPath } from '@/lib/auth/permissions';
@@ -34,7 +34,7 @@ const ID_METHODS = {
 };
 const SOCIAL_KEYS = ['WhatsApp', 'Facebook', 'Instagram', 'X'];
 
-function OtpInput({ onChange }) {
+export function OtpInput({ onChange }) {
   const [vals, setVals] = useState(['', '', '', '', '', '']);
   const refs = useRef([]);
   // Distributes `digits` across the boxes starting at `from`, focuses the
@@ -93,6 +93,24 @@ export function AuthPage({ mode = 'signin' }) {
   const [otp, setOtp] = useState('');
   const [pendingEmail, setPendingEmail] = useState('');
 
+  // Admin/affiliate are flagged on the user object itself; a MicroStore isn't
+  // (there's no role or flag for it — see lib/api/endpoints.js's myMicrostoreApi
+  // comment), so the only way to know is to ask the backend directly.
+  const routeAfterAuth = async (signedIn) => {
+    if (hasAnyAdminAccess(signedIn)) {
+      const dest = firstPermittedAdminPath(signedIn);
+      if (dest && dest.startsWith('/admin')) { window.location.assign(dest); return; }
+      go('admin');
+      return;
+    }
+    if (hasAffiliateAccess(signedIn)) { go('affiliateDashboard'); return; }
+    try {
+      const res = await myMicrostoreApi.get();
+      if (res?.microstore || res) { go('microstoreDashboard'); return; }
+    } catch (e) {}
+    go('account');
+  };
+
   // Already signed in (e.g. a stale bookmark or the back button landed here
   // with a valid session already in place) — there's nothing to do on any
   // auth screen in that case, send them on to where signing in normally
@@ -100,7 +118,8 @@ export function AuthPage({ mode = 'signin' }) {
   // doesn't get stuck on a blank screen during the brief session check.
   useEffect(() => {
     if (authLoading || !isAuthenticated) return;
-    go(user?.role === 'admin' ? 'admin' : 'account');
+    routeAfterAuth(user);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, isAuthenticated, user, go]);
 
   useEffect(() => {setM(mode);setErrs({});setFormError('');setIdm('email');}, [mode]);
@@ -160,23 +179,12 @@ export function AuthPage({ mode = 'signin' }) {
       try {
         await authApi.login({ email: f.id.trim(), password: f.pass });
         const signedIn = await refreshUser();
-        setLoading(false);
         toast('Welcome back!');
-        if (hasAnyAdminAccess(signedIn)) {
-          const dest = firstPermittedAdminPath(signedIn);
-          if (dest && dest.startsWith('/admin')) {
-            window.location.assign(dest);
-          } else {
-            go('admin');
-          }
-        } else if (hasAffiliateAccess(signedIn)) {
-          go('affiliateDashboard');
-        } else {
-          go('account');
-        }
+        await routeAfterAuth(signedIn);
       } catch (err) {
-        setLoading(false);
         applyErrors(err, { id: 'email', pass: 'password' });
+      } finally {
+        setLoading(false);
       }
       return;
     }
@@ -246,12 +254,12 @@ export function AuthPage({ mode = 'signin' }) {
       try {
         await authApi.otpVerify({ email: pendingEmail, otp });
         const loggedIn = await refreshUser();
-        setLoading(false);
         toast('Welcome back!');
-        go(loggedIn?.role === 'admin' ? 'admin' : 'account');
+        await routeAfterAuth(loggedIn);
       } catch (err) {
-        setLoading(false);
         applyErrors(err, { otp: 'otp' });
+      } finally {
+        setLoading(false);
       }
       return;
     }

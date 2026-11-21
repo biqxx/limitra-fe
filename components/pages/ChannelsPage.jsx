@@ -2,14 +2,13 @@
 /* LIMITRA, Channels: where you can shop & how to connect them — ported from legacy/pages-channels.jsx */
 import { useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
+import { SocialMark } from '@/components/ui/SocialMark';
 import { useStore } from '@/components/store/StoreProvider';
-import { SOCIAL_GLYPHS } from '@/lib/data';
 
-/* brand glyph helper (reads paths from lib/data) */
+/* brand glyph helper — falls back to the line-icon set for non-brand names */
 function ChGlyph({ name, size = 22 }) {
-  const d = (SOCIAL_GLYPHS || {})[name];
-  if (!d) return <Icon name={name} size={size} />;
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={d} /></svg>;
+  const mark = <SocialMark name={name} size={size} />;
+  return mark || <Icon name={name} size={size} />;
 }
 
 /* channel definitions */

@@ -195,9 +195,10 @@ export function CelebrityStoresPage() {
         faqs={FAQS}
         apply={{
           rateNote: 'Free to join · commissions on a rolling 90-day basis.',
-          codePrefix: 'STAR',
           termsLabel: 'Celebrity Store',
-          successBody: 'Celebrity Stores are a selective program — our partner team will review your application and reach out if approved.',
+          program: 'celebrity',
+          signupRoute: 'becomeCelebrity',
+          signupLabel: 'Create your Celebrity Store account',
         }}
       />
 

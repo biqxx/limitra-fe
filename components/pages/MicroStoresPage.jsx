@@ -48,7 +48,7 @@ export function MicroStoresPage() {
             <h1>Become a Limitra<br /><span className="hl">MicroStore Partner</span></h1>
             <p>Curate products, share your own storefront and earn on every delivered sale. Limitra still handles inventory, pricing, checkout, payment, fulfillment and returns&hellip; you just build the audience. Earn <b>commissions</b> on valid orders.</p>
             <div className="hero-cta">
-              <button className="btn btn-accent btn-lg" onClick={() => go('auth', 'signup')}>Become a MicroStore Partner <Icon name="arrowr" size={18} /></button>
+              <button className="btn btn-accent btn-lg" onClick={() => go('startMicrostore')}>Become a MicroStore Partner <Icon name="arrowr" size={18} /></button>
               <button className="btn btn-ghost-light btn-lg" onClick={() => go('microstoresExplore')}>Explore MicroStores</button>
             </div>
             <div className="ms-hero-trust">
@@ -185,8 +185,10 @@ export function MicroStoresPage() {
         faqs={FAQS}
         apply={{
           rateNote: 'Free to join · commissions on a rolling 90-day basis.',
-          codePrefix: 'MS',
           termsLabel: 'MicroStores',
+          program: 'microstore',
+          signupRoute: 'startMicrostore',
+          signupLabel: 'Create your MicroStore account',
         }}
       />
 
@@ -196,7 +198,7 @@ export function MicroStoresPage() {
           <div className="ms-cta">
             <h2>Ready to become a MicroStore Partner?</h2>
             <p>It takes a few minutes to set up. Limitra handles inventory, pricing, checkout, payment, fulfillment and returns — you just share your link and earn.</p>
-            <button className="btn btn-lg" style={{ background: '#fff', color: 'var(--orange)' }} onClick={() => go('auth', 'signup')}>Become a MicroStore Partner <Icon name="arrowr" size={18} /></button>
+            <button className="btn btn-lg" style={{ background: '#fff', color: 'var(--orange)' }} onClick={() => go('startMicrostore')}>Become a MicroStore Partner <Icon name="arrowr" size={18} /></button>
           </div>
         </div>
       </section>

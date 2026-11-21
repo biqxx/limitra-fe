@@ -91,15 +91,17 @@
 .ms-dir-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
 
 /* storefront */
-.ms-store-banner { border-radius: var(--r-xl); padding: 28px; display: flex; align-items: center; gap: 22px; color: #fff; flex-wrap: wrap; }
-.ms-store-banner-avatar { width: 68px; height: 68px; border-radius: 50%; display: grid; place-items: center; color: #fff; flex: none; border: 3px solid rgba(255,255,255,.5); }
+.ms-store-banner { position: relative; border-radius: var(--r-xl); padding: 28px; display: flex; align-items: center; gap: 22px; color: var(--text); flex-wrap: wrap; overflow: hidden; background: var(--surface); isolation: isolate; }
+.ms-store-banner-bgimg { position: absolute; inset: 0; background-size: cover; background-position: center right; z-index: -2; }
+.ms-store-banner-fade { position: absolute; inset: 0; background: linear-gradient(90deg, var(--surface) 0%, var(--surface) 42%, color-mix(in srgb, var(--navy) 55%, var(--surface)) 68%, var(--navy) 100%); z-index: -1; }
+.ms-store-banner-avatar { width: 76px; height: 76px; border-radius: var(--r-md); display: grid; place-items: center; color: var(--text); flex: none; background: #fff; box-shadow: var(--shadow-sm); overflow: hidden; }
 .ms-store-banner-info { flex: 1; min-width: 240px; }
-.ms-store-banner-info b { font-size: 22px; font-family: var(--font-display); display: block; }
-.ms-store-banner-info > span { opacity: .85; font-size: 14px; }
-.ms-store-banner-info p { opacity: .9; font-size: 13.5px; margin: 6px 0 10px; max-width: 480px; }
-.ms-store-banner-meta { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
+.ms-store-banner-info b { font-size: 22px; font-family: var(--font-display); display: block; color: var(--text); }
+.ms-store-banner-info > span { color: var(--text-muted); font-size: 14px; }
+.ms-store-banner-info p { color: var(--text-muted); font-size: 13.5px; margin: 6px 0 10px; max-width: 480px; }
+.ms-store-banner-meta { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 16px; }
 .ms-store-banner-meta span { display: inline-flex; align-items: center; gap: 6px; }
-.ms-store-banner-cta { display: flex; flex-direction: column; gap: 8px; }
+.ms-store-banner-cta { display: flex; flex-direction: row; gap: 10px; flex-wrap: wrap; }
 .ms-store-banner-cta .btn { white-space: nowrap; }
 
 /* sell banner */

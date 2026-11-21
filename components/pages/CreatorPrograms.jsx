@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Icon, Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
-import { affiliateApi } from '@/lib/api/endpoints';
+import { affiliateApi, myMicrostoreApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { CREATOR_PROGRAMS } from '@/lib/creatorPrograms';
 
@@ -140,23 +140,101 @@ function CreatorField({ label, value, onChange, err, placeholder, type = 'text',
   );
 }
 
-export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions on a rolling 90-day basis.', codePrefix = 'LIM', termsLabel = 'Affiliate', successBody }) {
-  const { toast, isAuthenticated } = useStore();
+function MicrostoreQuickCreate() {
+  const { go, toast } = useStore();
+  const [f, setF] = useState({ name: '', tagline: '' });
+  const [err, setErr] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [store, setStore] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!f.name.trim()) { setErr('Enter a store name'); return; }
+    setErr('');
+    setSubmitting(true);
+    try {
+      const res = await myMicrostoreApi.create({ name: f.name.trim(), tagline: f.tagline.trim() || undefined });
+      setStore(res?.microstore || res);
+      toast('MicroStore created!');
+    } catch (err2) {
+      toast(messageFrom(err2, 'Could not create your MicroStore'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (store) {
+    const slug = store.slug;
+    return (
+      <div className="aff-success card">
+        <div className="success-check" style={{ width: 64, height: 64, marginBottom: 16 }}><Icon name="check" size={30} stroke={3} /></div>
+        <h3 style={{ fontSize: 22 }}>Your MicroStore is live!</h3>
+        {slug && <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => go('microstore', slug)}>View my storefront</button>}
+      </div>
+    );
+  }
+
+  return (
+    <form className="aff-form card" onSubmit={submit}>
+      <h3 style={{ fontSize: 22, marginBottom: 4 }}>Create your MicroStore</h3>
+      <p className="muted" style={{ fontSize: 14, marginBottom: 20 }}>You&rsquo;re signed in — set up your storefront in one step.</p>
+      <div className="form-grid">
+        <CreatorField label="Store name" full value={f.name} onChange={(v) => setF((s) => ({ ...s, name: v }))} err={err} placeholder="Lucy's Picks" />
+        <CreatorField label="Tagline (optional)" full value={f.tagline} onChange={(v) => setF((s) => ({ ...s, tagline: v }))} placeholder="Curated tech & lifestyle finds" />
+      </div>
+      <button className="btn btn-primary btn-block btn-lg" type="submit" disabled={submitting} style={{ marginTop: 18 }}>{submitting ? 'Creating…' : <>Create my MicroStore <Icon name="arrowr" size={18} /></>}</button>
+    </form>
+  );
+}
+
+export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions on a rolling 90-day basis.', termsLabel = 'Affiliate', signupRoute, signupLabel = 'Create your account', program = 'affiliate' }) {
+  const { go, toast, isAuthenticated } = useStore();
   const [f, setF] = useState({ name: '', email: '', channel: 'instagram', handle: '', audience: '10k-50k', about: '' });
   const [errs, setErrs] = useState({});
-  const [done, setDone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [appStatus, setAppStatus] = useState(null);
-  const [code] = useState(() => codePrefix + Math.floor(100 + Math.random() * 900));
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || program !== 'affiliate') return;
     let active = true;
     affiliateApi.applicationStatus()
       .then((res) => { if (active && res && (res.status || res.application)) setAppStatus(res.application || res); })
       .catch(() => {});
     return () => { active = false; };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, program]);
+
+  // Anonymous visitors don't get the apply form at all — joining a program
+  // starts from its own dedicated signup flow (CreatorSignup.jsx), which
+  // creates the account and submits the application in one go, instead of
+  // faking a success here with nothing ever reaching the backend.
+  if (!isAuthenticated && signupRoute) {
+    return (
+      <div className="aff-form card" style={{ textAlign: 'center' }}>
+        <h3 style={{ fontSize: 22, marginBottom: 8 }}>Ready to join?</h3>
+        <p className="muted" style={{ marginBottom: 20 }}>{rateNote}</p>
+        <button className="btn btn-primary btn-block btn-lg" onClick={() => go(signupRoute)}>{signupLabel} <Icon name="arrowr" size={18} /></button>
+        <p className="muted" style={{ fontSize: 13, marginTop: 14 }}>
+          Already applied? <a className="link-btn" onClick={() => go('auth', 'signin')}>Sign in</a> to check your status.
+        </p>
+      </div>
+    );
+  }
+
+  // Already signed in: MicroStore creation is instant and self-service
+  // (no `applications` endpoint for it, unlike Affiliate) — skip straight
+  // to a focused create form instead of the affiliate-shaped fields below.
+  if (isAuthenticated && program === 'microstore') return <MicrostoreQuickCreate />;
+
+  // Celebrity Stores have no application endpoint of their own yet — nothing
+  // real to submit here for an already-signed-in visitor.
+  if (isAuthenticated && program === 'celebrity') {
+    return (
+      <div className="aff-form card" style={{ textAlign: 'center' }}>
+        <h3 style={{ fontSize: 22, marginBottom: 8 }}>Thanks for your interest</h3>
+        <p className="muted">Celebrity Stores are a selective program reviewed individually by our partner team. We&rsquo;ll reach out by email if you&rsquo;re selected.</p>
+      </div>
+    );
+  }
 
   const submit = async (e) => {
     e.preventDefault();
@@ -168,16 +246,13 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
     if (Object.keys(er).length) return;
     setSubmitting(true);
     try {
-      if (isAuthenticated) {
-        const res = await affiliateApi.apply({
-          channel: f.channel,
-          social_handle: f.handle.trim(),
-          audience_size: f.audience,
-          notes: f.about.trim() || undefined,
-        });
-        setAppStatus(res?.application || res);
-      }
-      setDone(true);
+      const handle = f.handle.trim();
+      const res = await affiliateApi.apply({
+        promotion_channels: [f.channel],
+        website_url: handle ? (/^https?:\/\//i.test(handle) ? handle : `https://${handle}`) : undefined,
+        notes: f.about.trim() || undefined,
+      });
+      setAppStatus(res?.application || res);
       toast('Application submitted!');
     } catch (err) {
       toast(messageFrom(err, 'Could not submit application'));
@@ -186,7 +261,7 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
     }
   };
 
-  if (appStatus && !done) {
+  if (appStatus) {
     return (
       <div className="aff-success card">
         <div className="success-check" style={{ width: 64, height: 64, marginBottom: 16 }}><Icon name="clock" size={30} /></div>
@@ -199,25 +274,6 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
         {appStatus.status === 'approved' && (
           <Link href="/affiliate/dashboard" className="btn btn-primary" style={{ marginTop: 14 }}>Open Affiliate Dashboard</Link>
         )}
-      </div>
-    );
-  }
-
-  if (done) {
-    const link = 'limitra.com.ng/r/' + code;
-    return (
-      <div className="aff-success card">
-        <div className="success-check" style={{ width: 72, height: 72, marginBottom: 20 }}><Icon name="check" size={36} stroke={3} /></div>
-        <h3 style={{ fontSize: 24 }}>You&rsquo;re in, {f.name.split(' ')[0]}! 🎉</h3>
-        <p className="muted" style={{ marginTop: 8 }}>{successBody || 'Your application has been received. Our partner team will review it and get back to you shortly.'}</p>
-        <div className="aff-link">
-          <span className="muted" style={{ fontSize: 12 }}>Your referral link</span>
-          <div className="aff-link-row">
-            <code>{link}</code>
-            <button className="btn btn-primary btn-sm" onClick={async () => { try { await navigator.clipboard.writeText(link); } catch (e) {} toast('Link copied to clipboard'); }}><Icon name="share" size={15} /> Copy</button>
-          </div>
-        </div>
-        <p className="muted" style={{ fontSize: 13, marginTop: 16 }}>We&rsquo;ve emailed your dashboard login to <b>{f.email}</b>.</p>
       </div>
     );
   }
