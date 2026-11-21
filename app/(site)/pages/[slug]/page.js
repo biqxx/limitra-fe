@@ -1,41 +1,54 @@
-'use client';
+import { CmsContentClient } from '@/components/pages/CmsContentClient';
+import {
+  JsonLd,
+  SITE_NAME,
+  buildMetadata,
+  canonicalUrl,
+  fetchApiJson,
+  truncateText,
+} from '@/lib/seo';
 
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { contentApi } from '@/lib/api/endpoints';
-import { Breadcrumbs } from '@/components/ui/Shared';
-
-export default function CmsContentPage() {
-  const { slug } = useParams();
-  const [entry, setEntry] = useState(null);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    if (!slug) return;
-    contentApi.page(slug)
-      .then((res) => setEntry(res?.entry || res))
-      .catch(() => {})
-      .finally(() => setLoaded(true));
-  }, [slug]);
-
-  return (
-    <div className="page page-fade">
-      <div className="wrap" style={{ maxWidth: 820 }}>
-        <Breadcrumbs items={[{ label: 'Home', to: ['home'] }, { label: entry?.title || slug }]} />
-        {!loaded ? (
-          <p className="muted" style={{ padding: '40px 0' }}>Loading page…</p>
-        ) : !entry ? (
-          <div style={{ padding: '48px 0' }}><h2>Page not found</h2></div>
-        ) : (
-          <article style={{ padding: '20px 0 48px' }}>
-            <h1 style={{ fontSize: 30, marginBottom: 16 }}>{entry.title}</h1>
-            <div style={{ lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>
-              {typeof entry.body === 'string' ? entry.body : JSON.stringify(entry.body || '', null, 2)}
-            </div>
-          </article>
-        )}
-      </div>
-    </div>
-  );
+async function getContentEntry(slug) {
+  if (!slug) return null;
+  const data = await fetchApiJson(`/content/${encodeURIComponent(slug)}`, { revalidate: 300 });
+  return data?.entry || data || null;
 }
 
+export async function generateMetadata({ params }) {
+  const { slug } = await params;
+  const entry = await getContentEntry(slug);
+
+  const title = entry?.title || slug.replace(/-/g, ' ');
+  const rawBody = typeof entry?.body === 'string' ? entry.body : '';
+  const description =
+    truncateText(entry?.description || rawBody, 160) ||
+    `${title} — ${SITE_NAME}.`;
+
+  return buildMetadata({
+    title,
+    description,
+    path: `/pages/${encodeURIComponent(slug)}`,
+  });
+}
+
+export default async function CmsContentPage({ params }) {
+  const { slug } = await params;
+  const entry = await getContentEntry(slug);
+  const pageUrl = canonicalUrl(`/pages/${encodeURIComponent(slug)}`);
+
+  const jsonLd = entry
+    ? {
+        '@context': 'https://schema.org',
+        '@type': 'WebPage',
+        name: entry.title || slug,
+        url: pageUrl,
+      }
+    : null;
+
+  return (
+    <>
+      <JsonLd data={jsonLd} />
+      <CmsContentClient slug={slug} initialEntry={entry} />
+    </>
+  );
+}

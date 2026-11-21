@@ -200,10 +200,10 @@ export function CartPage() {
             }
             return (
               <div className="cart-item" key={it.key}>
-                <div className="ci-thumb" onClick={() => go('product', p.id)}><Thumb product={p} src={REAL_IMG[p.id]} /></div>
+                <div className="ci-thumb" onClick={() => go('product', p.slug || p.id)}><Thumb product={p} src={REAL_IMG[p.id]} /></div>
                 <div className="ci-info">
                   <span className="pc-brand">{p.brand}</span>
-                  <h4 onClick={() => go('product', p.id)} style={{ cursor: 'pointer' }}>{p.name}</h4>
+                  <h4 onClick={() => go('product', p.slug || p.id)} style={{ cursor: 'pointer' }}>{p.name}</h4>
                   <div className="ci-meta">
                     {Object.entries(it.variants || {}).map(([g, v]) => (
                       <span className="ci-tag" key={g}>{v.hex && <i style={{ background: v.hex }} />}{v.label}</span>
