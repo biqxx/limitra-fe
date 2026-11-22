@@ -510,8 +510,8 @@ export function HomePage() {
       <FlashDeals />
       <ProductRow eyebrow="Best sellers" title="Trending this week" items={trending} cat="trending" />
       <PromoBanners />
-      <ImageShowcase />
       <ProductRow eyebrow="Just landed" title="New arrivals" items={arrivals} cat="new" />
+      <ImageShowcase />
       <FeaturedVideo />
       <WhyLimitra />
     </div>);

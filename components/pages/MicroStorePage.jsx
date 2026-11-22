@@ -6,8 +6,12 @@
    against the already-loaded global PRODUCTS catalog (byId) to get the full
    normalized shape ProductCard/ListCard expect (price, rating, badges, etc.),
    same as every other product grid in the app, instead of a cut-down demo
-   shape. Follow/Chat have no backend yet (no follow or messaging endpoint
-   for MicroStores) so they stay honest placeholders. */
+   shape. Follow has no backend yet (no follow endpoint for MicroStores) so
+   it stays an honest placeholder. There's no in-app messaging endpoint
+   either, so "Chat with Store" opens the owner's WhatsApp/email instead —
+   whichever contact field the store happens to expose (undocumented,
+   field name unconfirmed); falls back to the old placeholder if neither
+   is present. */
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
@@ -21,6 +25,13 @@ const SORTS = [['relevance', 'Most relevant'], ['low', 'Price: low to high'], ['
 const PER_PAGE = 10;
 
 const EMPTY_FILTERS = { maxPrice: null, brands: [], minRating: 0, onSale: false, inStock: false };
+
+// Nigerian local numbers (leading 0) need the country code for a wa.me link;
+// anything already starting with a country code is left alone.
+const toWaNumber = (raw) => {
+  const d = String(raw).replace(/[^\d]/g, '');
+  return d.startsWith('0') ? '234' + d.slice(1) : d;
+};
 
 export function MicroStorePage({ slug }) {
   const { go, toast } = useStore();
@@ -126,6 +137,9 @@ export function MicroStorePage({ slug }) {
   const rating = store.rating ?? store.average_rating;
   const reviewsCount = store.reviews_count ?? store.reviews;
   const location = store.city || store.location || store.address;
+  const waNumber = store.whatsapp || store.whatsapp_number || store.phone || store.phone_number || store.contact_phone || store.owner?.whatsapp || store.owner?.phone;
+  const contactEmail = store.contact_email || store.email || store.owner?.email;
+  const chatHref = waNumber ? `https://wa.me/${toWaNumber(waNumber)}` : contactEmail ? `mailto:${contactEmail}` : null;
 
   return (
     <div className="page page-fade">
@@ -148,7 +162,11 @@ export function MicroStorePage({ slug }) {
               </div>
               <div className="ms-store-banner-cta">
                 <button className="btn btn-primary" onClick={() => toast('Following stores isn’t available yet')}><Icon name="heart" size={16} /> Follow Store</button>
-                <button className="btn btn-ghost" onClick={() => toast('Chat isn’t connected yet')}><Icon name="chat" size={16} /> Chat with Store</button>
+                {chatHref ? (
+                  <a className="btn btn-ghost" href={chatHref} target="_blank" rel="noreferrer"><Icon name="chat" size={16} /> Chat with Store</a>
+                ) : (
+                  <button className="btn btn-ghost" onClick={() => toast('This store hasn’t added a contact method yet')}><Icon name="chat" size={16} /> Chat with Store</button>
+                )}
               </div>
             </div>
           </div>

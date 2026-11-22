@@ -711,6 +711,22 @@ export function MSSettings() {
 }
 
 /* ---- Analytics (real endpoint, undocumented shape) ---- */
+// Field names aren't documented, so match by keyword rather than an exact
+// key list — anything unrecognized still gets a sensible default icon.
+const ANALYTICS_ICON = [
+  [/id$/i, 'hash', '#6B7280'],
+  [/name/i, 'store', '#0438B6'],
+  [/link|url|slug/i, 'link', '#0438B6'],
+  [/view/i, 'eye', '#7A5AE0'],
+  [/click/i, 'click', '#F5A623'],
+  [/order/i, 'cart', '#F5A623'],
+  [/revenue|sales|earning|balance/i, 'wallet', '#1F8A5B'],
+];
+function analyticsIcon(key) {
+  const hit = ANALYTICS_ICON.find(([re]) => re.test(key));
+  return hit ? [hit[1], hit[2]] : ['spark', '#0438B6'];
+}
+
 export function MSAnalytics() {
   const { analytics } = useMicrostore();
   const entries = analytics && typeof analytics === 'object'
@@ -723,9 +739,61 @@ export function MSAnalytics() {
 
   return (
     <div className="kpi-grid">
-      {entries.map(([k, v]) => (
-        <Kpi key={k} ic="spark" tint="#0438B6" label={k.replace(/_/g, ' ')} val={String(v)} />
-      ))}
+      {entries.map(([k, v]) => {
+        const [ic, tint] = analyticsIcon(k);
+        return <Kpi key={k} ic={ic} tint={tint} label={k.replace(/_/g, ' ')} val={String(v)} />;
+      })}
+    </div>
+  );
+}
+
+/* ---- Promotion (no backend yet — styled preview of what's coming) ---- */
+const PROMO_TOOLS = [
+  { icon: 'ticket', title: 'Discount Codes', desc: 'Share approved offers with your customers.' },
+  { icon: 'rocket', title: 'Product Boosts', desc: 'Put selected products in the spotlight.' },
+  { icon: 'share', title: 'Social Sharing Kits', desc: 'Promote your store with ready-to-share content.' },
+];
+
+export function MSPromotion() {
+  const router = useRouter();
+  useMsPageHeader({ subtitle: "Tools to help your Microstore reach more shoppers." });
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap', background: 'linear-gradient(135deg, var(--primary-soft), var(--surface))' }}>
+        <div>
+          <span className="adm-pill warn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon name="clock" size={12} /> Coming soon</span>
+          <h2 style={{ marginTop: 14, fontSize: 24 }}>More visibility. More possibilities.</h2>
+          <p className="muted" style={{ marginTop: 6 }}>New ways to promote your store are on the way.</p>
+        </div>
+        <Icon name="megaphone" size={64} className="muted" style={{ flex: 'none', opacity: .3 }} />
+      </div>
+
+      <h3>Your promotion tools</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+        {PROMO_TOOLS.map((t) => (
+          <div key={t.title} className="panel">
+            <span style={{ width: 46, height: 46, borderRadius: 'var(--r-md)', background: 'var(--primary-soft)', color: 'var(--primary)', display: 'grid', placeItems: 'center', marginBottom: 14 }}>
+              <Icon name={t.icon} size={21} />
+            </span>
+            <h4 style={{ marginBottom: 6, fontSize: 15.5 }}>{t.title}</h4>
+            <p className="muted" style={{ fontSize: 13.5, marginBottom: 14 }}>{t.desc}</p>
+            <span className="adm-pill muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="clock" size={12} /> Coming soon</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ width: 40, height: 40, borderRadius: 'var(--r-md)', background: 'var(--primary-soft)', color: 'var(--primary)', display: 'grid', placeItems: 'center', flex: 'none' }}>
+            <Icon name="store" size={18} />
+          </span>
+          <div>
+            <b>Get your store ready</b>
+            <p className="muted" style={{ fontSize: 13.5, marginTop: 2 }}>Add products and preview your storefront before you promote it.</p>
+          </div>
+        </div>
+        <button className="link-btn" onClick={() => router.push(msPath('products'))}>Manage Products <Icon name="arrowr" size={14} /></button>
+      </div>
     </div>
   );
 }

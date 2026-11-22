@@ -8,7 +8,7 @@ import { Icon } from '@/components/icons/Icon';
 import { Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { newsletterApi, notificationsApi, productsApi } from '@/lib/api/endpoints';
-import { hasAnyAdminAccess, hasAffiliateAccess } from '@/lib/auth/permissions';
+import { hasAnyAdminAccess, hasAffiliateAccess, hasMicrostoreAccess } from '@/lib/auth/permissions';
 import { EmptyState, QtyStepper, Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { naira, CATEGORIES, SUBCATS as ALL_SUBCATS, PRODUCTS, byId, unitPriceOf } from '@/lib/data';
 
@@ -397,7 +397,9 @@ function MobileMenu({ open, onClose }) {
   const router = useRouter();
   const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const isAffiliate = isAuthenticated && hasAffiliateAccess(user);
+  const isMicrostoreOwner = isAuthenticated && hasMicrostoreAccess(user);
   const nav = (n, ...p) => {onClose();go(n, ...p);};
+  const goMicrostores = () => { onClose(); isMicrostoreOwner ? router.push('/microstore/dashboard') : go('microstores'); };
   return (
     <>
       <div className={'scrim' + (open ? ' on' : '')} onClick={onClose} />
@@ -417,7 +419,7 @@ function MobileMenu({ open, onClose }) {
               </a>
             )}
           <div className="mm-sec">Earn with Limitra</div>
-          <a className="mm-link" onClick={() => nav('microstores')}><span className="row" style={{ gap: 12 }}><Icon name="store" size={18} />MicroStores <span className="nav-badge-new">New</span></span><Icon name="chevright" size={16} /></a>
+          <a className="mm-link" onClick={goMicrostores}><span className="row" style={{ gap: 12 }}><Icon name="store" size={18} />MicroStores <span className="nav-badge-new">New</span></span><Icon name="chevright" size={16} /></a>
           <a className="mm-link" onClick={() => nav('celebrityStores')}><span className="row" style={{ gap: 12 }}><Icon name="star" size={18} />Celebrity Stores</span><Icon name="chevright" size={16} /></a>
           <a className="mm-link" onClick={() => nav('affiliate')}><span className="row" style={{ gap: 12 }}><Icon name="share" size={18} />Become an Affiliate</span><Icon name="chevright" size={16} /></a>
           <div className="mm-sec">Account</div>
@@ -449,6 +451,8 @@ export function Header() {
   const router = useRouter();
   const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const isAffiliate = isAuthenticated && hasAffiliateAccess(user);
+  const isMicrostoreOwner = isAuthenticated && hasMicrostoreAccess(user);
+  const goMicrostores = () => isMicrostoreOwner ? router.push('/microstore/dashboard') : go('microstores');
   const [mega, setMega] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
@@ -514,7 +518,7 @@ export function Header() {
           <span className="row" style={{ gap: 8 }}><Icon name="truck" size={15} /> Free Delivery <b>Nationwide</b></span>
           <div className="row" style={{ gap: 20 }}>
             <a onClick={() => go('affiliate')} style={{ cursor: 'pointer' }}>Become an Affiliate</a>
-            <a onClick={() => go('microstores')} style={{ cursor: 'pointer' }}>MicroStores</a>
+            <a onClick={goMicrostores} style={{ cursor: 'pointer' }}>MicroStores</a>
             <a onClick={() => go('celebrityStores')} style={{ cursor: 'pointer' }}>Celebrity Stores</a>
             <a onClick={() => go('help')} style={{ cursor: 'pointer' }}>Help Center</a>
             <a onClick={() => go('orders')} style={{ cursor: 'pointer' }}>Track Order</a>
