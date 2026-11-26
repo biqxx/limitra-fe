@@ -106,16 +106,16 @@ function Gallery({ product, variantKey, activeImages }) {
       {active === VIDEO_TAB && vid ? (
         <div className="g-main g-video"><VideoStage video={vid} /></div>
       ) : (
-      <div className={'g-main g-clickable' + (gImgs ? ' g-main-contain' : '')} onClick={() => setLightbox(true)}>
-        <div className="thumb-badges">
-          {product.off > 0 && <span className="badge badge-sale">-{product.off}%</span>}
-          {product.badges?.includes('new') && <span className="badge badge-new">New</span>}
+        <div className={'g-main g-clickable' + (gImgs ? ' g-main-contain' : '')} onClick={() => setLightbox(true)}>
+          <div className="thumb-badges">
+            {product.off > 0 && <span className="badge badge-sale">-{product.off}%</span>}
+            {product.badges?.includes('new') && <span className="badge badge-new">New</span>}
+          </div>
+          {gImgs
+            ? <img src={gImgs[active] || gImgs[0]} alt={product.name} className="g-img g-img-contain" />
+            : <div className="g-img"><Placeholder product={product} label={angles[active] || angles[0]} /></div>}
+          <span className="g-zoom-hint"><Icon name="zoom" size={15} /> Tap to view</span>
         </div>
-        {gImgs
-          ? <img src={gImgs[active] || gImgs[0]} alt={product.name} className="g-img g-img-contain" />
-          : <div className="g-img"><Placeholder product={product} label={angles[active] || angles[0]} /></div>}
-        <span className="g-zoom-hint"><Icon name="zoom" size={15} /> Tap to view</span>
-      </div>
       )}
       {lightbox && createPortal((
         <div className="g-lightbox" onClick={() => setLightbox(false)}>
@@ -183,7 +183,7 @@ export function ProductPage({ id }) {
         const items = res?.items ?? res?.data?.items ?? res?.data ?? [];
         setReviewsList(Array.isArray(items) ? items : []);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => { if (!cancelled) setReviewsLoaded(true); });
     return () => { cancelled = true; };
   }, [tab, product?.id]);
@@ -213,7 +213,7 @@ export function ProductPage({ id }) {
     try {
       await reviewsApi.helpful(revId);
       setReviewsList((prev) => prev.map((r) => (r.id === revId ? { ...r, helpful_count: Number(r.helpful_count || 0) + 1 } : r)));
-    } catch {}
+    } catch { }
   };
   const [relatedRemote, setRelatedRemote] = useState([]);
   const [alternativesRemote, setAlternativesRemote] = useState([]);
@@ -232,10 +232,10 @@ export function ProductPage({ id }) {
 
     productsApi.related(id)
       .then(res => { if (!cancelled) setRelatedRemote((Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []).map(mapProductDetails)); })
-      .catch(() => {});
+      .catch(() => { });
     productsApi.alternatives(id)
       .then(res => { if (!cancelled) setAlternativesRemote((Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []).map(mapProductDetails)); })
-      .catch(() => {});
+      .catch(() => { });
 
     return () => { cancelled = true; };
   }, [id]);
@@ -289,17 +289,17 @@ export function ProductPage({ id }) {
   const comboOutOfStock = comboStock != null && comboStock <= 0;
   const outOfStock = comboOutOfStock || (!variants.length && product.stock <= 0);
 
-  const activeVariantImages = useMemo(() => {
-    const map = product.variantImages;
-    if (!map) return null;
-    const exact = map.byCombo?.[comboKey(selectedAttributes)];
-    if (Array.isArray(exact) && exact.length) return exact;
-    for (const [k, val] of Object.entries(selectedAttributes)) {
-      const optImgs = map.byOption?.[`${k.toLowerCase()}:${String(val).toLowerCase()}`];
-      if (Array.isArray(optImgs) && optImgs.length) return optImgs;
-    }
-    return null;
-  }, [product.variantImages, variantKey]);
+    const activeVariantImages = (() => {
+      const map = product.variantImages;
+      if (!map) return null;
+      const exact = map.byCombo?.[comboKey(selectedAttributes)];
+      if (Array.isArray(exact) && exact.length) return exact;
+      for (const [k, val] of Object.entries(selectedAttributes)) {
+        const optImgs = map.byOption?.[`${k.toLowerCase()}:${String(val).toLowerCase()}`];
+        if (Array.isArray(optImgs) && optImgs.length) return optImgs;
+      }
+      return null;
+  })();
   const buy = async (checkout) => {
     const selectedVariants = {};
     variants.forEach(g => {
