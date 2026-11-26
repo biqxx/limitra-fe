@@ -7,7 +7,7 @@ import { naira, byId, REAL_IMG, slugify, setCategories, setSubcats, setProducts,
 import { applyStoredVariants } from '@/lib/variantsStore';
 import { routeFor, parseRoute } from '@/lib/routes';
 import { getToken, clearTokens } from '@/lib/auth';
-import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi, referralsApi, publicSettingsApi, analyticsApi, savedCardsApi } from '@/lib/api/endpoints';
+import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi, referralsApi, publicSettingsApi, analyticsApi, savedCardsApi, myMicrostoreApi } from '@/lib/api/endpoints';
 import { hasAnyAdminAccess } from '@/lib/auth/permissions';
 import { messageFrom } from '@/lib/api/errors';
 
@@ -219,6 +219,17 @@ export function StoreProvider({ children }) {
     ?? 0
   );
 
+  /* Whether this user owns a MicroStore — there's no reliable role flag for
+     this on the user object (field names unconfirmed/unused in practice), so
+     this probes the real endpoint directly, same as AuthPage's routeAfterAuth
+     does post-login. Lets the nav ("MicroStores" link) route owners straight
+     to their dashboard instead of the public directory. */
+  const [hasMicrostore, setHasMicrostore] = useState(false);
+  const loadHasMicrostore = useCallback(async () => {
+    try { const res = await myMicrostoreApi.get(); setHasMicrostore(!!(res?.microstore || res)); }
+    catch (e) { setHasMicrostore(false); }
+  }, []);
+
   /* real session — resolves who's signed in from a stored JWT.
      lib/api/endpoints.js: authApi.me() (id/username/email/role) + profileApi.get()
      (first_name/last_name/phone/etc.) together make up the real profile.
@@ -243,7 +254,7 @@ export function StoreProvider({ children }) {
   }, []);
 
   const refreshUser = useCallback(async () => {
-    if (!getToken()) { setUser(null); setRemoteCart(null); setFavorites([]); setAddresses([]); setWallet(null); setAuthLoading(false); return null; }
+    if (!getToken()) { setUser(null); setRemoteCart(null); setFavorites([]); setAddresses([]); setWallet(null); setHasMicrostore(false); setAuthLoading(false); return null; }
     try {
       const me = await authApi.me();
       // profileApi.get() 404s/500s for accounts with no profile row yet (seen
@@ -258,6 +269,7 @@ export function StoreProvider({ children }) {
         loadAddresses(),
         loadWallet(),
         loadReferral(),
+        loadHasMicrostore(),
       ]);
       return resolved;
     } catch (e) {
@@ -266,7 +278,7 @@ export function StoreProvider({ children }) {
     } finally {
       setAuthLoading(false);
     }
-  }, [loadCartAndFavorites, loadAddresses, loadWallet, loadReferral]);
+  }, [loadCartAndFavorites, loadAddresses, loadWallet, loadReferral, loadHasMicrostore]);
   useEffect(() => { refreshUser(); }, [refreshUser]);
 
   const logout = useCallback(async () => {
@@ -277,6 +289,7 @@ export function StoreProvider({ children }) {
     setFavorites([]);
     setAddresses([]);
     setWallet(null);
+    setHasMicrostore(false);
   }, []);
 
   /* catalog — categories + products, both public (no auth) endpoints. Mutates
@@ -781,6 +794,7 @@ export function StoreProvider({ children }) {
     addresses, addressesLoading, loadAddresses, saveAddress, removeAddress, setPrimaryAddress,
     cards, saveCard, removeCard, setPrimaryCard,
     wallet, walletBalance, loadWallet,
+    hasMicrostore,
     toasts, toast,
     query, setQuery,
     searchHistory, addSearch, clearSearch,
@@ -797,6 +811,7 @@ export function StoreProvider({ children }) {
     addresses, addressesLoading, loadAddresses, saveAddress, removeAddress, setPrimaryAddress,
     cards, saveCard, removeCard, setPrimaryCard,
     wallet, walletBalance, loadWallet,
+    hasMicrostore,
     toasts, toast,
     query, setQuery,
     searchHistory, addSearch, clearSearch,

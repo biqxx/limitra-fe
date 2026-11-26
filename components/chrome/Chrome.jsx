@@ -8,7 +8,7 @@ import { Icon } from '@/components/icons/Icon';
 import { Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { newsletterApi, notificationsApi, productsApi } from '@/lib/api/endpoints';
-import { hasAnyAdminAccess, hasAffiliateAccess, hasMicrostoreAccess } from '@/lib/auth/permissions';
+import { hasAnyAdminAccess, hasAffiliateAccess } from '@/lib/auth/permissions';
 import { EmptyState, QtyStepper, Thumb, REAL_IMG } from '@/components/ui/Shared';
 import { naira, CATEGORIES, SUBCATS as ALL_SUBCATS, PRODUCTS, byId, unitPriceOf } from '@/lib/data';
 
@@ -393,13 +393,12 @@ function MiniCart({ open, onClose }) {
 }
 
 function MobileMenu({ open, onClose }) {
-  const { go, theme, toggleTheme, user, isAuthenticated, logout, catalogLoading } = useStore();
+  const { go, theme, toggleTheme, user, isAuthenticated, logout, catalogLoading, hasMicrostore } = useStore();
   const router = useRouter();
   const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const isAffiliate = isAuthenticated && hasAffiliateAccess(user);
-  const isMicrostoreOwner = isAuthenticated && hasMicrostoreAccess(user);
   const nav = (n, ...p) => {onClose();go(n, ...p);};
-  const goMicrostores = () => { onClose(); isMicrostoreOwner ? router.push('/microstore/dashboard') : go('microstores'); };
+  const goMicrostores = () => { onClose(); hasMicrostore ? router.push('/microstore/dashboard') : go('microstores'); };
   return (
     <>
       <div className={'scrim' + (open ? ' on' : '')} onClick={onClose} />
@@ -447,12 +446,11 @@ function MobileMenu({ open, onClose }) {
 }
 
 export function Header() {
-  const { go, cartCount, cartTotal, wish, route, theme, toggleTheme, catalogVersion, user, isAuthenticated, logout } = useStore();
+  const { go, cartCount, cartTotal, wish, route, theme, toggleTheme, catalogVersion, user, isAuthenticated, logout, hasMicrostore } = useStore();
   const router = useRouter();
   const isAdmin = isAuthenticated && hasAnyAdminAccess(user);
   const isAffiliate = isAuthenticated && hasAffiliateAccess(user);
-  const isMicrostoreOwner = isAuthenticated && hasMicrostoreAccess(user);
-  const goMicrostores = () => isMicrostoreOwner ? router.push('/microstore/dashboard') : go('microstores');
+  const goMicrostores = () => hasMicrostore ? router.push('/microstore/dashboard') : go('microstores');
   const [mega, setMega] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [mobOpen, setMobOpen] = useState(false);
