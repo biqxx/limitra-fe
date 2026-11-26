@@ -11,11 +11,10 @@ import { CATEGORIES, naira, byId, bySlug, byCat, effectivePrice } from '@/lib/da
 import { productsApi, reviewsApi } from '@/lib/api/endpoints';
 import { comboKey, groupsFromFlatVariants, imageMapFromFlatVariants, stockMapFromFlatVariants } from '@/lib/variants';
 
-function mapProductDetails(product) {
+function mapProductDetails(product, registerImage = true) {
   const imageUrls = Array.isArray(product.images)
     ? product.images.map(img => (typeof img === 'string' ? img : img?.url || img?.path)).filter(Boolean)
     : [];
-  const imageUrl = imageUrls[0];
   // The real backend returns `variants` as a flat array of per-SKU records
   // ({sku, attributes, stock}, confirmed live via a 422 on product creation)
   // — NOT the {name,type,options} "attribute group" shape this page renders
@@ -30,7 +29,7 @@ function mapProductDetails(product) {
     ? product.specifications.filter(spec => spec?.name).map(spec => [spec.name, spec.value ?? ''])
     : [];
 
-  if (imageUrl) REAL_IMG[product.id] = imageUrl;
+  if (registerImage && imageUrls[0]) REAL_IMG[product.id] = imageUrls[0];
 
   return {
     id: product.id,
@@ -150,16 +149,26 @@ function ReviewBreakdown({ product }) {
   );
 }
 
-export function ProductPage({ id }) {
+export function ProductPage({ id, initialProduct }) {
   const { go, addToCart, toggleWish, wish, catalogLoading, isAuthenticated, toast } = useStore();
   const catalogProduct = bySlug(id) || byId(id);
-  const [productDetails, setProductDetails] = useState(null);
+  const [productDetails, setProductDetails] = useState(() => initialProduct ? mapProductDetails(initialProduct, false) : null);
   const [detailLoading, setDetailLoading] = useState(true);
   const product = useMemo(() => {
     if (catalogProduct && productDetails && (productDetails.id === catalogProduct.id || productDetails.slug === catalogProduct.slug)) {
       return { ...catalogProduct, ...productDetails };
     }
-    return productDetails || catalogProduct || null;
+    if (productDetails) return productDetails;
+    if (catalogProduct) {
+      const isFlat = Array.isArray(catalogProduct.variants) && catalogProduct.variants.some(v => v && !Array.isArray(v.options));
+      return isFlat ? {
+        ...catalogProduct,
+        variants: groupsFromFlatVariants(catalogProduct.variants),
+        variantStock: catalogProduct.variantStock || stockMapFromFlatVariants(catalogProduct.variants),
+        variantImages: catalogProduct.variantImages || imageMapFromFlatVariants(catalogProduct.variants),
+      } : catalogProduct;
+    }
+    return null;
   }, [catalogProduct, productDetails]);
   // Variation groups are defined per-product by whoever uploaded it (admin ->
   // AdminCatalog's ProductEditDrawer) — a group only renders when the product
@@ -231,10 +240,10 @@ export function ProductPage({ id }) {
       .finally(() => { if (!cancelled) setDetailLoading(false); });
 
     productsApi.related(id)
-      .then(res => { if (!cancelled) setRelatedRemote((Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []).map(mapProductDetails)); })
+      .then(res => { if (!cancelled) setRelatedRemote((Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []).map(product => mapProductDetails(product))); })
       .catch(() => { });
     productsApi.alternatives(id)
-      .then(res => { if (!cancelled) setAlternativesRemote((Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []).map(mapProductDetails)); })
+      .then(res => { if (!cancelled) setAlternativesRemote((Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []).map(product => mapProductDetails(product))); })
       .catch(() => { });
 
     return () => { cancelled = true; };
@@ -359,7 +368,7 @@ export function ProductPage({ id }) {
                 <>
                   <div className="v-label">{g.name}: <b>{selected[g.name]?.name}</b></div>
                   <div className="swatches">
-                    {g.options.map(c => (
+                    {(g.options || []).map(c => (
                       <button key={c.name} className={'swatch' + (selected[g.name]?.name === c.name ? ' on' : '')} style={{ '--sw': c.hex }} title={c.price > 0 ? `${c.name} · ${naira(c.price)}` : c.name} onClick={() => setSelected(s => ({ ...s, [g.name]: c }))}>
                         <span style={{ background: c.hex }} />
                       </button>
@@ -370,7 +379,7 @@ export function ProductPage({ id }) {
                 <>
                   <div className="v-label">{g.name}</div>
                   <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                    {g.options.map((o, oi) => (
+                    {(g.options || []).map((o, oi) => (
                       <button key={oi} className={'chip' + (selected[g.name] === o ? ' on' : '')} onClick={() => setSelected(s => ({ ...s, [g.name]: o }))}>
                         {o.label}{o.price > 0 && <small className="muted" style={{ marginLeft: 5 }}>{naira(o.price)}</small>}
                       </button>
