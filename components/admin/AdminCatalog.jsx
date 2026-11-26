@@ -153,9 +153,11 @@ export async function saveAdminProduct(d, toast) {
   const sourced = Boolean(sources.length);
   const variantsPayload = cartesianCombos(d.variants).map(c => {
     const rec = d.variantStock?.[c.key] || {};
+    const varPrice = rec.price !== '' && rec.price != null ? Number(rec.price) : null;
     return {
       sku: String(rec.sku || defaultSku(d.name, c.attributes)).trim(),
       attributes: c.attributes,
+      ...(Number.isFinite(varPrice) && varPrice > 0 ? { price: varPrice } : {}),
       stock: Math.max(0, Number(rec.stock) || 0),
     };
   });
@@ -804,9 +806,10 @@ export function ProductEditDrawer({ draft, onClose, onSave, onMutated }) {
                   {combos.map(c => {
                     const rec = f.variantStock?.[c.key] || {};
                     return (
-                      <div key={c.key} className="adm-field-row-3" style={{ alignItems: 'flex-end' }}>
+                      <div key={c.key} className="adm-field-row-3" style={{ alignItems: 'flex-end', gridTemplateColumns: '1.2fr 1fr 0.8fr 0.7fr' }}>
                         <div style={{ paddingBottom: 10, minWidth: 0 }}><small className="muted">{Object.entries(c.attributes).map(([k, v]) => `${k}: ${v}`).join(' · ')}</small></div>
                         <label className="adm-field"><span>SKU</span><input value={rec.sku ?? ''} placeholder={defaultSku(f.name, c.attributes)} onChange={e => setComboField(c.key, 'sku', e.target.value)} /></label>
+                        <label className="adm-field"><span>Price (₦)</span><input type="number" min="0" step="0.01" value={rec.price ?? ''} placeholder={String(f.price || '')} onChange={e => setComboField(c.key, 'price', e.target.value)} /></label>
                         <label className="adm-field"><span>Stock</span><input type="number" min="0" value={rec.stock ?? ''} onChange={e => setComboField(c.key, 'stock', e.target.value)} /></label>
                       </div>
                     );
