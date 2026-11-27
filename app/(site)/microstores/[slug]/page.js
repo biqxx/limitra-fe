@@ -30,7 +30,7 @@ export async function generateMetadata({ params }) {
   const description =
     truncateText(store.tagline || store.bio, 160) ||
     `Shop curated picks from ${store.name} on ${SITE_NAME}.`;
-  const images = [store.banner_url, store.avatar_url].filter(Boolean);
+  const images = [store.banner_url, store.cover_url, store.avatar_url, store.logo_url].filter(Boolean);
 
   return buildMetadata({
     title: store.name,
@@ -56,8 +56,8 @@ export default async function MicroStoreRoutePage({ params }) {
             ...(store.bio || store.tagline
               ? { description: truncateText(store.tagline || store.bio, 300) }
               : {}),
-            ...(store.avatar_url || store.banner_url
-              ? { image: store.banner_url || store.avatar_url }
+            ...(store.avatar_url || store.banner_url || store.cover_url || store.logo_url
+              ? { image: store.banner_url || store.cover_url || store.avatar_url || store.logo_url }
               : {}),
           },
           {

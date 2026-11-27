@@ -204,6 +204,8 @@ export function AdminProducts({ editId }) {
   const [stockStat, setStockStat] = useState('All stock');
   const [editing, setEditing] = useState(null); // product being edited
   const [bulk, setBulk] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkDiscount, setBulkDiscount] = useState(null);
   const t = (m) => addToast(m);
 
   // The admin's OWN catalog, not the storefront's — productsApi.list() (what
@@ -272,6 +274,13 @@ export function AdminProducts({ editId }) {
     return 0;
   });
   const { shown: pShown, pagerProps: pPager } = usePager(list, q + cat + sort + stat + stockStat);
+  const toggleSelected = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const pageAllSelected = pShown.length > 0 && pShown.every(p => selected.has(p.id));
+  const toggleSelectPage = () => setSelected(s => {
+    const n = new Set(s);
+    pShown.forEach(p => pageAllSelected ? n.delete(p.id) : n.add(p.id));
+    return n;
+  });
   return (
     <>
       <AdmHead title="Products" sub={`${items.length} products across ${cats.length - 1} categories`}>
@@ -288,10 +297,20 @@ export function AdminProducts({ editId }) {
         </div>
       </div>
       <div className="panel" style={{ padding: 0 }}>
+        {selected.size > 0 && (
+          <div className="row between" style={{ padding: '10px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+            <small><b>{selected.size}</b> product{selected.size === 1 ? '' : 's'} selected</small>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="adm-btn primary" onClick={() => setBulkDiscount({ mode: 'pct', value: '', startsAt: '', endsAt: '' })}><Icon name="tag" size={14} /> Apply discount</button>
+              <button className="adm-btn ghost" onClick={() => setSelected(new Set())}>Clear</button>
+            </div>
+          </div>
+        )}
         <div className="adm-table-wrap"><table className="adm-table">
-          <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Variations</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th style={{ width: 36 }}><input type="checkbox" checked={pageAllSelected} onChange={toggleSelectPage} aria-label="Select all on this page" /></th><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Variations</th><th>Status</th><th></th></tr></thead>
           <tbody>{pShown.map(p => (
             <tr key={p.id}>
+              <td><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelected(p.id)} aria-label={`Select ${p.name}`} /></td>
               <td><div className="adm-prod"><span className="adm-prod-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></span><div><b>{p.name.split(',')[0]}</b><small>{p.brand ? p.brand + ' · ' : ''}{p.slug}</small></div></div></td>
               <td>{CATEGORIES.find(x => x.slug === p.category)?.name || p.category}</td>
               <td>
@@ -331,6 +350,28 @@ export function AdminProducts({ editId }) {
         }
       }} />}
       {bulk && <BulkUploadModal onClose={() => setBulk(false)} onDone={() => { loadProducts(); setBulk(false); }} />}
+      {bulkDiscount && (
+        <BulkDiscountModal
+          count={selected.size}
+          draft={bulkDiscount}
+          onChange={(patch) => setBulkDiscount(d => ({ ...d, ...patch }))}
+          onClose={() => setBulkDiscount(null)}
+          onDone={async () => {
+            const payload = bulkDiscount.mode === 'pct'
+              ? { discount_percentage: Number(bulkDiscount.value) }
+              : { discounted_price: Number(bulkDiscount.value) };
+            if (bulkDiscount.startsAt) payload.discount_starts_at = new Date(bulkDiscount.startsAt).toISOString();
+            if (bulkDiscount.endsAt) payload.discount_ends_at = new Date(bulkDiscount.endsAt).toISOString();
+            const ids = [...selected];
+            const results = await Promise.allSettled(ids.map(id => adminProductsApi.applyDiscount(id, payload)));
+            const failed = results.filter(r => r.status === 'rejected').length;
+            t(failed === 0 ? `Discount applied to ${ids.length} product${ids.length === 1 ? '' : 's'}` : `Applied to ${ids.length - failed} of ${ids.length} — ${failed} failed`);
+            setBulkDiscount(null);
+            setSelected(new Set());
+            await loadProducts();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -415,6 +456,45 @@ function BulkUploadModal({ onClose, onDone }) {
         <div className="adm-drawer-f">
           <button className="adm-btn ghost" onClick={onClose}>Close</button>
           <button className="adm-btn primary" disabled={!file || busy} onClick={startUpload}>{busy ? 'Uploading…' : 'Import products'}</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// No bulk-discount endpoint exists — applies POST /admin/products/{id}/discount
+// to each selected product individually (Promise.allSettled), same as every
+// other "bulk" action in this app without real backend support.
+function BulkDiscountModal({ count, draft, onChange, onClose, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const submit = async () => { setBusy(true); try { await onDone(); } finally { setBusy(false); } };
+  return (
+    <>
+      <div className="adm-drawer-scrim" onClick={onClose} />
+      <div className="adm-modal" role="dialog" aria-label="Apply discount to selected products">
+        <div className="adm-drawer-h"><h3>Apply discount · {count} product{count === 1 ? '' : 's'}</h3><button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button></div>
+        <div className="adm-drawer-body">
+          <div className="adm-field-row">
+            <label className="adm-field"><span>Type</span>
+              <select value={draft.mode} onChange={e => onChange({ mode: e.target.value, value: '' })}>
+                <option value="pct">Percentage off</option>
+                <option value="price">Set buying price</option>
+              </select>
+            </label>
+            <label className="adm-field">
+              <span>{draft.mode === 'pct' ? 'Discount (%)' : 'New buying price (₦)'}</span>
+              <input type="number" min="1" step="0.01" value={draft.value} onChange={e => onChange({ value: e.target.value })} placeholder={draft.mode === 'pct' ? 'e.g. 20' : 'e.g. 40000'} autoFocus />
+            </label>
+          </div>
+          <div className="adm-field-row">
+            <label className="adm-field"><span>Starts (optional)</span><input type="datetime-local" value={draft.startsAt} onChange={e => onChange({ startsAt: e.target.value })} /></label>
+            <label className="adm-field"><span>Ends (optional)</span><input type="datetime-local" value={draft.endsAt} onChange={e => onChange({ endsAt: e.target.value })} /></label>
+          </div>
+          <div className="adm-note"><Icon name="info" size={15} /> Applied to each selected product individually — no change is partial; any failures are reported after the run.</div>
+        </div>
+        <div className="adm-drawer-f">
+          <button className="adm-btn ghost" onClick={onClose}>Cancel</button>
+          <button className="adm-btn primary" disabled={!draft.value || busy} onClick={submit}>{busy ? 'Applying…' : `Apply to ${count} product${count === 1 ? '' : 's'}`}</button>
         </div>
       </div>
     </>
@@ -1067,6 +1147,8 @@ export function AdminOrders() {
   const [statusDraft, setStatusDraft] = useState(null);
   const [refundDraft, setRefundDraft] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkStatus, setBulkStatus] = useState(null);
 
   const loadOrders = useCallback(async () => {
     try {
@@ -1095,6 +1177,13 @@ export function AdminOrders() {
     return new Date(b.date) - new Date(a.date);
   });
   const { shown: oShown, pagerProps: oPager } = usePager(list, q + status + sort);
+  const toggleSelected = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const pageAllSelected = oShown.length > 0 && oShown.every(o => selected.has(o.id));
+  const toggleSelectPage = () => setSelected(s => {
+    const n = new Set(s);
+    oShown.forEach(o => pageAllSelected ? n.delete(o.id) : n.add(o.id));
+    return n;
+  });
 
   const submitStatus = async () => {
     if (!statusDraft?.status || !statusDraft.note.trim()) return;
@@ -1105,6 +1194,22 @@ export function AdminOrders() {
       setStatusDraft(null);
       await loadOrders();
     } catch (error) { toast(messageFrom(error)); } finally { setSaving(false); }
+  };
+
+  // No bulk order-status endpoint — fires PATCH /admin/orders/{id}/status for
+  // each selected order individually (Promise.allSettled).
+  const submitBulkStatus = async () => {
+    if (!bulkStatus?.status || !bulkStatus.note.trim()) return;
+    setSaving(true);
+    try {
+      const ids = [...selected];
+      const results = await Promise.allSettled(ids.map(id => adminOrdersApi.updateStatus(id, { status: bulkStatus.status, note: bulkStatus.note.trim() })));
+      const failed = results.filter(r => r.status === 'rejected').length;
+      toast(failed === 0 ? `Status updated for ${ids.length} order${ids.length === 1 ? '' : 's'}` : `Updated ${ids.length - failed} of ${ids.length} — ${failed} failed`);
+      setBulkStatus(null);
+      setSelected(new Set());
+      await loadOrders();
+    } finally { setSaving(false); }
   };
 
   const submitShip = async () => {
@@ -1143,11 +1248,22 @@ export function AdminOrders() {
       </div>
       <div className="panel" style={{ padding: 0 }}>
         {!loaded ? <div className="adm-soon"><p>Loading orders…</p></div> : (
+          <>
+          {selected.size > 0 && (
+            <div className="row between" style={{ padding: '10px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+              <small><b>{selected.size}</b> order{selected.size === 1 ? '' : 's'} selected</small>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="adm-btn primary" onClick={() => setBulkStatus({ status: STATUS_UPDATE_OPTIONS[0], note: '' })}><Icon name="edit" size={14} /> Update status</button>
+                <button className="adm-btn ghost" onClick={() => setSelected(new Set())}>Clear</button>
+              </div>
+            </div>
+          )}
           <div className="adm-table-wrap">
             <table className="adm-table">
-              <thead><tr><th>Order</th><th>Customer</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th style={{ width: 36 }}><input type="checkbox" checked={pageAllSelected} onChange={toggleSelectPage} aria-label="Select all on this page" /></th><th>Order</th><th>Customer</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th></th></tr></thead>
               <tbody>{oShown.map(o => (
                 <tr key={o.id} data-hlkey={o.id + ' ' + (o.customer || '')}>
+                  <td><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelected(o.id)} aria-label={`Select order #${o.id}`} /></td>
                   <td><b style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13.5 }}>#{o.id}</b></td>
                   <td>{o.customer}</td><td className="muted">{fmtOrderDate(o.date)}</td><td>{o.itemCount}</td><td><b>{naira(o.total)}</b></td>
                   <td><span className={'adm-pill ' + (ORDER_STATUS_CLS[o.status] || 'muted')}>{ORDER_STATUS_LABEL[o.status] || o.status}</span></td>
@@ -1164,6 +1280,7 @@ export function AdminOrders() {
             {list.length === 0 && <div style={{ padding: '28px', textAlign: 'center', color: 'var(--text-faint)' }}>No orders match your filters.</div>}
             <Pager {...oPager} />
           </div>
+          </>
         )}
       </div>
       {invoice && <InvoiceModal order={invoice} onClose={() => setInvoice(null)} />}
@@ -1177,6 +1294,18 @@ export function AdminOrders() {
             </select>
           </label>
           <label className="adm-field"><span>Note</span><textarea rows="3" value={statusDraft.note} onChange={e => setStatusDraft(c => ({ ...c, note: e.target.value }))} placeholder="Why this status changed (required)" autoFocus /></label>
+        </OrderDrawer>
+      )}
+
+      {bulkStatus && (
+        <OrderDrawer title={`Update status · ${selected.size} order${selected.size === 1 ? '' : 's'}`} saving={saving} canSave={!!bulkStatus.note.trim()} onClose={() => setBulkStatus(null)} onSave={submitBulkStatus} saveLabel={`Update ${selected.size} order${selected.size === 1 ? '' : 's'}`}>
+          <label className="adm-field"><span>New status</span>
+            <select value={bulkStatus.status} onChange={e => setBulkStatus(c => ({ ...c, status: e.target.value }))}>
+              {STATUS_UPDATE_OPTIONS.map(s => <option key={s} value={s}>{ORDER_STATUS_LABEL[s]}</option>)}
+            </select>
+          </label>
+          <label className="adm-field"><span>Note</span><textarea rows="3" value={bulkStatus.note} onChange={e => setBulkStatus(c => ({ ...c, note: e.target.value }))} placeholder="Why this status changed (required)" autoFocus /></label>
+          <div className="adm-note"><Icon name="info" size={15} /> Applied to each selected order individually; any failures are reported after the run.</div>
         </OrderDrawer>
       )}
 

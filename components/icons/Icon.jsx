@@ -9,6 +9,7 @@ import {
   MessageCircle, Gift, Flame, Eye, ShoppingBag, ZoomIn, Mail, Lock, Phone, Pencil, CreditCard,
   DollarSign, Clock, Info, Sparkles, Store, Shirt, Paintbrush2, Scissors, List, Download, Share2,
   Copy, Play, Pause, Video, Volume2, VolumeX, Send, Paperclip, Bell, Wallet,
+  Hash, Link2, MousePointerClick, Megaphone, Rocket, Ticket,
 } from 'lucide-react';
 
 const I = {
@@ -23,7 +24,9 @@ const I = {
   dollar: DollarSign, clock: Clock, info: Info, spark: Sparkles, store: Store, shirt: Shirt,
   makeup: Paintbrush2, hair: Scissors, list: List, download: Download, share: Share2,
   copy: Copy, play: Play, pause: Pause, video: Video, volume: Volume2, mute: VolumeX,
-  telegram: Send, paperclip: Paperclip, bell: Bell, wallet: Wallet,
+  telegram: Send, send: Send, paperclip: Paperclip, bell: Bell, wallet: Wallet,
+  hash: Hash, link: Link2, click: MousePointerClick,
+  megaphone: Megaphone, rocket: Rocket, ticket: Ticket,
 };
 
 export function Icon({ name, size = 20, stroke = 2, fill = 'none', className = '', style = {} }) {

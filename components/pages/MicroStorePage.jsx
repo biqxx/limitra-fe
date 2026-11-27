@@ -6,26 +6,80 @@
    against the already-loaded global PRODUCTS catalog (byId) to get the full
    normalized shape ProductCard/ListCard expect (price, rating, badges, etc.),
    same as every other product grid in the app, instead of a cut-down demo
-   shape. Follow/Chat have no backend yet (no follow or messaging endpoint
-   for MicroStores) so they stay honest placeholders. */
+   shape. Follow has no backend yet (no follow endpoint for MicroStores) so
+   it stays an honest placeholder. "Chat with Store" opens a real in-app
+   conversation (GET/POST /microstores/{slug}/chat) now that it exists —
+   still falls back to the owner's WhatsApp/email as a secondary link when
+   the store happens to expose one (undocumented field, unconfirmed name). */
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { Breadcrumbs, EmptyState, ProductCard } from '@/components/ui/Shared';
 import { Dropdown } from '@/components/forms/Shared';
 import { FilterPanel, ListCard, pagerList, priceSort } from '@/components/pages/ShopPage';
+import { ChatThread, normalizeChatMessage, pickMsgList } from '@/components/microstore/Chat';
 import { microstoresApi } from '@/lib/api/endpoints';
+import { messageFrom } from '@/lib/api/errors';
 import { byId } from '@/lib/data';
+// The chat modal below borrows Admin/dashboard's .adm-modal/.adm-drawer-*
+// chrome, but this page isn't wrapped by a dashboard layout that would load
+// admin.css for free — import it directly here instead.
+import '@/styles/admin.css';
 
 const SORTS = [['relevance', 'Most relevant'], ['low', 'Price: low to high'], ['high', 'Price: high to low'], ['rating', 'Top rated'], ['new', 'Newest']];
 const PER_PAGE = 30;
 
 const EMPTY_FILTERS = { maxPrice: null, brands: [], minRating: 0, onSale: false, inStock: false };
 
+// Nigerian local numbers (leading 0) need the country code for a wa.me link;
+// anything already starting with a country code is left alone.
+const toWaNumber = (raw) => {
+  const d = String(raw).replace(/[^\d]/g, '');
+  return d.startsWith('0') ? '234' + d.slice(1) : d;
+};
+
 export function MicroStorePage({ slug, initialStore }) {
-  const { go, toast } = useStore();
-  const [store, setStore] = useState(initialStore);
+  const { go, toast, user, isAuthenticated } = useStore();
+  const [store, setStore] = useState(initialStore ?? null);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatConv, setChatConv] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatSending, setChatSending] = useState(false);
+
+  const openChat = async () => {
+    if (!isAuthenticated) { toast('Sign in to chat with this store'); go('auth', 'signin'); return; }
+    setChatOpen(true);
+    if (chatConv) return; // already loaded this visit
+    setChatLoading(true);
+    try {
+      const res = await microstoresApi.getChat(slug);
+      const conv = res?.conversation || res;
+      setChatConv(conv);
+      setChatMessages(pickMsgList(conv).map((m) => normalizeChatMessage(m, user?.id)));
+    } catch (e) {
+      toast(messageFrom(e, 'Could not open chat'));
+      setChatOpen(false);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const sendChat = async (text) => {
+    setChatSending(true);
+    const optimistic = { id: `opt-${Date.now()}`, text, mine: true, date: new Date().toISOString() };
+    setChatMessages((m) => [...m, optimistic]);
+    try {
+      await microstoresApi.sendChatMessage(slug, { body: text });
+    } catch (e) {
+      toast(messageFrom(e, 'Message failed to send'));
+      setChatMessages((m) => m.filter((x) => x.id !== optimistic.id));
+    } finally {
+      setChatSending(false);
+    }
+  };
 
   useEffect(() => {
     if (!slug) return;
@@ -124,16 +178,23 @@ export function MicroStorePage({ slug, initialStore }) {
   const rating = store.rating ?? store.average_rating;
   const reviewsCount = store.reviews_count ?? store.reviews;
   const location = store.city || store.location || store.address;
+  const waNumber = store.whatsapp || store.whatsapp_number || store.phone || store.phone_number || store.contact_phone || store.owner?.whatsapp || store.owner?.phone;
+  const contactEmail = store.contact_email || store.email || store.owner?.email;
+  const chatHref = waNumber ? `https://wa.me/${toWaNumber(waNumber)}` : contactEmail ? `mailto:${contactEmail}` : null;
+  // GET /microstores/{slug} is a separate, undocumented endpoint from the
+  // PATCH that saves these — no guarantee it echoes the same key names back.
+  const bannerUrl = store.banner_url || store.cover_url || store.cover_image_url || store.banner_image || store.banner;
+  const logoUrl = store.logo_url || store.avatar_url || store.logo_image;
 
   return (
     <div className="page page-fade">
       <section className="sec" style={{ paddingTop: 8, paddingBottom: 0 }}>
         <div className="wrap">
           <div className="ms-store-banner">
-            {store.banner_url && <div className="ms-store-banner-bgimg" style={{ backgroundImage: `url(${store.banner_url})` }} />}
+            {bannerUrl && <div className="ms-store-banner-bgimg" style={{ backgroundImage: `url(${bannerUrl})` }} />}
             <div className="ms-store-banner-fade" />
             <span className="ms-store-banner-avatar">
-              {store.logo_url ? <img src={store.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Icon name="store" size={28} />}
+              {logoUrl ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Icon name="store" size={28} />}
             </span>
             <div className="ms-store-banner-info">
               <b>{name}</b>
@@ -146,7 +207,8 @@ export function MicroStorePage({ slug, initialStore }) {
               </div>
               <div className="ms-store-banner-cta">
                 <button className="btn btn-primary" onClick={() => toast('Following stores isn’t available yet')}><Icon name="heart" size={16} /> Follow Store</button>
-                <button className="btn btn-ghost" onClick={() => toast('Chat isn’t connected yet')}><Icon name="chat" size={16} /> Chat with Store</button>
+                <button className="btn btn-ghost" onClick={openChat}><Icon name="chat" size={16} /> Chat with Store</button>
+                {chatHref && <a className="btn btn-ghost" href={chatHref} target="_blank" rel="noreferrer" title="Chat on WhatsApp/email instead"><Icon name="link" size={16} /></a>}
               </div>
             </div>
           </div>
@@ -233,6 +295,20 @@ export function MicroStorePage({ slug, initialStore }) {
           </div>
         </div>
       </section>
+
+      {chatOpen && (
+        <>
+          <div className="adm-drawer-scrim" onClick={() => setChatOpen(false)} />
+          <div className="adm-modal" role="dialog" aria-label={`Chat with ${name}`} style={{ height: 520, display: 'flex', flexDirection: 'column' }}>
+            <div className="adm-drawer-h"><h3>Chat with {name}</h3><button className="adm-icon-btn" onClick={() => setChatOpen(false)} aria-label="Close"><Icon name="close" size={20} /></button></div>
+            <div className="adm-drawer-body" style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+              {chatLoading ? <p className="muted" style={{ margin: 'auto' }}>Loading conversation…</p> : (
+                <ChatThread messages={chatMessages} onSend={sendChat} sending={chatSending} placeholder={`Message ${name}…`} />
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

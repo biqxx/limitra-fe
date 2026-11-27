@@ -8,6 +8,11 @@
 .ms-hero-copy h1 { color: #fff; font-size: clamp(32px, 4.2vw, 52px); line-height: 1.06; letter-spacing: -.025em; }
 .ms-hero-copy h1 .hl { color: var(--orange-soft); }
 .ms-hero-copy > p { color: rgba(255,255,255,.82); font-size: 16.5px; margin: 18px 0 28px; max-width: 460px; text-wrap: pretty; }
+/* .hero-cta's base rule (styles/pages.css) centers and wraps, which suits a
+   centered single-CTA hero — this one is left-aligned with two buttons that
+   should stack, not sit side by side (matches Affiliate/Celebrity Stores). */
+.ms-hero-copy .hero-cta { flex-direction: column; align-items: flex-start; }
+.ms-hero-copy .hero-cta .btn { white-space: nowrap; }
 .ms-hero-trust { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px 22px; margin-top: 26px; max-width: 460px; }
 .ms-hero-trust span { display: flex; align-items: flex-start; gap: 9px; font-family: var(--font-display); font-weight: 600; font-size: 13px; line-height: 1.35; color: rgba(255,255,255,.9); }
 .ms-hero-trust svg { color: var(--orange-soft); flex: none; margin-top: 1px; }

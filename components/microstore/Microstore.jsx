@@ -6,27 +6,40 @@
    components/charts/Charts.jsx, styles/admin.css) for visual consistency,
    just laid out inside the page flow instead of owning the viewport.
 
-   Most of the target design's sections (Orders, Inventory, Customers,
-   Promotion, Reviews, Earnings, Withdrawals, Transactions, Order Status,
-   Top Performing Products) have no backing API for MicroStores at all —
-   myMicrostoreApi only exposes get/create/update/addProduct/updateProduct/
-   removeProduct/analytics. Those sections render ComingSoon panels instead
-   of fabricated numbers. */
+   Orders/Inventory/Customers/Reviews/Earnings/Withdrawals/Transactions now
+   have real endpoints (myMicrostoreApi.orders/inventory/customers/reviews/
+   earnings/withdrawals/transactions) but, like everything else undocumented
+   in this app, with no published field names — every normalizer below reads
+   defensively and degrades to an empty state rather than fabricating data.
+   Order Status / Top Performing Products on the Overview page still have no
+   dedicated endpoint, so those stay ComingSoon panels. */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, Fragment } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Icon } from '@/components/icons/Icon';
 import { Kpi, BarChart } from '@/components/charts/Charts';
 import { useStore } from '@/components/store/StoreProvider';
 import { Breadcrumbs, Thumb } from '@/components/ui/Shared';
+import { Pager, usePager } from '@/components/admin/AdminShared';
+import { ChatThread, normalizeChatMessage, pickMsgList } from '@/components/microstore/Chat';
 import { naira, PRODUCTS, REAL_IMG } from '@/lib/data';
 import { myMicrostoreApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 
 const fn = naira;
 
+// Shared defensive-read helpers for the newly-added, still field-name-
+// undocumented endpoints below.
+const pick = (obj, keys, fallback) => { for (const k of keys) { if (obj?.[k] != null) return obj[k]; } return fallback; };
+const unwrapList = (res) => Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : Array.isArray(res?.items) ? res.items : [];
+const fmtDate = (v) => { if (!v) return '—'; const d = new Date(v); return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString(); };
+
+const MS_ORDER_STATUS_LABEL = { pending_payment: 'Pending payment', confirmed: 'Confirmed', processing: 'Processing', shipped: 'Shipped', in_transit: 'In transit', delivered: 'Delivered', cancelled: 'Cancelled' };
+const MS_ORDER_STATUS_CLS = { delivered: 'ok', cancelled: 'bad', shipped: 'info', in_transit: 'info', processing: 'warn', confirmed: 'warn', pending_payment: 'muted' };
+const MS_STATUS_UPDATE_OPTIONS = ['processing', 'shipped', 'in_transit', 'delivered', 'cancelled'];
+
 export const MS_NAV = [
   ['Overview', [['dashboard', 'Dashboard', 'grid']]],
-  ['Sales', [['orders', 'Orders', 'cart'], ['products', 'Products', 'bag'], ['inventory', 'Inventory', 'package'], ['customers', 'Customers', 'user']]],
+  ['Sales', [['orders', 'Orders', 'cart'], ['products', 'Products', 'bag'], ['inventory', 'Inventory', 'package'], ['customers', 'Customers', 'user'], ['messages', 'Messages', 'chat']]],
   ['Growth', [['analytics', 'Analytics', 'spark'], ['promotion', 'Promotion', 'gift'], ['reviews', 'Reviews', 'star']]],
   ['Finance', [['earnings', 'Earnings', 'dollar'], ['withdrawals', 'Withdrawals', 'wallet'], ['transactions', 'Transactions', 'list']]],
   ['Store', [['storefront', 'Storefront', 'store'], ['settings', 'Store Settings', 'lock']]],
@@ -578,6 +591,13 @@ export function MSStorefront() {
 }
 
 /* ---- Store settings ---- */
+// logo_url/banner_url must be a real, valid URL under 500 characters
+// (confirmed live: a 422 rejects anything else, including an embedded
+// data: URL) — and there's no upload endpoint for a store owner to get a
+// hosted URL from (only generic admin media and the user's own profile
+// avatar exist, neither of which fits here). So this has to stay a pasted
+// link to an already-hosted image, not a real file picker, until the
+// backend adds a dedicated upload endpoint.
 function ImageSlot({ label, value, onChange, round, recommended }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value || '');
@@ -603,7 +623,7 @@ function ImageSlot({ label, value, onChange, round, recommended }) {
           {value && <button className="adm-btn danger sm" onClick={() => onChange('')}>Remove image</button>}
         </div>
       )}
-      <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>{recommended} No file upload yet — paste a direct image URL.</p>
+      <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>{recommended} Paste a link to an already-hosted image (max 500 characters) — there&rsquo;s no file upload for this yet.</p>
     </div>
   );
 }
@@ -711,10 +731,30 @@ export function MSSettings() {
 }
 
 /* ---- Analytics (real endpoint, undocumented shape) ---- */
+// Field names aren't documented, so match by keyword rather than an exact
+// key list — anything unrecognized still gets a sensible default icon.
+const ANALYTICS_ICON = [
+  [/id$/i, 'hash', '#6B7280'],
+  [/name/i, 'store', '#0438B6'],
+  [/link|url|slug/i, 'link', '#0438B6'],
+  [/view/i, 'eye', '#7A5AE0'],
+  [/click/i, 'click', '#F5A623'],
+  [/order/i, 'cart', '#F5A623'],
+  [/revenue|sales|earning|balance/i, 'wallet', '#1F8A5B'],
+];
+function analyticsIcon(key) {
+  const hit = ANALYTICS_ICON.find(([re]) => re.test(key));
+  return hit ? [hit[1], hit[2]] : ['spark', '#0438B6'];
+}
+
+// Internal identifiers (microstore_id, "Microstore ID", etc.) aren't a
+// metric the owner needs to see as a KPI tile.
+const isIdField = (key) => /(^|[_\s])id$/i.test(key.trim());
+
 export function MSAnalytics() {
   const { analytics } = useMicrostore();
   const entries = analytics && typeof analytics === 'object'
-    ? Object.entries(analytics).filter(([k, v]) => typeof v === 'number' || typeof v === 'string')
+    ? Object.entries(analytics).filter(([k, v]) => (typeof v === 'number' || typeof v === 'string') && !isIdField(k))
     : [];
 
   if (entries.length === 0) {
@@ -723,9 +763,551 @@ export function MSAnalytics() {
 
   return (
     <div className="kpi-grid">
-      {entries.map(([k, v]) => (
-        <Kpi key={k} ic="spark" tint="#0438B6" label={k.replace(/_/g, ' ')} val={String(v)} />
+      {entries.map(([k, v]) => {
+        const [ic, tint] = analyticsIcon(k);
+        return <Kpi key={k} ic={ic} tint={tint} label={k.replace(/_/g, ' ')} val={String(v)} />;
+      })}
+    </div>
+  );
+}
+
+/* ---- Promotion (no backend yet — styled preview of what's coming) ---- */
+const PROMO_TOOLS = [
+  { icon: 'ticket', title: 'Discount Codes', desc: 'Share approved offers with your customers.' },
+  { icon: 'rocket', title: 'Product Boosts', desc: 'Put selected products in the spotlight.' },
+  { icon: 'share', title: 'Social Sharing Kits', desc: 'Promote your store with ready-to-share content.' },
+];
+
+export function MSPromotion() {
+  const router = useRouter();
+  useMsPageHeader({ subtitle: "Tools to help your Microstore reach more shoppers." });
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap', background: 'linear-gradient(135deg, var(--primary-soft), var(--surface))' }}>
+        <div>
+          <span className="adm-pill warn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon name="clock" size={12} /> Coming soon</span>
+          <h2 style={{ marginTop: 14, fontSize: 24 }}>More visibility. More possibilities.</h2>
+          <p className="muted" style={{ marginTop: 6 }}>New ways to promote your store are on the way.</p>
+        </div>
+        <Icon name="megaphone" size={64} className="muted" style={{ flex: 'none', opacity: .3 }} />
+      </div>
+
+      <h3>Your promotion tools</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+        {PROMO_TOOLS.map((t) => (
+          <div key={t.title} className="panel">
+            <span style={{ width: 46, height: 46, borderRadius: 'var(--r-md)', background: 'var(--primary-soft)', color: 'var(--primary)', display: 'grid', placeItems: 'center', marginBottom: 14 }}>
+              <Icon name={t.icon} size={21} />
+            </span>
+            <h4 style={{ marginBottom: 6, fontSize: 15.5 }}>{t.title}</h4>
+            <p className="muted" style={{ fontSize: 13.5, marginBottom: 14 }}>{t.desc}</p>
+            <span className="adm-pill muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="clock" size={12} /> Coming soon</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ width: 40, height: 40, borderRadius: 'var(--r-md)', background: 'var(--primary-soft)', color: 'var(--primary)', display: 'grid', placeItems: 'center', flex: 'none' }}>
+            <Icon name="store" size={18} />
+          </span>
+          <div>
+            <b>Get your store ready</b>
+            <p className="muted" style={{ fontSize: 13.5, marginTop: 2 }}>Add products and preview your storefront before you promote it.</p>
+          </div>
+        </div>
+        <button className="link-btn" onClick={() => router.push(msPath('products'))}>Manage Products <Icon name="arrowr" size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Orders ---- */
+function normalizeStoreOrder(o) {
+  return {
+    raw: o,
+    id: pick(o, ['id', 'order_id'], '—'),
+    product: pick(o, ['product_name'], null) || pick(o.product || {}, ['name', 'title'], null) || `Product #${pick(o, ['product_id'], '—')}`,
+    customer: pick(o, ['customer_name'], null) || pick(o.customer || o.user || {}, ['name'], 'Customer'),
+    qty: Number(pick(o, ['quantity', 'qty'], 1)),
+    total: Number(pick(o, ['total', 'amount', 'price', 'line_total'], 0)),
+    status: pick(o, ['status'], 'processing'),
+    date: pick(o, ['created_at', 'date', 'ordered_at'], null),
+  };
+}
+
+export function MSOrders() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkStatus, setBulkStatus] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setItems(unwrapList(await myMicrostoreApi.orders({ per_page: 100 })).map(normalizeStoreOrder)); }
+    catch (e) { toast(messageFrom(e, 'Could not load orders')); }
+    finally { setLoaded(true); }
+  }, [toast]);
+  useEffect(() => { load(); }, [load]);
+
+  const { shown, pagerProps } = usePager(items, '');
+  const toggle = (id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const pageAllSelected = shown.length > 0 && shown.every((o) => selected.has(o.id));
+  const toggleAll = () => setSelected((s) => { const n = new Set(s); shown.forEach((o) => pageAllSelected ? n.delete(o.id) : n.add(o.id)); return n; });
+
+  // Body shape for POST /my-microstore/orders/bulk-status is undocumented —
+  // order_ids + status is the common Laravel convention used elsewhere in
+  // this app's bulk endpoints.
+  const submitBulkStatus = async () => {
+    if (!bulkStatus?.status) return;
+    setSaving(true);
+    try {
+      await myMicrostoreApi.bulkUpdateOrderStatus({ order_ids: [...selected], status: bulkStatus.status });
+      toast(`Status updated for ${selected.size} order${selected.size === 1 ? '' : 's'}`);
+      setBulkStatus(null);
+      setSelected(new Set());
+      await load();
+    } catch (e) { toast(messageFrom(e)); } finally { setSaving(false); }
+  };
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Orders" icon="cart" desc="No orders for your MicroStore yet — they'll show up here once a customer buys one of your curated products." />;
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      {selected.size > 0 && (
+        <div className="row between" style={{ padding: '10px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+          <small><b>{selected.size}</b> order{selected.size === 1 ? '' : 's'} selected</small>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="adm-btn primary" onClick={() => setBulkStatus({ status: MS_STATUS_UPDATE_OPTIONS[0] })}><Icon name="edit" size={14} /> Update status</button>
+            <button className="adm-btn ghost" onClick={() => setSelected(new Set())}>Clear</button>
+          </div>
+        </div>
+      )}
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead><tr><th style={{ width: 36 }}><input type="checkbox" checked={pageAllSelected} onChange={toggleAll} aria-label="Select all on this page" /></th><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>
+            {!loaded ? <tr><td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading orders…</td></tr> : shown.map((o) => (
+              <tr key={o.id}>
+                <td data-label=""><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggle(o.id)} aria-label={`Select order ${o.id}`} /></td>
+                <td data-label="Product"><b>{o.product}</b></td>
+                <td data-label="Customer">{o.customer}</td>
+                <td data-label="Qty">{o.qty}</td>
+                <td data-label="Total"><b>{fn(o.total)}</b></td>
+                <td data-label="Status"><span className={'adm-pill ' + (MS_ORDER_STATUS_CLS[o.status] || 'muted')}>{MS_ORDER_STATUS_LABEL[o.status] || o.status}</span></td>
+                <td data-label="Date" className="muted">{fmtDate(o.date)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Pager {...pagerProps} />
+      </div>
+
+      {bulkStatus && (
+        <>
+          <div className="adm-drawer-scrim" onClick={() => setBulkStatus(null)} />
+          <div className="adm-modal" role="dialog" aria-label="Update order status">
+            <div className="adm-drawer-h"><h3>Update status · {selected.size} order{selected.size === 1 ? '' : 's'}</h3><button className="adm-icon-btn" onClick={() => setBulkStatus(null)} aria-label="Close"><Icon name="close" size={20} /></button></div>
+            <div className="adm-drawer-body">
+              <label className="adm-field"><span>New status</span>
+                <select value={bulkStatus.status} onChange={(e) => setBulkStatus((c) => ({ ...c, status: e.target.value }))}>
+                  {MS_STATUS_UPDATE_OPTIONS.map((s) => <option key={s} value={s}>{MS_ORDER_STATUS_LABEL[s]}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="adm-drawer-f">
+              <button className="adm-btn ghost" onClick={() => setBulkStatus(null)}>Cancel</button>
+              <button className="adm-btn primary" disabled={saving} onClick={submitBulkStatus}>{saving ? 'Updating…' : 'Update status'}</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---- Inventory (read-only — no stock-adjustment endpoint for MicroStores) ---- */
+export function MSInventory() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myMicrostoreApi.inventory({ per_page: 100 })
+      .then((res) => setItems(unwrapList(res).map((i) => ({
+        product: pick(i, ['product_name'], null) || pick(i.product || {}, ['name', 'title'], `Product #${pick(i, ['product_id'], '—')}`),
+        stock: Number(pick(i, ['stock', 'quantity', 'stock_quantity'], 0)),
+      }))))
+      .catch((e) => toast(messageFrom(e, 'Could not load inventory')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const statusOf = (s) => s === 0 ? ['Out of stock', 'bad'] : s < 10 ? ['Low stock', 'warn'] : ['In stock', 'ok'];
+  const { shown, pagerProps } = usePager(items, '');
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Inventory" icon="package" desc="No curated products to track stock for yet." />;
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead><tr><th>Product</th><th>Stock</th><th>Status</th></tr></thead>
+          <tbody>
+            {!loaded ? <tr><td colSpan={3} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading inventory…</td></tr> : shown.map((i, idx) => {
+              const [label, cls] = statusOf(i.stock);
+              return (
+                <tr key={idx}>
+                  <td data-label="Product"><b>{i.product}</b></td>
+                  <td data-label="Stock">{i.stock}</td>
+                  <td data-label="Status"><span className={'adm-pill ' + cls}>{label}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <Pager {...pagerProps} />
+      </div>
+    </div>
+  );
+}
+
+/* ---- Customers (read-only — no messaging/export endpoint) ---- */
+export function MSCustomers() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myMicrostoreApi.customers({ per_page: 100 })
+      .then((res) => setItems(unwrapList(res).map((c) => ({
+        name: pick(c, ['name'], null) || pick(c.user || c.customer || {}, ['name'], 'Customer'),
+        email: pick(c, ['email'], null) || pick(c.user || c.customer || {}, ['email'], ''),
+        orders: Number(pick(c, ['order_count', 'orders_count', 'total_orders'], 0)),
+        spent: Number(pick(c, ['total_spent', 'lifetime_value', 'amount_spent'], 0)),
+      }))))
+      .catch((e) => toast(messageFrom(e, 'Could not load customers')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const { shown, pagerProps } = usePager(items, '');
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Customers" icon="user" desc="No customers yet — anyone who buys from your store will show up here." />;
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead><tr><th>Customer</th><th>Orders</th><th>Total spent</th></tr></thead>
+          <tbody>
+            {!loaded ? <tr><td colSpan={3} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading customers…</td></tr> : shown.map((c, idx) => (
+              <tr key={idx}>
+                <td data-label="Customer"><b>{c.name}</b>{c.email && <div><small className="muted">{c.email}</small></div>}</td>
+                <td data-label="Orders">{c.orders}</td>
+                <td data-label="Total spent"><b>{fn(c.spent)}</b></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Pager {...pagerProps} />
+      </div>
+    </div>
+  );
+}
+
+/* ---- Reviews (read-only — no reply/moderate endpoint for MicroStores) ---- */
+export function MSReviews() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myMicrostoreApi.reviews({ per_page: 100 })
+      .then((res) => setItems(unwrapList(res).map((r) => ({
+        product: pick(r, ['product_name'], null) || pick(r.product || {}, ['name', 'title'], `Product #${pick(r, ['product_id'], '—')}`),
+        customer: pick(r, ['customer_name'], null) || pick(r.user || r.customer || {}, ['name'], 'Customer'),
+        rating: Number(pick(r, ['rating', 'stars'], 0)),
+        comment: pick(r, ['comment', 'body', 'text'], ''),
+        date: pick(r, ['created_at', 'date'], null),
+      }))))
+      .catch((e) => toast(messageFrom(e, 'Could not load reviews')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Reviews" icon="star" desc="No reviews on your curated products yet." />;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {!loaded ? <p className="muted">Loading reviews…</p> : items.map((r, idx) => (
+        <div key={idx} className="panel">
+          <div className="row between" style={{ marginBottom: 6 }}>
+            <b>{r.product}</b>
+            <span className="row" style={{ gap: 2 }}>{Array.from({ length: 5 }).map((_, i) => <Icon key={i} name="star" size={14} fill={i < r.rating ? '#FFD166' : 'none'} className={i < r.rating ? '' : 'muted'} />)}</span>
+          </div>
+          {r.comment && <p style={{ fontSize: 13.5 }}>{r.comment}</p>}
+          <small className="muted">{r.customer} · {fmtDate(r.date)}</small>
+        </div>
       ))}
+    </div>
+  );
+}
+
+/* ---- Earnings (summary object, not a list — same KPI-tile treatment as
+   Analytics) ---- */
+export function MSEarnings() {
+  const { toast } = useStore();
+  const [data, setData] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myMicrostoreApi.earnings()
+      .then((res) => setData(res?.earnings || res))
+      .catch((e) => toast(messageFrom(e, 'Could not load earnings')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const entries = data && typeof data === 'object'
+    ? Object.entries(data).filter(([k, v]) => (typeof v === 'number' || typeof v === 'string') && !isIdField(k))
+    : [];
+
+  if (loaded && entries.length === 0) {
+    return <ComingSoon title="Earnings" icon="dollar" desc="No earnings data is available for your MicroStore yet." />;
+  }
+
+  return !loaded ? <p className="muted">Loading earnings…</p> : (
+    <div className="kpi-grid">
+      {entries.map(([k, v]) => {
+        const [ic, tint] = analyticsIcon(k);
+        return <Kpi key={k} ic={ic} tint={tint} label={k.replace(/_/g, ' ')} val={/revenue|earning|balance|sales/i.test(k) && !Number.isNaN(Number(v)) ? fn(Number(v)) : String(v)} />;
+      })}
+    </div>
+  );
+}
+
+/* ---- Withdrawals ---- */
+export function MSWithdrawals() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [requesting, setRequesting] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setItems(unwrapList(await myMicrostoreApi.withdrawals({ per_page: 100 })).map((w) => ({
+        amount: Number(pick(w, ['amount'], 0)),
+        status: pick(w, ['status'], 'pending'),
+        date: pick(w, ['created_at', 'date'], null),
+      })));
+    } catch (e) { toast(messageFrom(e, 'Could not load withdrawals')); }
+    finally { setLoaded(true); }
+  }, [toast]);
+  useEffect(() => { load(); }, [load]);
+
+  const submitRequest = async () => {
+    const amount = Number(requesting?.amount);
+    if (!amount || amount <= 0) return;
+    setSaving(true);
+    try {
+      await myMicrostoreApi.requestWithdrawal({ amount });
+      toast('Withdrawal requested');
+      setRequesting(null);
+      await load();
+    } catch (e) { toast(messageFrom(e)); } finally { setSaving(false); }
+  };
+
+  const { shown, pagerProps } = usePager(items, '');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <button className="adm-btn primary" onClick={() => setRequesting({ amount: '' })}><Icon name="plus" size={14} /> Request withdrawal</button>
+      </div>
+      {loaded && items.length === 0 ? (
+        <ComingSoon title="Withdrawals" icon="wallet" desc="No withdrawal requests yet." />
+      ) : (
+        <div className="panel" style={{ padding: 0 }}>
+          <div className="adm-table-wrap">
+            <table className="adm-table">
+              <thead><tr><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+              <tbody>
+                {!loaded ? <tr><td colSpan={3} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading withdrawals…</td></tr> : shown.map((w, idx) => (
+                  <tr key={idx}>
+                    <td data-label="Amount"><b>{fn(w.amount)}</b></td>
+                    <td data-label="Status"><span className={'adm-pill ' + (w.status === 'paid' || w.status === 'approved' ? 'ok' : w.status === 'rejected' ? 'bad' : 'warn')}>{w.status}</span></td>
+                    <td data-label="Date" className="muted">{fmtDate(w.date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Pager {...pagerProps} />
+          </div>
+        </div>
+      )}
+
+      {requesting && (
+        <>
+          <div className="adm-drawer-scrim" onClick={() => setRequesting(null)} />
+          <div className="adm-modal" role="dialog" aria-label="Request withdrawal">
+            <div className="adm-drawer-h"><h3>Request withdrawal</h3><button className="adm-icon-btn" onClick={() => setRequesting(null)} aria-label="Close"><Icon name="close" size={20} /></button></div>
+            <div className="adm-drawer-body">
+              <label className="adm-field"><span>Amount (₦)</span><input type="number" min="1" value={requesting.amount} onChange={(e) => setRequesting((c) => ({ ...c, amount: e.target.value }))} placeholder="e.g. 20000" autoFocus /></label>
+            </div>
+            <div className="adm-drawer-f">
+              <button className="adm-btn ghost" onClick={() => setRequesting(null)}>Cancel</button>
+              <button className="adm-btn primary" disabled={!requesting.amount || saving} onClick={submitRequest}>{saving ? 'Submitting…' : 'Request withdrawal'}</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---- Transactions (read-only ledger) ---- */
+export function MSTransactions() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myMicrostoreApi.transactions({ per_page: 100 })
+      .then((res) => setItems(unwrapList(res).map((t) => ({
+        type: pick(t, ['type'], 'transaction'),
+        amount: Number(pick(t, ['amount'], 0)),
+        status: pick(t, ['status'], 'completed'),
+        date: pick(t, ['created_at', 'date'], null),
+      }))))
+      .catch((e) => toast(messageFrom(e, 'Could not load transactions')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const { shown, pagerProps } = usePager(items, '');
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Transactions" icon="list" desc="No transactions on your MicroStore account yet." />;
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>
+            {!loaded ? <tr><td colSpan={4} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading transactions…</td></tr> : shown.map((t, idx) => (
+              <tr key={idx}>
+                <td data-label="Type" style={{ textTransform: 'capitalize' }}>{t.type}</td>
+                <td data-label="Amount"><b>{fn(t.amount)}</b></td>
+                <td data-label="Status"><span className="adm-pill muted">{t.status}</span></td>
+                <td data-label="Date" className="muted">{fmtDate(t.date)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Pager {...pagerProps} />
+      </div>
+    </div>
+  );
+}
+
+/* ---- Messages (real in-app chat with customers) ---- */
+function normalizeConvoSummary(c) {
+  return {
+    id: pick(c, ['id', 'conversation_id'], null),
+    customer: pick(c, ['customer_name'], null) || pick(c.customer || c.user || {}, ['name'], 'Customer'),
+    preview: pick(c, ['last_message', 'preview'], null) || pick(c.latest_message || {}, ['message', 'body', 'text'], ''),
+    unread: Number(pick(c, ['unread_count', 'unread'], 0)),
+  };
+}
+
+export function MSMessages() {
+  const { toast, user } = useStore();
+  const [convos, setConvos] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [activeId, setActiveId] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    myMicrostoreApi.chats({ per_page: 50 })
+      .then((res) => setConvos(unwrapList(res).map(normalizeConvoSummary)))
+      .catch((e) => toast(messageFrom(e, 'Could not load messages')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const openConvo = async (id) => {
+    setActiveId(id);
+    setThreadLoading(true);
+    try {
+      const res = await myMicrostoreApi.getChat(id);
+      const conv = res?.conversation || res;
+      setMessages(pickMsgList(conv).map((m) => normalizeChatMessage(m, user?.id)));
+    } catch (e) {
+      toast(messageFrom(e, 'Could not open conversation'));
+    } finally {
+      setThreadLoading(false);
+    }
+  };
+
+  const sendReply = async (text) => {
+    setSending(true);
+    const optimistic = { id: `opt-${Date.now()}`, text, mine: true, date: new Date().toISOString() };
+    setMessages((m) => [...m, optimistic]);
+    try {
+      await myMicrostoreApi.replyChat(activeId, { body: text });
+    } catch (e) {
+      toast(messageFrom(e, 'Reply failed to send'));
+      setMessages((m) => m.filter((x) => x.id !== optimistic.id));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (loaded && convos.length === 0) {
+    return <ComingSoon title="Messages" icon="chat" desc="No customer messages yet — conversations started from your storefront will show up here." />;
+  }
+
+  return (
+    <div className="panel ms-inbox" style={{ padding: 0, minHeight: 460 }}>
+      <div className={'ms-inbox-list' + (activeId ? ' ms-inbox-hide-mobile' : '')}>
+        {!loaded ? <p className="muted" style={{ padding: 16 }}>Loading…</p> : convos.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => openConvo(c.id)}
+            style={{
+              width: '100%', textAlign: 'left', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 2,
+              background: activeId === c.id ? 'var(--surface-2)' : 'transparent', borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <span className="row between" style={{ width: '100%' }}>
+              <b style={{ fontSize: 13.5 }}>{c.customer}</b>
+              {c.unread > 0 && <span className="adm-pill ok" style={{ fontSize: 10 }}>{c.unread}</span>}
+            </span>
+            <small className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>{c.preview || 'No messages yet'}</small>
+          </button>
+        ))}
+      </div>
+      <div className={'ms-inbox-thread' + (!activeId ? ' ms-inbox-hide-mobile' : '')}>
+        {!activeId ? (
+          <p className="muted" style={{ margin: 'auto' }}>Select a conversation to view messages.</p>
+        ) : (
+          <>
+            <button className="ms-inbox-back" onClick={() => setActiveId(null)}><Icon name="chevleft" size={16} /> Back</button>
+            {threadLoading ? <p className="muted" style={{ margin: 'auto' }}>Loading conversation…</p> : (
+              <ChatThread messages={messages} onSend={sendReply} sending={sending} placeholder="Reply to customer…" />
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

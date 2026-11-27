@@ -410,7 +410,7 @@ export function ProductPage({ id, initialProduct }) {
               : product.stock <= 5 && <p className="stock-warn"><Icon name="flame" size={14} fill="currentColor" /> Only {product.stock} left, order soon</p>}
 
           <div className="pdp-perks">
-            {[['truck', 'Free delivery', 'Nationwide in 10–14 days'], ['refresh', '7-day returns', 'No questions asked'], ['shield', 'Warranty', specs.find(s => s[0] === 'Warranty')?.[1] || '12 months']].map(([ic, t, s]) => (
+            {[['truck', 'Free delivery', 'Nationwide in 10–14 days'], ['refresh', '7-day returns', 'No questions asked']].map(([ic, t, s]) => (
               <div key={t} className="perk"><span className="perk-ic"><Icon name={ic} size={18} /></span><div><b>{t}</b><small>{s}</small></div></div>
             ))}
           </div>
@@ -440,7 +440,6 @@ export function ProductPage({ id, initialProduct }) {
               <p>{product.desc}</p>
               <p>Every Limitra order ships in tamper-proof packaging and is covered by our buyer-protection guarantee. This product is sold and fulfilled by <b>Limitra</b> with verified quality inspection before dispatch.</p>
               <ul className="feat-list">
-                <li><Icon name="check" size={16} stroke={3} /> Genuine product with official manufacturer warranty</li>
                 <li><Icon name="check" size={16} stroke={3} /> Inspected & quality-checked before dispatch</li>
                 <li><Icon name="check" size={16} stroke={3} /> Secure card &amp; bank transfer payments</li>
               </ul>

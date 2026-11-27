@@ -10,7 +10,7 @@ import { useStore } from '@/components/store/StoreProvider';
 import { OtpInput } from '@/components/pages/AuthPage';
 import { FormAlert } from '@/components/forms/Shared';
 import { Breadcrumbs } from '@/components/ui/Shared';
-import { authApi, affiliateApi, myMicrostoreApi } from '@/lib/api/endpoints';
+import { authApi, affiliateApi, myMicrostoreApi, myCelebrityStoreApi } from '@/lib/api/endpoints';
 import { ApiError } from '@/lib/api/client';
 import { fieldErrorsFrom, messageFrom } from '@/lib/api/errors';
 import { getToken } from '@/lib/auth';
@@ -74,17 +74,20 @@ const PROGRAMS = {
     icon: 'star',
     eyebrow: 'Apply for a Celebrity Store',
     title: 'Become a Celebrity Store Partner',
-    desc: 'Create your account and tell us about your audience — Celebrity Stores are a selective, invite-reviewed program.',
+    desc: 'Create your account and set up your Celebrity Store together — a premium storefront for your personal brand.',
     breadcrumb: 'Celebrity Store',
     details: [
-      { key: 'channel', label: 'Main channel', type: 'select', options: CHANNELS, default: CHANNELS[0] },
-      { key: 'audience', label: 'Audience size', type: 'select', options: AUDIENCES, default: AUDIENCES[3] },
-      { key: 'handle', label: 'Channel / page link', placeholder: 'instagram.com/yourhandle', full: true },
-      { key: 'about', label: 'Tell us about your brand (optional)', type: 'textarea', optional: true, full: true, placeholder: 'What should our partner team know about you?' },
+      { key: 'storeName', label: 'Store name', placeholder: 'Jay’s Edit', full: true },
+      { key: 'tagline', label: 'Tagline (optional)', optional: true, full: true, placeholder: 'Curated picks from my closet' },
+      { key: 'bio', label: 'About your store (optional)', type: 'textarea', optional: true, full: true, placeholder: 'What makes your store worth following?' },
     ],
-    submit: null, // no dedicated backend program yet — account creation only
-    successTitle: 'You’re on the list!',
-    successBody: 'Your account has been created. Celebrity Stores are reviewed individually — our partner team will reach out by email if you’re selected.',
+    submit: (f) => myCelebrityStoreApi.create({
+      name: f.storeName.trim(),
+      tagline: f.tagline.trim() || undefined,
+      bio: f.bio.trim() || undefined,
+    }),
+    successTitle: 'Your Celebrity Store is live!',
+    successBody: 'Your account and storefront have both been created.',
   },
 };
 
@@ -283,7 +286,10 @@ export function CreatorSignupPage({ program }) {
               {program === 'microstore' && (
                 <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => go('microstoreDashboard')}>Go to my MicroStore dashboard</button>
               )}
-              {program !== 'microstore' && (
+              {program === 'celebrity' && (
+                <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => go('celebrityStoreDashboard')}>Go to my Celebrity Store dashboard</button>
+              )}
+              {program !== 'microstore' && program !== 'celebrity' && (
                 <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => go('account')}>Go to my account</button>
               )}
             </div>

@@ -1,0 +1,1313 @@
+'use client';
+/* LIMITRA Celebrity Store owner dashboard — sits inside the normal site chrome
+   (header/footer), unlike the isolated full-viewport Admin/Affiliate dashboard
+   shells, because that's how the target design presents it. Reuses the same
+   Kpi/BarChart/Donut/.panel/.adm-table primitives as those dashboards (see
+   components/charts/Charts.jsx, styles/admin.css) for visual consistency,
+   just laid out inside the page flow instead of owning the viewport.
+
+   Orders/Inventory/Customers/Reviews/Earnings/Withdrawals/Transactions now
+   have real endpoints (myCelebrityStoreApi.orders/inventory/customers/reviews/
+   earnings/withdrawals/transactions) but, like everything else undocumented
+   in this app, with no published field names — every normalizer below reads
+   defensively and degrades to an empty state rather than fabricating data.
+   Order Status / Top Performing Products on the Overview page still have no
+   dedicated endpoint, so those stay ComingSoon panels. */
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, Fragment } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
+import { Icon } from '@/components/icons/Icon';
+import { Kpi, BarChart } from '@/components/charts/Charts';
+import { useStore } from '@/components/store/StoreProvider';
+import { Breadcrumbs, Thumb } from '@/components/ui/Shared';
+import { Pager, usePager } from '@/components/admin/AdminShared';
+import { ChatThread, normalizeChatMessage, pickMsgList } from '@/components/microstore/Chat';
+import { naira, PRODUCTS, REAL_IMG } from '@/lib/data';
+import { myCelebrityStoreApi } from '@/lib/api/endpoints';
+import { messageFrom } from '@/lib/api/errors';
+
+const fn = naira;
+
+// Shared defensive-read helpers for the newly-added, still field-name-
+// undocumented endpoints below.
+const pick = (obj, keys, fallback) => { for (const k of keys) { if (obj?.[k] != null) return obj[k]; } return fallback; };
+const unwrapList = (res) => Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : Array.isArray(res?.items) ? res.items : [];
+const fmtDate = (v) => { if (!v) return '—'; const d = new Date(v); return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString(); };
+
+const CS_ORDER_STATUS_LABEL = { pending_payment: 'Pending payment', confirmed: 'Confirmed', processing: 'Processing', shipped: 'Shipped', in_transit: 'In transit', delivered: 'Delivered', cancelled: 'Cancelled' };
+const CS_ORDER_STATUS_CLS = { delivered: 'ok', cancelled: 'bad', shipped: 'info', in_transit: 'info', processing: 'warn', confirmed: 'warn', pending_payment: 'muted' };
+const CS_STATUS_UPDATE_OPTIONS = ['processing', 'shipped', 'in_transit', 'delivered', 'cancelled'];
+
+export const CS_NAV = [
+  ['Overview', [['dashboard', 'Dashboard', 'grid']]],
+  ['Sales', [['orders', 'Orders', 'cart'], ['products', 'Products', 'bag'], ['inventory', 'Inventory', 'package'], ['customers', 'Customers', 'user'], ['messages', 'Messages', 'chat']]],
+  ['Growth', [['analytics', 'Analytics', 'spark'], ['promotion', 'Promotion', 'gift'], ['reviews', 'Reviews', 'star']]],
+  ['Finance', [['earnings', 'Earnings', 'dollar'], ['withdrawals', 'Withdrawals', 'wallet'], ['transactions', 'Transactions', 'list']]],
+  ['Store', [['storefront', 'Storefront', 'store'], ['settings', 'Store Settings', 'lock']]],
+];
+
+export const csPath = (key) => '/celebrity-store/dashboard' + (key === 'dashboard' ? '' : '/' + key);
+
+/* ---- Per-page header slot: a page can override the topbar's subtitle and
+   swap the default "Add Products" action for its own (e.g. Settings' "Save
+   Changes"), without the Frame needing to know about every page's actions. */
+const CsHeaderCtx = createContext(null);
+export function useCsPageHeader({ subtitle, actionLabel, onAction, actionBusy } = {}) {
+  const setHeader = useContext(CsHeaderCtx);
+  useEffect(() => {
+    setHeader?.({ subtitle, actionLabel, onAction, actionBusy });
+    return () => setHeader?.(null);
+  }, [setHeader, subtitle, actionLabel, onAction, actionBusy]);
+}
+
+function initialsOf(name) {
+  return String(name || 'CS').trim().split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2) || 'CS';
+}
+
+/* ---- Shared context: loads the store + best-effort analytics once ---- */
+const CelebrityStoreCtx = createContext(null);
+export function useCelebrityStore() {
+  return useContext(CelebrityStoreCtx);
+}
+
+// GET /my-celebrity-store's shape for the curated-products relation is
+// undocumented — try every plausible key a Laravel resource might use for it
+// instead of assuming `.products` is the only one.
+function extractProducts(s, raw) {
+  for (const obj of [s, raw]) {
+    for (const key of ['products', 'curated_products', 'store_products', 'celebrity_store_products', 'items']) {
+      if (Array.isArray(obj?.[key])) return obj[key];
+    }
+  }
+  return [];
+}
+
+const productKeyOf = (p) => p.product_id ?? p.id;
+
+export function CelebrityStoreProvider({ children }) {
+  const { isAuthenticated, authLoading } = useStore();
+  const [store, setStore] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState('');
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [storeRes, analyticsRes] = await Promise.all([
+        myCelebrityStoreApi.get(),
+        myCelebrityStoreApi.analytics().catch(() => null),
+      ]);
+      const s = storeRes?.celebrity_store || storeRes;
+      if (!s) {
+        setNotFound(true);
+        setStore(null);
+      } else {
+        setNotFound(false);
+        setStore(s);
+        // Merge rather than replace: if the server's GET omits the relation
+        // (missing ?include, stale read replica, etc.) this must not wipe out
+        // products that were just optimistically added this session.
+        const fetched = extractProducts(s, storeRes);
+        setProducts((prev) => {
+          const byKey = new Map(prev.map((p) => [productKeyOf(p), p]));
+          fetched.forEach((p) => byKey.set(productKeyOf(p), p));
+          return Array.from(byKey.values());
+        });
+      }
+      setAnalytics(analyticsRes?.analytics || analyticsRes || null);
+    } catch (e) {
+      setNotFound(true);
+      setStore(null);
+      setError(messageFrom(e, 'Could not load your Celebrity Store'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) { setLoading(false); return; } // eslint-disable-line react-hooks/set-state-in-effect
+    refresh();
+  }, [authLoading, isAuthenticated, refresh]);
+
+  // Optimistic local mutators — update the UI immediately from what the
+  // add/update/remove endpoints themselves return or imply, instead of
+  // depending on a follow-up GET /my-celebrity-store to echo the relation back
+  // correctly (see extractProducts above for why that can't be trusted alone).
+  const addProductLocal = useCallback((item) => {
+    setProducts((prev) => {
+      const key = productKeyOf(item);
+      if (prev.some((p) => productKeyOf(p) === key)) return prev;
+      return [...prev, item];
+    });
+  }, []);
+  const updateProductLocal = useCallback((productId, patch) => {
+    setProducts((prev) => prev.map((p) => (productKeyOf(p) === productId ? { ...p, ...patch } : p)));
+  }, []);
+  const removeProductLocal = useCallback((productId) => {
+    setProducts((prev) => prev.filter((p) => productKeyOf(p) !== productId));
+  }, []);
+
+  const value = useMemo(
+    () => ({ store, products, analytics, loading, notFound, error, refresh, addProductLocal, updateProductLocal, removeProductLocal }),
+    [store, products, analytics, loading, notFound, error, refresh, addProductLocal, updateProductLocal, removeProductLocal],
+  );
+
+  return <CelebrityStoreCtx.Provider value={value}>{children}</CelebrityStoreCtx.Provider>;
+}
+
+/* ---- Dashboard frame: sidebar + topbar, wraps every page under
+   app/(site)/celebrity-store/dashboard ---- */
+export function CelebrityStoreDashboardFrame({ children }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { user, isAuthenticated, authLoading } = useStore();
+  const { store, loading, notFound } = useCelebrityStore();
+  const [headerConfig, setHeaderConfig] = useState(null);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) { router.replace('/auth/signin'); return; }
+    if (!loading && notFound) router.replace('/become-celebrity');
+  }, [authLoading, isAuthenticated, loading, notFound, router]);
+
+  // `loading` flips true on every refresh() call, not just the first one —
+  // once a store is already loaded, a background refresh (after adding a
+  // product, saving settings, etc.) must not unmount {children}, or it wipes
+  // out whatever local UI state that subtree was holding (an open modal, an
+  // in-progress edit) every single time.
+  if (authLoading || !isAuthenticated || (loading && !store) || notFound) {
+    return <div className="page page-fade"><div className="wrap" style={{ padding: '60px 0' }}><p className="muted">Loading your Celebrity Store…</p></div></div>;
+  }
+
+  const isActive = (key) => pathname === csPath(key);
+  const current = CS_NAV.flatMap(([, items]) => items).find(([key]) => isActive(key));
+  const currentLabel = current?.[1] || 'Dashboard';
+  const firstName = (user?.name || user?.username || 'there').split(' ')[0];
+  const storeHref = store?.slug ? `/celebrity-stores/${store.slug}` : null;
+
+  return (
+    <div className="page page-fade">
+      <div className="wrap">
+        <Breadcrumbs items={currentLabel === 'Dashboard' ? [{ label: 'Celebrity Store' }] : [{ label: 'Celebrity Store', to: ['celebrityStoreDashboard'] }, { label: currentLabel }]} />
+      </div>
+
+      <section className="sec" style={{ paddingTop: 10 }}>
+        <div className="wrap ms-dash">
+          <aside className="ms-dash-side">
+            <div className="ms-dash-store">
+              <span className="ms-dash-avatar">{initialsOf(store?.name)}</span>
+              <div>
+                <b>{store?.name}</b>
+                {store?.verified && <span className="adm-pill ok" style={{ marginLeft: 6 }}>Verified</span>}
+                {store?.tagline && <p className="muted" style={{ marginTop: 2, fontSize: 12.5 }}>{store.tagline}</p>}
+              </div>
+            </div>
+            <nav className="ms-dash-nav">
+              {CS_NAV.map(([grp, items]) => (
+                <Fragment key={grp}>
+                  <div className="ms-dash-grp">{grp}</div>
+                  {items.map(([key, label, ic]) => (
+                    <button key={key} className={'ms-dash-link' + (isActive(key) ? ' on' : '')} onClick={() => router.push(csPath(key))}>
+                      <Icon name={ic} size={17} /> {label}
+                    </button>
+                  ))}
+                </Fragment>
+              ))}
+            </nav>
+            {storeHref && (
+              <a className="btn btn-primary btn-block" href={storeHref} target="_blank" rel="noreferrer">View Store</a>
+            )}
+          </aside>
+
+          <div className="ms-dash-main">
+            <div className="ms-dash-top">
+              <div>
+                <span className="muted">{currentLabel === 'Dashboard' ? `Good day, ${firstName}` : currentLabel}</span>
+                <h1 style={{ marginTop: 2 }}>{currentLabel === 'Dashboard' ? 'Welcome back to your Celebrity Store!' : currentLabel}</h1>
+                {headerConfig?.subtitle && <p className="muted" style={{ marginTop: 6 }}>{headerConfig.subtitle}</p>}
+              </div>
+              <div className="row" style={{ gap: 10 }}>
+                {storeHref && (
+                  <a className="btn btn-ghost" href={storeHref} target="_blank" rel="noreferrer"><Icon name="eye" size={15} /> Preview Store</a>
+                )}
+                {headerConfig?.onAction ? (
+                  <button className="btn btn-primary" onClick={headerConfig.onAction} disabled={headerConfig.actionBusy}>
+                    <Icon name="check" size={15} /> {headerConfig.actionBusy ? 'Saving…' : (headerConfig.actionLabel || 'Save Changes')}
+                  </button>
+                ) : (
+                  <button className="btn btn-primary" onClick={() => router.push(csPath('products'))}><Icon name="plus" size={15} /> Add Products</button>
+                )}
+              </div>
+            </div>
+            <CsHeaderCtx.Provider value={setHeaderConfig}>
+              {children}
+            </CsHeaderCtx.Provider>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/* ---- Shared "no backend for this yet" panel ---- */
+export function ComingSoon({ title, desc, icon, bullets }) {
+  return (
+    <div className="panel" style={{ textAlign: 'center', padding: icon ? '48px 24px' : '36px 20px' }}>
+      {icon && (
+        <span style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--surface-2)', display: 'grid', placeItems: 'center', marginInline: 'auto', marginBottom: 16 }}>
+          <Icon name={icon} size={24} className="muted" />
+        </span>
+      )}
+      {!icon && <div className="panel-h" style={{ justifyContent: 'center', marginBottom: 8 }}><h3>{title}</h3></div>}
+      {icon && <h3 style={{ marginBottom: 8 }}>{title}</h3>}
+      <p className="muted" style={{ maxWidth: 380, marginInline: 'auto' }}>{desc || `${title} isn't available for Celebrity Stores yet — this will populate once that's supported.`}</p>
+      {bullets?.length > 0 && (
+        <ul style={{ listStyle: 'none', maxWidth: 320, marginInline: 'auto', marginTop: 18, textAlign: 'left', display: 'grid', gap: 8 }}>
+          {bullets.map((b) => (
+            <li key={b} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13.5, color: 'var(--text-muted)' }}>
+              <Icon name="clock" size={14} style={{ marginTop: 2, flex: 'none', color: 'var(--text-faint)' }} /> {b}
+            </li>
+          ))}
+        </ul>
+      )}
+      <span className="adm-pill muted" style={{ marginTop: 18, display: 'inline-flex' }}>Coming soon</span>
+    </div>
+  );
+}
+
+/* ---- Overview ---- */
+export function CSOverview() {
+  const { products, analytics } = useCelebrityStore();
+  const totalSales = analytics?.total_sales ?? analytics?.total_revenue ?? null;
+  const ordersCount = analytics?.orders_count ?? analytics?.total_orders ?? null;
+  const availableBalance = analytics?.available_balance ?? analytics?.balance ?? null;
+  const series = Array.isArray(analytics?.series) ? analytics.series : [];
+  const chartSlice = series.slice(-10);
+  const chartData = chartSlice.map((d) => Number(d.sales ?? d.revenue ?? d.total ?? 0));
+  const chartLabels = chartSlice.map((d) => String(d.date || '').slice(5));
+
+  return (
+    <>
+      <div className="kpi-grid">
+        <Kpi ic="bag" tint="#0438B6" label="Products" val={String(products.length)} />
+        <Kpi ic="dollar" tint="#1F8A5B" label="Total sales" val={totalSales != null ? fn(Number(totalSales)) : 'Coming soon'} />
+        <Kpi ic="cart" tint="#F5A623" label="Orders" val={ordersCount != null ? String(ordersCount) : 'Coming soon'} />
+        <Kpi ic="wallet" tint="#7A5AE0" label="Available balance" val={availableBalance != null ? fn(Number(availableBalance)) : 'Coming soon'} />
+      </div>
+
+      <div className="panel">
+        <div className="panel-h"><h3>Sales overview</h3></div>
+        {chartData.some((v) => v > 0)
+          ? <BarChart data={chartData} labels={chartLabels} alt />
+          : <p className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>No sales data available yet — this will populate once your store has orders.</p>}
+      </div>
+
+      <div className="adm-row c2">
+        <ComingSoon title="Order status" />
+        <ComingSoon title="Top performing products" desc="Per-product sales ranking isn't available for Celebrity Stores yet." />
+      </div>
+
+      <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="panel-h" style={{ padding: '18px 20px 0' }}><h3>My products ({products.length})</h3></div>
+        {products.length === 0 ? (
+          <p className="muted" style={{ textAlign: 'center', padding: 28 }}>No products curated yet.</p>
+        ) : (
+          <div className="adm-table-wrap">
+            <table className="adm-table">
+              <thead><tr><th>Product</th><th>Status</th></tr></thead>
+              <tbody>
+                {products.slice(0, 5).map((p) => (
+                  <tr key={p.id || p.product_id}>
+                    <td><b>{p.custom_title || p.product?.name || p.name || `Product #${p.product_id || p.id}`}</b></td>
+                    <td><span className={'adm-pill ' + (p.is_pinned ? 'ok' : 'muted')}>{p.is_pinned ? 'Pinned' : 'Standard'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ---- Products ---- */
+/* Mirrors Admin's "Add product" modal chrome (.adm-drawer-scrim/.adm-modal/
+   .adm-drawer-h/-body/-f) for visual consistency — but a Celebrity Store owner
+   curates from the existing live catalog rather than creating a new product
+   (myCelebrityStoreApi.addProduct only takes a product_id + note), so this is a
+   searchable picker over the real PRODUCTS catalog, not a creation form. */
+function AddProductModal({ excludeIds, onClose, onAdded }) {
+  // Subscribes this component to StoreProvider so it re-renders once the
+  // async catalog load (StoreProvider.loadCatalog) populates PRODUCTS — see
+  // lib/data.js's note on why this is a plain computation below, not a
+  // useMemo: PRODUCTS is a reassigned module-level binding, not state, so a
+  // memo keyed on search/excludeIds alone would stay stuck on whatever
+  // PRODUCTS looked like on this component's first render.
+  const { toast } = useStore();
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [title, setTitle] = useState('');
+  const [desc, setDesc] = useState('');
+  const [pinned, setPinned] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [addedCount, setAddedCount] = useState(0);
+
+  const term = search.trim().toLowerCase();
+  const results = PRODUCTS
+    .filter((p) => !excludeIds.has(p.id))
+    .filter((p) => !term || p.name.toLowerCase().includes(term) || (p.brand || '').toLowerCase().includes(term))
+    .slice(0, 40);
+
+  const selectProduct = (p) => {
+    setSelected(p);
+    setTitle(p.name);
+    setDesc(p.desc || '');
+  };
+
+  const resetSelection = () => {
+    setSelected(null);
+    setTitle('');
+    setDesc('');
+    setPinned(false);
+    setSearch('');
+  };
+
+  // Adds one product and keeps the modal open so the owner can pick the next
+  // one straight away — excludeIds (from CSProducts) is recomputed from the
+  // live curated list on every refresh, so an already-added product drops out
+  // of this picker's results automatically without any local bookkeeping here.
+  const confirm = async () => {
+    if (!selected) return;
+    setSaving(true);
+    const body = {
+      product_id: selected.id,
+      custom_title: title.trim() && title.trim() !== selected.name ? title.trim() : undefined,
+      custom_description: desc.trim() || undefined,
+      is_pinned: pinned || undefined,
+    };
+    try {
+      const res = await myCelebrityStoreApi.addProduct(body);
+      // Use whatever the server actually returns for the new curated record
+      // if it looks like one; otherwise fall back to a client-built item so
+      // it shows up immediately regardless of what the response shape is.
+      const created = res?.celebrity_store_product || res?.product || res;
+      const item = (created && typeof created === 'object' && (created.product_id || created.id))
+        ? created
+        : { ...body, product: { id: selected.id, name: selected.name, price: selected.price } };
+      toast(`Added "${selected.name}" to your store`);
+      setAddedCount((n) => n + 1);
+      onAdded(item);
+      resetSelection();
+    } catch (e) {
+      toast(messageFrom(e, 'Could not add this product'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="adm-drawer-scrim" onClick={onClose} />
+      <div className="adm-modal adm-modal-lg" role="dialog" aria-modal="true" aria-label="Add product">
+        <div className="adm-drawer-h">
+          <div><h3>Add product to your Celebrity Store</h3><small className="muted">Base product, photo & variations come from Limitra&rsquo;s live catalog.</small></div>
+          <button className="adm-icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
+        </div>
+        <div className="adm-drawer-body">
+          <div className="adm-prod-modal-grid">
+            <div className="adm-prod-modal-side">
+              <div className="adm-img-drop" style={{ cursor: 'default', height: 160 }}>
+                {selected
+                  ? <div className="ms-thumb-fit" style={{ height: '100%' }}><Thumb product={selected} src={REAL_IMG[selected.id]} /></div>
+                  : <span className="adm-img-empty"><Icon name="package" size={24} /><b>No product selected</b><small>Pick a base product below</small></span>}
+              </div>
+              <p className="muted" style={{ fontSize: 12, lineHeight: 1.4, display: 'flex', gap: 5, alignItems: 'flex-start' }}><Icon name="lock" size={12} style={{ marginTop: 2, flex: 'none' }} /> <span>Photo is managed by Limitra&rsquo;s catalog &mdash; there&rsquo;s no per-store photo upload.</span></p>
+
+              <label className="adm-field">
+                <span>Base product</span>
+                <input placeholder="Search by name or brand…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              </label>
+              <div style={{ maxHeight: 260, overflowY: 'auto', display: 'grid', gap: 6, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: 6 }}>
+                {results.length === 0 ? (
+                  <p className="muted" style={{ textAlign: 'center', padding: 16, fontSize: 13 }}>No matching products.</p>
+                ) : results.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => selectProduct(p)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: 8, borderRadius: 'var(--r-sm)', textAlign: 'left',
+                      background: selected?.id === p.id ? 'var(--primary-soft)' : 'var(--surface-2)',
+                      border: selected?.id === p.id ? '1.5px solid var(--primary)' : '1.5px solid transparent',
+                    }}
+                  >
+                    <div className="ms-thumb-fit" style={{ width: 36, height: 36, flex: 'none', borderRadius: 'var(--r-sm)' }}><Thumb product={p} src={REAL_IMG[p.id]} /></div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <b style={{ display: 'block', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</b>
+                      <span className="muted" style={{ fontSize: 12 }}>{p.brand} · {fn(Number(p.price || 0))}</span>
+                    </div>
+                    {selected?.id === p.id && <Icon name="check" size={16} stroke={3} style={{ color: 'var(--primary)', flex: 'none' }} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="adm-prod-modal-main">
+              <label className="adm-field">
+                <span>Product name</span>
+                <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={!selected} placeholder={selected ? '' : 'Select a base product first'} />
+                <small className="muted">Shown on your storefront in place of the catalog name.</small>
+              </label>
+              <label className="adm-field">
+                <span>Description</span>
+                <textarea rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} disabled={!selected} placeholder={selected ? 'Why you recommend it' : 'Select a base product first'} />
+              </label>
+              <div className="row between" style={{ padding: '2px 0' }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600 }}>Pin to the top of my storefront</span>
+                <button
+                  type="button"
+                  className={'toggle' + (pinned ? ' on' : '')}
+                  onClick={() => setPinned((p) => !p)}
+                  disabled={!selected}
+                  style={{ opacity: selected ? 1 : .5 }}
+                  role="switch"
+                  aria-checked={pinned}
+                  aria-label="Pin to top of storefront"
+                />
+              </div>
+
+              <div className="adm-field" style={{ opacity: .65 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                  Variations <Icon name="lock" size={11} /> <small className="muted" style={{ textTransform: 'none', fontWeight: 400, letterSpacing: 0 }}>not editable per Celebrity Store</small>
+                </span>
+                {selected ? (
+                  selected.variants?.length > 0 ? (
+                    <div style={{ display: 'grid', gap: 4, marginTop: 4 }}>
+                      {selected.variants.map((v) => (
+                        <p key={v.name} className="muted" style={{ fontSize: 12.5, margin: 0, wordBreak: 'break-word' }}>
+                          <b style={{ color: 'var(--text)' }}>{v.name}:</b> {(v.options || []).map((o) => o.name || o).join(', ')}
+                        </p>
+                      ))}
+                    </div>
+                  ) : <p className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>This product has no variations.</p>
+                ) : <p className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>Select a base product to see its variations.</p>}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="adm-drawer-f">
+          {addedCount > 0 && <span className="muted" style={{ fontSize: 12.5, marginRight: 'auto', alignSelf: 'center' }}>{addedCount} product{addedCount === 1 ? '' : 's'} added</span>}
+          <button className="adm-btn ghost" onClick={onClose}>{addedCount > 0 ? 'Done' : 'Cancel'}</button>
+          <button className="adm-btn primary" disabled={!selected || saving} onClick={confirm}>{saving ? 'Adding…' : 'Add product'}</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function CSProducts() {
+  const { products, refresh, addProductLocal, updateProductLocal, removeProductLocal } = useCelebrityStore();
+  const [picker, setPicker] = useState(false);
+
+  const excludeIds = useMemo(() => new Set(products.map((p) => p.product_id || p.id)), [products]);
+
+  const togglePinned = async (p) => {
+    const key = p.product_id || p.id;
+    updateProductLocal(key, { is_pinned: !p.is_pinned });
+    await myCelebrityStoreApi.updateProduct(key, { is_pinned: !p.is_pinned }).catch(() => {});
+    refresh();
+  };
+
+  const removeProd = async (p) => {
+    const key = p.product_id || p.id;
+    removeProductLocal(key);
+    await myCelebrityStoreApi.removeProduct(key).catch(() => {});
+    refresh();
+  };
+
+  return (
+    <>
+      {picker && (
+        <AddProductModal
+          excludeIds={excludeIds}
+          onClose={() => setPicker(false)}
+          onAdded={(item) => { addProductLocal(item); refresh(); }}
+        />
+      )}
+
+      <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="panel-h" style={{ padding: '18px 20px 0' }}>
+          <h3>Curated products ({products.length})</h3>
+          <button className="adm-btn primary" onClick={() => setPicker(true)}><Icon name="plus" size={15} /> Add product</button>
+        </div>
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead><tr><th>Product</th><th>Price</th><th>Pinned</th><th></th></tr></thead>
+            <tbody>
+              {products.length === 0 ? (
+                <tr><td colSpan={4} className="muted" style={{ textAlign: 'center', padding: 24 }}>No curated products yet.</td></tr>
+              ) : products.map((p) => (
+                <tr key={p.id || p.product_id}>
+                  <td><b>{p.custom_title || p.product?.name || p.name || `Product #${p.product_id || p.id}`}</b></td>
+                  <td>{fn(Number(p.product?.price || p.price || 0))}</td>
+                  <td><button className={'adm-pill ' + (p.is_pinned ? 'ok' : 'muted')} onClick={() => togglePinned(p)}>{p.is_pinned ? 'Pinned' : 'Standard'}</button></td>
+                  <td><div className="adm-rowact"><button className="del" title="Remove" onClick={() => removeProd(p)}><Icon name="trash" size={15} /></button></div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ---- Storefront ---- */
+export function CSStorefront() {
+  const { store } = useCelebrityStore();
+  const href = store?.slug ? `/celebrity-stores/${store.slug}` : null;
+  return (
+    <div className="panel" style={{ textAlign: 'center', padding: '40px 20px' }}>
+      <h3 style={{ marginBottom: 8 }}>{store?.name}</h3>
+      <p className="muted" style={{ marginBottom: 20 }}>{store?.tagline || 'Your live Celebrity Store storefront.'}</p>
+      {href ? (
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+          <a className="btn btn-primary" href={href} target="_blank" rel="noreferrer"><Icon name="eye" size={15} /> Preview storefront</a>
+          <button
+            className="btn btn-ghost"
+            onClick={async () => { try { await navigator.clipboard.writeText(window.location.origin + href); } catch (e) {} }}
+          ><Icon name="copy" size={15} /> Copy link</button>
+        </div>
+      ) : (
+        <p className="muted">Your storefront link isn&rsquo;t ready yet.</p>
+      )}
+    </div>
+  );
+}
+
+/* ---- Store settings ---- */
+// logo_url/banner_url must be a real, valid URL under 500 characters
+// (confirmed live: a 422 rejects anything else, including an embedded
+// data: URL) — and there's no upload endpoint for a store owner to get a
+// hosted URL from (only generic admin media and the user's own profile
+// avatar exist, neither of which fits here). So this has to stay a pasted
+// link to an already-hosted image, not a real file picker, until the
+// backend adds a dedicated upload endpoint.
+function ImageSlot({ label, value, onChange, round, recommended }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || '');
+  const size = round ? 90 : undefined;
+  return (
+    <div className="panel" style={{ flex: round ? '0 0 220px' : '1 1 320px' }}>
+      <b style={{ display: 'block', marginBottom: 12 }}>{label}</b>
+      {value ? (
+        <img src={value} alt="" style={{ width: round ? size : '100%', height: round ? size : 90, borderRadius: round ? '50%' : 'var(--r-sm)', objectFit: 'cover', background: 'var(--surface-2)', display: 'block' }} />
+      ) : (
+        <div style={{ width: round ? size : '100%', height: round ? size : 90, borderRadius: round ? '50%' : 'var(--r-sm)', background: 'var(--surface-2)', display: 'grid', placeItems: 'center' }}>
+          <Icon name="store" size={22} className="muted" />
+        </div>
+      )}
+      {editing ? (
+        <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+          <input className="input" placeholder="Paste image URL" value={draft} onChange={(e) => setDraft(e.target.value)} style={{ flex: 1 }} />
+          <button className="adm-btn primary sm" onClick={() => { onChange(draft.trim()); setEditing(false); }}>Save</button>
+        </div>
+      ) : (
+        <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+          <button className="adm-btn ghost sm" onClick={() => { setDraft(value || ''); setEditing(true); }}>Change image</button>
+          {value && <button className="adm-btn danger sm" onClick={() => onChange('')}>Remove image</button>}
+        </div>
+      )}
+      <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>{recommended} Paste a link to an already-hosted image (max 500 characters) — there&rsquo;s no file upload for this yet.</p>
+    </div>
+  );
+}
+
+function LockedField({ label, placeholder }) {
+  return (
+    <label className="adm-field">
+      <span>{label} <small className="muted">(coming soon)</small></span>
+      <input disabled placeholder={placeholder} style={{ opacity: .55, cursor: 'not-allowed' }} />
+    </label>
+  );
+}
+
+export function CSSettings() {
+  const { store, refresh } = useCelebrityStore();
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [bannerUrl, setBannerUrl] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setName(store?.name || ''); // eslint-disable-line react-hooks/set-state-in-effect
+    setDescription(store?.tagline || '');
+    setLogoUrl(store?.logo_url || '');
+    setBannerUrl(store?.banner_url || '');
+  }, [store]);
+
+  const save = useCallback(async () => {
+    setSaving(true);
+    try {
+      await myCelebrityStoreApi.update({
+        name: name.trim(),
+        tagline: description.trim() || undefined,
+        logo_url: logoUrl.trim() || undefined,
+        banner_url: bannerUrl.trim() || undefined,
+      });
+      await refresh();
+    } finally {
+      setSaving(false);
+    }
+  }, [name, description, logoUrl, bannerUrl, refresh]);
+
+  useCsPageHeader({
+    subtitle: 'Manage your store information, brand assets and policies',
+    actionLabel: 'Save Changes',
+    onAction: save,
+    actionBusy: saving,
+  });
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Store Appearance</h3>
+        <p className="muted" style={{ marginTop: 4, marginBottom: 16 }}>Update your store logo and cover image. These will be visible on your Celebrity Store.</p>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <ImageSlot label="Logo" value={logoUrl} onChange={setLogoUrl} round recommended="Recommended: 500x500px." />
+          <ImageSlot label="Cover image" value={bannerUrl} onChange={setBannerUrl} recommended="Recommended: 1200x400px." />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Store Information</h3>
+        <p className="muted" style={{ marginTop: 4, marginBottom: 16 }}>Tell customers about your store and where you&rsquo;re located.</p>
+        <div className="adm-field-row">
+          <label className="adm-field"><span>Store name</span><input value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <label className="adm-field"><span>Store description</span><input value={description} onChange={(e) => setDescription(e.target.value)} /></label>
+        </div>
+        <div className="adm-field-row" style={{ marginTop: 10 }}>
+          <LockedField label="Store category" placeholder="e.g. Gaming and Tech" />
+          <LockedField label="Contact email" placeholder="you@email.com" />
+        </div>
+        <div className="adm-field-row" style={{ marginTop: 10 }}>
+          <LockedField label="Store location" placeholder="e.g. Lagos, Nigeria" />
+          <LockedField label="Phone number" placeholder="+234…" />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Store Links</h3>
+        <p className="muted" style={{ marginTop: 4, marginBottom: 16 }}>Add your social media and website links.</p>
+        <div className="adm-field-row">
+          <LockedField label="Instagram" placeholder="yourhandle" />
+          <LockedField label="Facebook" placeholder="yourhandle" />
+        </div>
+        <div className="adm-field-row" style={{ marginTop: 10 }}>
+          <LockedField label="TikTok" placeholder="yourhandle" />
+          <LockedField label="Website" placeholder="https://" />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Store Policies</h3>
+        <p className="muted" style={{ marginTop: 4, marginBottom: 16 }}>Add your store policies to build trust with your customers.</p>
+        <div className="adm-field-row">
+          <LockedField label="Shipping policy" placeholder="" />
+          <LockedField label="Return & refund policy" placeholder="" />
+        </div>
+        <div className="adm-field-row" style={{ marginTop: 10 }}>
+          <LockedField label="Consolidation policy" placeholder="" />
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ---- Analytics (real endpoint, undocumented shape) ---- */
+// Field names aren't documented, so match by keyword rather than an exact
+// key list — anything unrecognized still gets a sensible default icon.
+const ANALYTICS_ICON = [
+  [/id$/i, 'hash', '#6B7280'],
+  [/name/i, 'store', '#0438B6'],
+  [/link|url|slug/i, 'link', '#0438B6'],
+  [/view/i, 'eye', '#7A5AE0'],
+  [/click/i, 'click', '#F5A623'],
+  [/order/i, 'cart', '#F5A623'],
+  [/revenue|sales|earning|balance/i, 'wallet', '#1F8A5B'],
+];
+function analyticsIcon(key) {
+  const hit = ANALYTICS_ICON.find(([re]) => re.test(key));
+  return hit ? [hit[1], hit[2]] : ['spark', '#0438B6'];
+}
+
+// Internal identifiers (celebrity_store_id, "Celebrity Store ID", etc.)
+// aren't a metric the owner needs to see as a KPI tile.
+const isIdField = (key) => /(^|[_\s])id$/i.test(key.trim());
+
+export function CSAnalytics() {
+  const { analytics } = useCelebrityStore();
+  const entries = analytics && typeof analytics === 'object'
+    ? Object.entries(analytics).filter(([k, v]) => (typeof v === 'number' || typeof v === 'string') && !isIdField(k))
+    : [];
+
+  if (entries.length === 0) {
+    return <ComingSoon title="Analytics" desc="No analytics data is available for your Celebrity Store yet." />;
+  }
+
+  return (
+    <div className="kpi-grid">
+      {entries.map(([k, v]) => {
+        const [ic, tint] = analyticsIcon(k);
+        return <Kpi key={k} ic={ic} tint={tint} label={k.replace(/_/g, ' ')} val={String(v)} />;
+      })}
+    </div>
+  );
+}
+
+/* ---- Promotion (no backend yet — styled preview of what's coming) ---- */
+const PROMO_TOOLS = [
+  { icon: 'ticket', title: 'Discount Codes', desc: 'Share approved offers with your customers.' },
+  { icon: 'rocket', title: 'Product Boosts', desc: 'Put selected products in the spotlight.' },
+  { icon: 'share', title: 'Social Sharing Kits', desc: 'Promote your store with ready-to-share content.' },
+];
+
+export function CSPromotion() {
+  const router = useRouter();
+  useCsPageHeader({ subtitle: "Tools to help your Celebrity Store reach more shoppers." });
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap', background: 'linear-gradient(135deg, var(--primary-soft), var(--surface))' }}>
+        <div>
+          <span className="adm-pill warn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon name="clock" size={12} /> Coming soon</span>
+          <h2 style={{ marginTop: 14, fontSize: 24 }}>More visibility. More possibilities.</h2>
+          <p className="muted" style={{ marginTop: 6 }}>New ways to promote your store are on the way.</p>
+        </div>
+        <Icon name="megaphone" size={64} className="muted" style={{ flex: 'none', opacity: .3 }} />
+      </div>
+
+      <h3>Your promotion tools</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+        {PROMO_TOOLS.map((t) => (
+          <div key={t.title} className="panel">
+            <span style={{ width: 46, height: 46, borderRadius: 'var(--r-md)', background: 'var(--primary-soft)', color: 'var(--primary)', display: 'grid', placeItems: 'center', marginBottom: 14 }}>
+              <Icon name={t.icon} size={21} />
+            </span>
+            <h4 style={{ marginBottom: 6, fontSize: 15.5 }}>{t.title}</h4>
+            <p className="muted" style={{ fontSize: 13.5, marginBottom: 14 }}>{t.desc}</p>
+            <span className="adm-pill muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="clock" size={12} /> Coming soon</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ width: 40, height: 40, borderRadius: 'var(--r-md)', background: 'var(--primary-soft)', color: 'var(--primary)', display: 'grid', placeItems: 'center', flex: 'none' }}>
+            <Icon name="store" size={18} />
+          </span>
+          <div>
+            <b>Get your store ready</b>
+            <p className="muted" style={{ fontSize: 13.5, marginTop: 2 }}>Add products and preview your storefront before you promote it.</p>
+          </div>
+        </div>
+        <button className="link-btn" onClick={() => router.push(csPath('products'))}>Manage Products <Icon name="arrowr" size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Orders ---- */
+function normalizeStoreOrder(o) {
+  return {
+    raw: o,
+    id: pick(o, ['id', 'order_id'], '—'),
+    product: pick(o, ['product_name'], null) || pick(o.product || {}, ['name', 'title'], null) || `Product #${pick(o, ['product_id'], '—')}`,
+    customer: pick(o, ['customer_name'], null) || pick(o.customer || o.user || {}, ['name'], 'Customer'),
+    qty: Number(pick(o, ['quantity', 'qty'], 1)),
+    total: Number(pick(o, ['total', 'amount', 'price', 'line_total'], 0)),
+    status: pick(o, ['status'], 'processing'),
+    date: pick(o, ['created_at', 'date', 'ordered_at'], null),
+  };
+}
+
+export function CSOrders() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkStatus, setBulkStatus] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setItems(unwrapList(await myCelebrityStoreApi.orders({ per_page: 100 })).map(normalizeStoreOrder)); }
+    catch (e) { toast(messageFrom(e, 'Could not load orders')); }
+    finally { setLoaded(true); }
+  }, [toast]);
+  useEffect(() => { load(); }, [load]);
+
+  const { shown, pagerProps } = usePager(items, '');
+  const toggle = (id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const pageAllSelected = shown.length > 0 && shown.every((o) => selected.has(o.id));
+  const toggleAll = () => setSelected((s) => { const n = new Set(s); shown.forEach((o) => pageAllSelected ? n.delete(o.id) : n.add(o.id)); return n; });
+
+  // Body shape for POST /my-celebrity-store/orders/bulk-status is undocumented —
+  // order_ids + status is the common Laravel convention used elsewhere in
+  // this app's bulk endpoints.
+  const submitBulkStatus = async () => {
+    if (!bulkStatus?.status) return;
+    setSaving(true);
+    try {
+      await myCelebrityStoreApi.bulkUpdateOrderStatus({ order_ids: [...selected], status: bulkStatus.status });
+      toast(`Status updated for ${selected.size} order${selected.size === 1 ? '' : 's'}`);
+      setBulkStatus(null);
+      setSelected(new Set());
+      await load();
+    } catch (e) { toast(messageFrom(e)); } finally { setSaving(false); }
+  };
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Orders" icon="cart" desc="No orders for your Celebrity Store yet — they'll show up here once a customer buys one of your curated products." />;
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      {selected.size > 0 && (
+        <div className="row between" style={{ padding: '10px 16px', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+          <small><b>{selected.size}</b> order{selected.size === 1 ? '' : 's'} selected</small>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="adm-btn primary" onClick={() => setBulkStatus({ status: CS_STATUS_UPDATE_OPTIONS[0] })}><Icon name="edit" size={14} /> Update status</button>
+            <button className="adm-btn ghost" onClick={() => setSelected(new Set())}>Clear</button>
+          </div>
+        </div>
+      )}
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead><tr><th style={{ width: 36 }}><input type="checkbox" checked={pageAllSelected} onChange={toggleAll} aria-label="Select all on this page" /></th><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>
+            {!loaded ? <tr><td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading orders…</td></tr> : shown.map((o) => (
+              <tr key={o.id}>
+                <td data-label=""><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggle(o.id)} aria-label={`Select order ${o.id}`} /></td>
+                <td data-label="Product"><b>{o.product}</b></td>
+                <td data-label="Customer">{o.customer}</td>
+                <td data-label="Qty">{o.qty}</td>
+                <td data-label="Total"><b>{fn(o.total)}</b></td>
+                <td data-label="Status"><span className={'adm-pill ' + (CS_ORDER_STATUS_CLS[o.status] || 'muted')}>{CS_ORDER_STATUS_LABEL[o.status] || o.status}</span></td>
+                <td data-label="Date" className="muted">{fmtDate(o.date)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Pager {...pagerProps} />
+      </div>
+
+      {bulkStatus && (
+        <>
+          <div className="adm-drawer-scrim" onClick={() => setBulkStatus(null)} />
+          <div className="adm-modal" role="dialog" aria-label="Update order status">
+            <div className="adm-drawer-h"><h3>Update status · {selected.size} order{selected.size === 1 ? '' : 's'}</h3><button className="adm-icon-btn" onClick={() => setBulkStatus(null)} aria-label="Close"><Icon name="close" size={20} /></button></div>
+            <div className="adm-drawer-body">
+              <label className="adm-field"><span>New status</span>
+                <select value={bulkStatus.status} onChange={(e) => setBulkStatus((c) => ({ ...c, status: e.target.value }))}>
+                  {CS_STATUS_UPDATE_OPTIONS.map((s) => <option key={s} value={s}>{CS_ORDER_STATUS_LABEL[s]}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="adm-drawer-f">
+              <button className="adm-btn ghost" onClick={() => setBulkStatus(null)}>Cancel</button>
+              <button className="adm-btn primary" disabled={saving} onClick={submitBulkStatus}>{saving ? 'Updating…' : 'Update status'}</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---- Inventory (read-only — no stock-adjustment endpoint for Celebrity Stores) ---- */
+export function CSInventory() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myCelebrityStoreApi.inventory({ per_page: 100 })
+      .then((res) => setItems(unwrapList(res).map((i) => ({
+        product: pick(i, ['product_name'], null) || pick(i.product || {}, ['name', 'title'], `Product #${pick(i, ['product_id'], '—')}`),
+        stock: Number(pick(i, ['stock', 'quantity', 'stock_quantity'], 0)),
+      }))))
+      .catch((e) => toast(messageFrom(e, 'Could not load inventory')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const statusOf = (s) => s === 0 ? ['Out of stock', 'bad'] : s < 10 ? ['Low stock', 'warn'] : ['In stock', 'ok'];
+  const { shown, pagerProps } = usePager(items, '');
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Inventory" icon="package" desc="No curated products to track stock for yet." />;
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead><tr><th>Product</th><th>Stock</th><th>Status</th></tr></thead>
+          <tbody>
+            {!loaded ? <tr><td colSpan={3} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading inventory…</td></tr> : shown.map((i, idx) => {
+              const [label, cls] = statusOf(i.stock);
+              return (
+                <tr key={idx}>
+                  <td data-label="Product"><b>{i.product}</b></td>
+                  <td data-label="Stock">{i.stock}</td>
+                  <td data-label="Status"><span className={'adm-pill ' + cls}>{label}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <Pager {...pagerProps} />
+      </div>
+    </div>
+  );
+}
+
+/* ---- Customers (read-only — no messaging/export endpoint) ---- */
+export function CSCustomers() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myCelebrityStoreApi.customers({ per_page: 100 })
+      .then((res) => setItems(unwrapList(res).map((c) => ({
+        name: pick(c, ['name'], null) || pick(c.user || c.customer || {}, ['name'], 'Customer'),
+        email: pick(c, ['email'], null) || pick(c.user || c.customer || {}, ['email'], ''),
+        orders: Number(pick(c, ['order_count', 'orders_count', 'total_orders'], 0)),
+        spent: Number(pick(c, ['total_spent', 'lifetime_value', 'amount_spent'], 0)),
+      }))))
+      .catch((e) => toast(messageFrom(e, 'Could not load customers')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const { shown, pagerProps } = usePager(items, '');
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Customers" icon="user" desc="No customers yet — anyone who buys from your store will show up here." />;
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead><tr><th>Customer</th><th>Orders</th><th>Total spent</th></tr></thead>
+          <tbody>
+            {!loaded ? <tr><td colSpan={3} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading customers…</td></tr> : shown.map((c, idx) => (
+              <tr key={idx}>
+                <td data-label="Customer"><b>{c.name}</b>{c.email && <div><small className="muted">{c.email}</small></div>}</td>
+                <td data-label="Orders">{c.orders}</td>
+                <td data-label="Total spent"><b>{fn(c.spent)}</b></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Pager {...pagerProps} />
+      </div>
+    </div>
+  );
+}
+
+/* ---- Reviews (read-only — no reply/moderate endpoint for Celebrity Stores) ---- */
+export function CSReviews() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myCelebrityStoreApi.reviews({ per_page: 100 })
+      .then((res) => setItems(unwrapList(res).map((r) => ({
+        product: pick(r, ['product_name'], null) || pick(r.product || {}, ['name', 'title'], `Product #${pick(r, ['product_id'], '—')}`),
+        customer: pick(r, ['customer_name'], null) || pick(r.user || r.customer || {}, ['name'], 'Customer'),
+        rating: Number(pick(r, ['rating', 'stars'], 0)),
+        comment: pick(r, ['comment', 'body', 'text'], ''),
+        date: pick(r, ['created_at', 'date'], null),
+      }))))
+      .catch((e) => toast(messageFrom(e, 'Could not load reviews')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Reviews" icon="star" desc="No reviews on your curated products yet." />;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {!loaded ? <p className="muted">Loading reviews…</p> : items.map((r, idx) => (
+        <div key={idx} className="panel">
+          <div className="row between" style={{ marginBottom: 6 }}>
+            <b>{r.product}</b>
+            <span className="row" style={{ gap: 2 }}>{Array.from({ length: 5 }).map((_, i) => <Icon key={i} name="star" size={14} fill={i < r.rating ? '#FFD166' : 'none'} className={i < r.rating ? '' : 'muted'} />)}</span>
+          </div>
+          {r.comment && <p style={{ fontSize: 13.5 }}>{r.comment}</p>}
+          <small className="muted">{r.customer} · {fmtDate(r.date)}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---- Earnings (summary object, not a list — same KPI-tile treatment as
+   Analytics) ---- */
+export function CSEarnings() {
+  const { toast } = useStore();
+  const [data, setData] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myCelebrityStoreApi.earnings()
+      .then((res) => setData(res?.earnings || res))
+      .catch((e) => toast(messageFrom(e, 'Could not load earnings')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const entries = data && typeof data === 'object'
+    ? Object.entries(data).filter(([k, v]) => (typeof v === 'number' || typeof v === 'string') && !isIdField(k))
+    : [];
+
+  if (loaded && entries.length === 0) {
+    return <ComingSoon title="Earnings" icon="dollar" desc="No earnings data is available for your Celebrity Store yet." />;
+  }
+
+  return !loaded ? <p className="muted">Loading earnings…</p> : (
+    <div className="kpi-grid">
+      {entries.map(([k, v]) => {
+        const [ic, tint] = analyticsIcon(k);
+        return <Kpi key={k} ic={ic} tint={tint} label={k.replace(/_/g, ' ')} val={/revenue|earning|balance|sales/i.test(k) && !Number.isNaN(Number(v)) ? fn(Number(v)) : String(v)} />;
+      })}
+    </div>
+  );
+}
+
+/* ---- Withdrawals ---- */
+export function CSWithdrawals() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [requesting, setRequesting] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setItems(unwrapList(await myCelebrityStoreApi.withdrawals({ per_page: 100 })).map((w) => ({
+        amount: Number(pick(w, ['amount'], 0)),
+        status: pick(w, ['status'], 'pending'),
+        date: pick(w, ['created_at', 'date'], null),
+      })));
+    } catch (e) { toast(messageFrom(e, 'Could not load withdrawals')); }
+    finally { setLoaded(true); }
+  }, [toast]);
+  useEffect(() => { load(); }, [load]);
+
+  const submitRequest = async () => {
+    const amount = Number(requesting?.amount);
+    if (!amount || amount <= 0) return;
+    setSaving(true);
+    try {
+      await myCelebrityStoreApi.requestWithdrawal({ amount });
+      toast('Withdrawal requested');
+      setRequesting(null);
+      await load();
+    } catch (e) { toast(messageFrom(e)); } finally { setSaving(false); }
+  };
+
+  const { shown, pagerProps } = usePager(items, '');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <button className="adm-btn primary" onClick={() => setRequesting({ amount: '' })}><Icon name="plus" size={14} /> Request withdrawal</button>
+      </div>
+      {loaded && items.length === 0 ? (
+        <ComingSoon title="Withdrawals" icon="wallet" desc="No withdrawal requests yet." />
+      ) : (
+        <div className="panel" style={{ padding: 0 }}>
+          <div className="adm-table-wrap">
+            <table className="adm-table">
+              <thead><tr><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+              <tbody>
+                {!loaded ? <tr><td colSpan={3} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading withdrawals…</td></tr> : shown.map((w, idx) => (
+                  <tr key={idx}>
+                    <td data-label="Amount"><b>{fn(w.amount)}</b></td>
+                    <td data-label="Status"><span className={'adm-pill ' + (w.status === 'paid' || w.status === 'approved' ? 'ok' : w.status === 'rejected' ? 'bad' : 'warn')}>{w.status}</span></td>
+                    <td data-label="Date" className="muted">{fmtDate(w.date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Pager {...pagerProps} />
+          </div>
+        </div>
+      )}
+
+      {requesting && (
+        <>
+          <div className="adm-drawer-scrim" onClick={() => setRequesting(null)} />
+          <div className="adm-modal" role="dialog" aria-label="Request withdrawal">
+            <div className="adm-drawer-h"><h3>Request withdrawal</h3><button className="adm-icon-btn" onClick={() => setRequesting(null)} aria-label="Close"><Icon name="close" size={20} /></button></div>
+            <div className="adm-drawer-body">
+              <label className="adm-field"><span>Amount (₦)</span><input type="number" min="1" value={requesting.amount} onChange={(e) => setRequesting((c) => ({ ...c, amount: e.target.value }))} placeholder="e.g. 20000" autoFocus /></label>
+            </div>
+            <div className="adm-drawer-f">
+              <button className="adm-btn ghost" onClick={() => setRequesting(null)}>Cancel</button>
+              <button className="adm-btn primary" disabled={!requesting.amount || saving} onClick={submitRequest}>{saving ? 'Submitting…' : 'Request withdrawal'}</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---- Transactions (read-only ledger) ---- */
+export function CSTransactions() {
+  const { toast } = useStore();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    myCelebrityStoreApi.transactions({ per_page: 100 })
+      .then((res) => setItems(unwrapList(res).map((t) => ({
+        type: pick(t, ['type'], 'transaction'),
+        amount: Number(pick(t, ['amount'], 0)),
+        status: pick(t, ['status'], 'completed'),
+        date: pick(t, ['created_at', 'date'], null),
+      }))))
+      .catch((e) => toast(messageFrom(e, 'Could not load transactions')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const { shown, pagerProps } = usePager(items, '');
+
+  if (loaded && items.length === 0) {
+    return <ComingSoon title="Transactions" icon="list" desc="No transactions on your Celebrity Store account yet." />;
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>
+            {!loaded ? <tr><td colSpan={4} className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading transactions…</td></tr> : shown.map((t, idx) => (
+              <tr key={idx}>
+                <td data-label="Type" style={{ textTransform: 'capitalize' }}>{t.type}</td>
+                <td data-label="Amount"><b>{fn(t.amount)}</b></td>
+                <td data-label="Status"><span className="adm-pill muted">{t.status}</span></td>
+                <td data-label="Date" className="muted">{fmtDate(t.date)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Pager {...pagerProps} />
+      </div>
+    </div>
+  );
+}
+
+/* ---- Messages (real in-app chat with customers) ---- */
+function normalizeConvoSummary(c) {
+  return {
+    id: pick(c, ['id', 'conversation_id'], null),
+    customer: pick(c, ['customer_name'], null) || pick(c.customer || c.user || {}, ['name'], 'Customer'),
+    preview: pick(c, ['last_message', 'preview'], null) || pick(c.latest_message || {}, ['message', 'body', 'text'], ''),
+    unread: Number(pick(c, ['unread_count', 'unread'], 0)),
+  };
+}
+
+export function CSMessages() {
+  const { toast, user } = useStore();
+  const [convos, setConvos] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [activeId, setActiveId] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    myCelebrityStoreApi.chats({ per_page: 50 })
+      .then((res) => setConvos(unwrapList(res).map(normalizeConvoSummary)))
+      .catch((e) => toast(messageFrom(e, 'Could not load messages')))
+      .finally(() => setLoaded(true));
+  }, [toast]);
+
+  const openConvo = async (id) => {
+    setActiveId(id);
+    setThreadLoading(true);
+    try {
+      const res = await myCelebrityStoreApi.getChat(id);
+      const conv = res?.conversation || res;
+      setMessages(pickMsgList(conv).map((m) => normalizeChatMessage(m, user?.id)));
+    } catch (e) {
+      toast(messageFrom(e, 'Could not open conversation'));
+    } finally {
+      setThreadLoading(false);
+    }
+  };
+
+  const sendReply = async (text) => {
+    setSending(true);
+    const optimistic = { id: `opt-${Date.now()}`, text, mine: true, date: new Date().toISOString() };
+    setMessages((m) => [...m, optimistic]);
+    try {
+      await myCelebrityStoreApi.replyChat(activeId, { body: text });
+    } catch (e) {
+      toast(messageFrom(e, 'Reply failed to send'));
+      setMessages((m) => m.filter((x) => x.id !== optimistic.id));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (loaded && convos.length === 0) {
+    return <ComingSoon title="Messages" icon="chat" desc="No customer messages yet — conversations started from your storefront will show up here." />;
+  }
+
+  return (
+    <div className="panel ms-inbox" style={{ padding: 0, minHeight: 460 }}>
+      <div className={'ms-inbox-list' + (activeId ? ' ms-inbox-hide-mobile' : '')}>
+        {!loaded ? <p className="muted" style={{ padding: 16 }}>Loading…</p> : convos.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => openConvo(c.id)}
+            style={{
+              width: '100%', textAlign: 'left', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 2,
+              background: activeId === c.id ? 'var(--surface-2)' : 'transparent', borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <span className="row between" style={{ width: '100%' }}>
+              <b style={{ fontSize: 13.5 }}>{c.customer}</b>
+              {c.unread > 0 && <span className="adm-pill ok" style={{ fontSize: 10 }}>{c.unread}</span>}
+            </span>
+            <small className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>{c.preview || 'No messages yet'}</small>
+          </button>
+        ))}
+      </div>
+      <div className={'ms-inbox-thread' + (!activeId ? ' ms-inbox-hide-mobile' : '')}>
+        {!activeId ? (
+          <p className="muted" style={{ margin: 'auto' }}>Select a conversation to view messages.</p>
+        ) : (
+          <>
+            <button className="ms-inbox-back" onClick={() => setActiveId(null)}><Icon name="chevleft" size={16} /> Back</button>
+            {threadLoading ? <p className="muted" style={{ margin: 'auto' }}>Loading conversation…</p> : (
+              <ChatThread messages={messages} onSend={sendReply} sending={sending} placeholder="Reply to customer…" />
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

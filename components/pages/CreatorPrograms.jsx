@@ -9,11 +9,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Icon, Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
-import { affiliateApi, myMicrostoreApi } from '@/lib/api/endpoints';
+import { affiliateApi, myMicrostoreApi, myCelebrityStoreApi } from '@/lib/api/endpoints';
 import { messageFrom } from '@/lib/api/errors';
 import { CREATOR_PROGRAMS } from '@/lib/creatorPrograms';
-
-const CP_PHOTO = '/assets/img/a09d96b52fb7936342b34355ffca656885ce52ff.png';
 
 export function CreatorProgramSwitcher({ active }) {
   const { go } = useStore();
@@ -28,7 +26,7 @@ export function CreatorProgramSwitcher({ active }) {
         <div className="cp-switch">
           {CREATOR_PROGRAMS.map(p => (
             <div key={p.key} className={'cp-card card' + (active === p.key ? ' on' : '') + (p.dark ? ' dark' : '')}>
-              <img className="cp-card-photo" src={CP_PHOTO} alt="" aria-hidden="true" />
+              <img className="cp-card-photo" src={p.photo} alt="" aria-hidden="true" style={p.photoPosition ? { objectPosition: p.photoPosition } : undefined} />
               <div className="cp-card-head">
                 <Logo height={18} white={p.dark} />
                 <b>{p.name}</b>
@@ -187,6 +185,53 @@ function MicrostoreQuickCreate() {
   );
 }
 
+function CelebrityQuickCreate() {
+  const { go, toast } = useStore();
+  const [f, setF] = useState({ name: '', tagline: '' });
+  const [err, setErr] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [store, setStore] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!f.name.trim()) { setErr('Enter a store name'); return; }
+    setErr('');
+    setSubmitting(true);
+    try {
+      const res = await myCelebrityStoreApi.create({ name: f.name.trim(), tagline: f.tagline.trim() || undefined });
+      setStore(res?.celebrity_store || res);
+      toast('Celebrity Store created!');
+    } catch (err2) {
+      toast(messageFrom(err2, 'Could not create your Celebrity Store'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (store) {
+    const slug = store.slug;
+    return (
+      <div className="aff-success card">
+        <div className="success-check" style={{ width: 64, height: 64, marginBottom: 16 }}><Icon name="check" size={30} stroke={3} /></div>
+        <h3 style={{ fontSize: 22 }}>Your Celebrity Store is live!</h3>
+        {slug && <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => go('celebrityStore', slug)}>View my storefront</button>}
+      </div>
+    );
+  }
+
+  return (
+    <form className="aff-form card" onSubmit={submit}>
+      <h3 style={{ fontSize: 22, marginBottom: 4 }}>Create your Celebrity Store</h3>
+      <p className="muted" style={{ fontSize: 14, marginBottom: 20 }}>You&rsquo;re signed in — set up your storefront in one step.</p>
+      <div className="form-grid">
+        <CreatorField label="Store name" full value={f.name} onChange={(v) => setF((s) => ({ ...s, name: v }))} err={err} placeholder="Jay's Edit" />
+        <CreatorField label="Tagline (optional)" full value={f.tagline} onChange={(v) => setF((s) => ({ ...s, tagline: v }))} placeholder="Curated picks from my closet" />
+      </div>
+      <button className="btn btn-primary btn-block btn-lg" type="submit" disabled={submitting} style={{ marginTop: 18 }}>{submitting ? 'Creating…' : <>Create my Celebrity Store <Icon name="arrowr" size={18} /></>}</button>
+    </form>
+  );
+}
+
 export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions on a rolling 90-day basis.', termsLabel = 'Affiliate', signupRoute, signupLabel = 'Create your account', program = 'affiliate' }) {
   const { go, toast, isAuthenticated } = useStore();
   const [f, setF] = useState({ name: '', email: '', channel: 'instagram', handle: '', audience: '10k-50k', about: '' });
@@ -225,16 +270,10 @@ export function CreatorApplyForm({ rateNote = 'Free to join · earn commissions 
   // to a focused create form instead of the affiliate-shaped fields below.
   if (isAuthenticated && program === 'microstore') return <MicrostoreQuickCreate />;
 
-  // Celebrity Stores have no application endpoint of their own yet — nothing
-  // real to submit here for an already-signed-in visitor.
-  if (isAuthenticated && program === 'celebrity') {
-    return (
-      <div className="aff-form card" style={{ textAlign: 'center' }}>
-        <h3 style={{ fontSize: 22, marginBottom: 8 }}>Thanks for your interest</h3>
-        <p className="muted">Celebrity Stores are a selective program reviewed individually by our partner team. We&rsquo;ll reach out by email if you&rsquo;re selected.</p>
-      </div>
-    );
-  }
+  // Celebrity Store creation is instant and self-service (no `applications`
+  // endpoint for it, same as MicroStore) — skip straight to a focused create
+  // form instead of the affiliate-shaped fields below.
+  if (isAuthenticated && program === 'celebrity') return <CelebrityQuickCreate />;
 
   const submit = async (e) => {
     e.preventDefault();
