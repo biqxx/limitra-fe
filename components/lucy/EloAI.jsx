@@ -64,7 +64,7 @@ function compressImage(file) {
 const ELO_STORAGE_KEY = 'lim_elo_chat_v1';
 
 export function EloAI() {
-  const { go, addToCart, toggleWish, wish, isAuthenticated } = useStore();
+  const { go, addToCart, toggleWish, wish, isAuthenticated, refreshCart } = useStore();
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [msgs, setMsgs] = useState([{ role: 'assistant', text: GREETING }]);
@@ -73,10 +73,10 @@ export function EloAI() {
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [err, setErr] = useState('');
-  // Real backend conversation — null until the first message is sent (and
-  // only ever set for signed-in users; /ai/conversations requires auth,
-  // confirmed in the spec, so guests keep the local canned-reply fallback).
+  // Real backend conversation — null until the first message is sent.
+  // Signed-in users authenticate via bearer token; guests use guestToken.
   const [conversationId, setConversationId] = useState(null);
+  const [guestToken, setGuestToken] = useState(null);
   const [hydrated, setHydrated] = useState(false);
   const bodyRef = useRef(null);
   const fileRef = useRef(null);
@@ -90,6 +90,9 @@ export function EloAI() {
       if (saved && saved.conversationId) {
         setConversationId(saved.conversationId);
       }
+      if (saved && saved.guestToken) {
+        setGuestToken(saved.guestToken);
+      }
     } catch (e) {}
     setHydrated(true);
   }, []);
@@ -97,9 +100,9 @@ export function EloAI() {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      sessionStorage.setItem(ELO_STORAGE_KEY, JSON.stringify({ conversationId, msgs }));
+      sessionStorage.setItem(ELO_STORAGE_KEY, JSON.stringify({ conversationId, guestToken, msgs }));
     } catch (e) {}
-  }, [hydrated, conversationId, msgs]);
+  }, [hydrated, conversationId, guestToken, msgs]);
 
   useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; }, [msgs, open, busy, pending]);
 
@@ -134,19 +137,23 @@ export function EloAI() {
     if (imgs.length) { e.preventDefault(); addFiles(imgs); }
   };
 
-  // Signed-in users get the real backend; guests fall back to canned local
-  // picks since /ai/conversations requires auth (confirmed in the spec).
   const sendReal = async (q, imgs) => {
     let convId = conversationId;
+    let activeGuestToken = isAuthenticated ? null : guestToken;
     if (!convId) {
-      const res = await aiConversationsApi.create({ channel: 'web' });
+      const res = await aiConversationsApi.create({ channel: 'web' }, activeGuestToken);
       const data = res?.data ?? res;
       convId = data?.id ?? data?.conversation_id ?? data?.conversation?.id;
       if (!convId) throw new Error('Conversation was created but no id came back in the response.');
+      if (!isAuthenticated && data?.guest_token) {
+        activeGuestToken = data.guest_token;
+        setGuestToken(data.guest_token);
+      }
       setConversationId(convId);
     }
     const clientMessageId = genClientMessageId();
     const priorCount = msgs.length;
+    let sendRes = null;
     if (imgs.length > 0) {
       const formData = new FormData();
       formData.append('text', q || 'Find similar products in the store based on this image.');
@@ -156,18 +163,24 @@ export function EloAI() {
           formData.append('images[]', img.blob, img.name || `photo-${idx + 1}.jpg`);
         }
       });
-      await aiConversationsApi.sendMessage(convId, formData);
+      sendRes = await aiConversationsApi.sendMessage(convId, formData, activeGuestToken);
     } else {
-      await aiConversationsApi.sendMessage(convId, {
+      sendRes = await aiConversationsApi.sendMessage(convId, {
         text: q,
         client_message_id: clientMessageId,
-      });
+      }, activeGuestToken);
     }
-    // Response shape for the assistant's reply is undocumented — re-fetch
-    // the full thread (same "re-fetch after mutation" pattern used for the
-    // cart elsewhere in this app) and poll briefly if it hasn't landed yet.
+    const sendMsg = sendRes?.data ?? sendRes;
+    const sendActions = sendMsg?.metadata?.actions ?? sendMsg?.actions ?? [];
+    if (Array.isArray(sendActions) && sendActions.some(a => a?.type === 'cart_updated') && typeof refreshCart === 'function') {
+      refreshCart();
+    }
+    if (sendMsg && (sendMsg.role === 'assistant' || sendMsg.content || sendMsg.text)) {
+      setMsgs(m => [...m, normalizeAiMessage(sendMsg)]);
+      return;
+    }
     for (let attempt = 0; attempt < 8; attempt++) {
-      const res = await aiConversationsApi.messages(convId);
+      const res = await aiConversationsApi.messages(convId, activeGuestToken);
       const list = Array.isArray(res) ? res : (res?.data?.items ?? res?.items ?? res?.data ?? []);
       const normalized = (Array.isArray(list) ? list : []).map(normalizeAiMessage);
       const freshAssistant = normalized.slice(priorCount).filter(m => m.role === 'assistant');
@@ -180,15 +193,6 @@ export function EloAI() {
     setMsgs(m => [...m, { role: 'assistant', text: "Still working on that — feel free to keep browsing, I'll have an answer shortly." }]);
   };
 
-  const sendGuestFallback = async (q, imgs) => {
-    await new Promise(r => setTimeout(r, 700));
-    const picks = (imgs.length ? PRODUCTS.filter(p => p.bestseller) : PRODUCTS.filter(p => p.off > 0)).slice(0, 3);
-    const reply = imgs.length
-      ? "I found products similar to your photo. Here are the closest matches in our store:"
-      : "I'd love to help! Here are a few popular picks you might like:";
-    setMsgs(m => [...m, { role: 'assistant', text: reply, products: picks.map(p => p.id) }]);
-  };
-
   const send = async (text) => {
     const q = (text != null ? text : input).trim();
     const imgs = pending;
@@ -197,8 +201,7 @@ export function EloAI() {
     setMsgs(m => [...m, { role: 'user', text: q, images: imgs.map(i => i.src) }]);
     setBusy(true);
     try {
-      if (isAuthenticated) await sendReal(q, imgs);
-      else await sendGuestFallback(q, imgs);
+      await sendReal(q, imgs);
     } catch (e) {
       setMsgs(m => [...m, { role: 'assistant', text: "Sorry, I had trouble responding just then. Please try again in a moment." }]);
     } finally {
@@ -207,7 +210,7 @@ export function EloAI() {
   };
 
   const handoff = async () => {
-    if (!conversationId) return;
+    if (!conversationId || !isAuthenticated) return;
     try {
       await aiConversationsApi.handoff(conversationId, 'Customer requested human support');
       setMsgs(m => [...m, { role: 'assistant', text: "You've been connected to our support team — they'll follow up with you shortly." }]);
@@ -217,8 +220,9 @@ export function EloAI() {
   };
 
   const clearChat = async () => {
-    if (conversationId) { try { await aiConversationsApi.remove(conversationId); } catch (e) {} }
+    if (conversationId) { try { await aiConversationsApi.remove(conversationId, isAuthenticated ? null : guestToken); } catch (e) {} }
     setConversationId(null);
+    setGuestToken(null);
     setMsgs([{ role: 'assistant', text: GREETING }]);
     setPending([]); setErr('');
     try { sessionStorage.removeItem(ELO_STORAGE_KEY); } catch (e) {}
@@ -244,7 +248,7 @@ export function EloAI() {
               <b>Shop with Elo</b>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              {conversationId && <button className="lucy-head-btn" onClick={handoff} aria-label="Talk to a human" title="Talk to a human"><Icon name="headset" size={18} /></button>}
+              {conversationId && isAuthenticated && <button className="lucy-head-btn" onClick={handoff} aria-label="Talk to a human" title="Talk to a human"><Icon name="headset" size={18} /></button>}
               <button className="lucy-head-btn lucy-expand-btn" onClick={() => setExpanded(e => !e)} aria-label={expanded ? 'Collapse Elo' : 'Expand Elo'} title={expanded ? 'Collapse' : 'Expand'}><Icon name={expanded ? 'minimize' : 'maximize'} size={17} /></button>
               <button className="lucy-head-btn" onClick={() => setOpen(false)} aria-label="Close"><Icon name="close" size={20} /></button>
             </div>
