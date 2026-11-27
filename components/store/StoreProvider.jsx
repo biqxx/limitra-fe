@@ -7,7 +7,7 @@ import { naira, byId, REAL_IMG, slugify, setCategories, setSubcats, setProducts,
 import { applyStoredVariants } from '@/lib/variantsStore';
 import { routeFor, parseRoute } from '@/lib/routes';
 import { getToken, clearTokens } from '@/lib/auth';
-import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi, referralsApi, publicSettingsApi, analyticsApi, savedCardsApi, myMicrostoreApi } from '@/lib/api/endpoints';
+import { authApi, profileApi, cartApi, cartItemsApi, favoritesApi, categoriesApi, productsApi, addressesApi, walletApi, referralsApi, publicSettingsApi, analyticsApi, savedCardsApi, myMicrostoreApi, myCelebrityStoreApi } from '@/lib/api/endpoints';
 import { hasAnyAdminAccess } from '@/lib/auth/permissions';
 import { messageFrom } from '@/lib/api/errors';
 
@@ -33,7 +33,7 @@ let _catalogPromise = null;
 function needsCatalogOnRoute(pathname) {
   if (!pathname || pathname.startsWith('/admin')) return false;
   if (pathname === '/') return true;
-  return ['/shop', '/deals', '/category', '/product', '/cart', '/wishlist', '/channels', '/microstores', '/microstore', '/store'].some(
+  return ['/shop', '/deals', '/category', '/product', '/cart', '/wishlist', '/channels', '/microstores', '/microstore', '/celebrity-stores', '/celebrity-store', '/store'].some(
     prefix => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
 }
@@ -230,6 +230,14 @@ export function StoreProvider({ children }) {
     catch (e) { setHasMicrostore(false); }
   }, []);
 
+  // Same reliable probe as hasMicrostore above, for the parallel Celebrity
+  // Store program.
+  const [hasCelebrityStore, setHasCelebrityStore] = useState(false);
+  const loadHasCelebrityStore = useCallback(async () => {
+    try { const res = await myCelebrityStoreApi.get(); setHasCelebrityStore(!!(res?.celebrity_store || res)); }
+    catch (e) { setHasCelebrityStore(false); }
+  }, []);
+
   /* real session — resolves who's signed in from a stored JWT.
      lib/api/endpoints.js: authApi.me() (id/username/email/role) + profileApi.get()
      (first_name/last_name/phone/etc.) together make up the real profile.
@@ -254,7 +262,7 @@ export function StoreProvider({ children }) {
   }, []);
 
   const refreshUser = useCallback(async () => {
-    if (!getToken()) { setUser(null); setRemoteCart(null); setFavorites([]); setAddresses([]); setWallet(null); setHasMicrostore(false); setAuthLoading(false); return null; }
+    if (!getToken()) { setUser(null); setRemoteCart(null); setFavorites([]); setAddresses([]); setWallet(null); setHasMicrostore(false); setHasCelebrityStore(false); setAuthLoading(false); return null; }
     try {
       const me = await authApi.me();
       // profileApi.get() 404s/500s for accounts with no profile row yet (seen
@@ -270,6 +278,7 @@ export function StoreProvider({ children }) {
         loadWallet(),
         loadReferral(),
         loadHasMicrostore(),
+        loadHasCelebrityStore(),
       ]);
       return resolved;
     } catch (e) {
@@ -278,7 +287,7 @@ export function StoreProvider({ children }) {
     } finally {
       setAuthLoading(false);
     }
-  }, [loadCartAndFavorites, loadAddresses, loadWallet, loadReferral, loadHasMicrostore]);
+  }, [loadCartAndFavorites, loadAddresses, loadWallet, loadReferral, loadHasMicrostore, loadHasCelebrityStore]);
   useEffect(() => { refreshUser(); }, [refreshUser]);
 
   const logout = useCallback(async () => {
@@ -290,6 +299,7 @@ export function StoreProvider({ children }) {
     setAddresses([]);
     setWallet(null);
     setHasMicrostore(false);
+    setHasCelebrityStore(false);
   }, []);
 
   /* catalog — categories + products, both public (no auth) endpoints. Mutates
@@ -794,7 +804,7 @@ export function StoreProvider({ children }) {
     addresses, addressesLoading, loadAddresses, saveAddress, removeAddress, setPrimaryAddress,
     cards, saveCard, removeCard, setPrimaryCard,
     wallet, walletBalance, loadWallet,
-    hasMicrostore,
+    hasMicrostore, hasCelebrityStore,
     toasts, toast,
     query, setQuery,
     searchHistory, addSearch, clearSearch,
@@ -811,7 +821,7 @@ export function StoreProvider({ children }) {
     addresses, addressesLoading, loadAddresses, saveAddress, removeAddress, setPrimaryAddress,
     cards, saveCard, removeCard, setPrimaryCard,
     wallet, walletBalance, loadWallet,
-    hasMicrostore,
+    hasMicrostore, hasCelebrityStore,
     toasts, toast,
     query, setQuery,
     searchHistory, addSearch, clearSearch,

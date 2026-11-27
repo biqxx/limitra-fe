@@ -45,11 +45,11 @@ export function AffiliatePage() {
   return (
     <div className="page page-fade">
       {/* hero */}
-      <section className="aff-hero">
+      <section className="aff-hero aff-hero-big-img">
         <div className="wrap aff-hero-grid">
           <div className="aff-hero-copy">
             <span className="badge badge-soft"><Icon name="spark" size={14} /> Limitra Affiliate Program</span>
-            <h1>Share what you love.<br /><span className="hl">Earn while you do.</span></h1>
+            <h1><span className="aff-hero-nowrap">Share what you love.</span><br /><span className="hl">Earn while you do.</span></h1>
             <p>Turn your audience into income. Recommend Nigeria&rsquo;s favourite marketplace and earn <b>commissions</b> on valid delivered orders, your rate is calculated based on the category commission on a rolling 90-day window.</p>
             <div className="hero-cta">
               <button className="btn btn-accent btn-lg" onClick={scrollToApply}>Become an affiliate <Icon name="arrowr" size={18} /></button>

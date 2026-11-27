@@ -56,20 +56,20 @@ export function CelebrityStoresPage() {
   return (
     <div className="page page-fade">
       {/* hero */}
-      <section className="aff-hero">
+      <section className="aff-hero aff-hero-overlap">
         <div className="wrap aff-hero-grid">
           <div className="aff-hero-copy">
             <span className="badge badge-soft"><Icon name="star" size={14} /> Limitra Celebrity Stores</span>
             <h1>Shop Your Favourite<br /><span className="hl">Celebrity&rsquo;s Picks</span></h1>
-            <p>Discover exclusive collections curated by your favourite celebrities and creators. Shop what they love, all in one place.</p>
+            <p>Discover exclusive collections curated by your favourite celebrities and creators. From must-have fashion to the latest gadgets. Shop what they love all in one place.</p>
             <div className="hero-cta">
               <button className="btn btn-accent btn-lg" onClick={scrollToApply}>Become a Celebrity Store Partner <Icon name="arrowr" size={18} /></button>
               <button className="btn btn-ghost-light btn-lg" onClick={scrollToApply}>See how it works</button>
             </div>
             <div className="aff-hero-trust">
-              <span><Icon name="check" size={15} stroke={3} /> Higher rates</span>
-              <span><Icon name="check" size={15} stroke={3} /> Rolling 90 days</span>
-              <span><Icon name="check" size={15} stroke={3} /> From sale #1</span>
+              <span><Icon name="check" size={15} stroke={3} /> Selective approval</span>
+              <span><Icon name="check" size={15} stroke={3} /> Rank up</span>
+              <span><Icon name="check" size={15} stroke={3} /> Earn commissions</span>
             </div>
           </div>
           <div className="aff-hero-visual">
@@ -77,6 +77,17 @@ export function CelebrityStoresPage() {
           </div>
         </div>
       </section>
+      {/* Outside .aff-hero deliberately — that section has overflow:hidden
+          (for its decorative glow), which would clip this card's overlap
+          into the section below if it were a descendant instead. */}
+      <div className="wrap aff-hero-stats-wrap">
+        <div className="aff-hero-stats">
+          <div className="aff-hero-stat"><span className="aff-hero-stat-ic"><Icon name="dollar" size={18} /></span><div><b>Higher rates</b><small>commission rates (increases with tier)</small></div></div>
+          <div className="aff-hero-stat"><span className="aff-hero-stat-ic"><Icon name="refresh" size={18} /></span><div><b>Rolling 90 days</b><small>performance window</small></div></div>
+          <div className="aff-hero-stat"><span className="aff-hero-stat-ic"><Icon name="check" size={18} /></span><div><b>Delivered orders</b><small>count toward your rank</small></div></div>
+          <div className="aff-hero-stat"><span className="aff-hero-stat-ic"><Icon name="spark" size={18} /></span><div><b>From sale #1</b><small>start earning commissions</small></div></div>
+        </div>
+      </div>
 
       <CreatorProgramSwitcher active="celebrity" />
 

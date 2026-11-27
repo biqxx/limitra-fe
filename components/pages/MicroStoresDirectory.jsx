@@ -1,14 +1,41 @@
 'use client';
-/* LIMITRA, MicroStores directory — browse all MicroStore Partners. */
-import { useState } from 'react';
+/* LIMITRA, MicroStores directory — browse all MicroStore Partners.
+   Wired to the real backend: GET /microstores (microstoresApi.list). That
+   endpoint only documents page/per_page params — no server-side search,
+   category or sort — so this fetches one page (per_page: 100) and filters/
+   sorts client-side, same approach as ShopPage/MicroStorePage. Response
+   field names aren't documented either; read defensively, same fields
+   MicroStorePage already reads for a single store. There's no tags/category
+   field on a real store, so (unlike the old demo-data version) this has no
+   category filter — it would have nothing real to filter by. */
+import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { Breadcrumbs } from '@/components/ui/Shared';
 import { microstoresApi } from '@/lib/api/endpoints';
-import { MICROSTORES } from '@/lib/microstoresData';
 
-const DIR_CATS = ['All stores', 'Gaming', 'Beauty', 'Phones', 'Home & Living', "Men's Fashion", 'Bags'];
 const SORTS = [['popular', 'Most popular'], ['rating', 'Top rated'], ['az', 'Name: A → Z']];
+const TINTS = ['#0438B6', '#F67208', '#107A45', '#8E55E6', '#E5484D', '#C9890A'];
+
+function unwrapStores(res) {
+  if (Array.isArray(res)) return res;
+  for (const k of ['data', 'items', 'microstores']) if (Array.isArray(res?.[k])) return res[k];
+  return [];
+}
+
+function normalizeStore(s, i) {
+  return {
+    slug: s.slug,
+    name: s.name || 'MicroStore',
+    tagline: s.tagline || '',
+    rating: s.rating ?? s.average_rating ?? null,
+    reviews: s.reviews_count ?? s.reviews ?? null,
+    verified: !!s.verified,
+    logoUrl: s.logo_url || null,
+    bannerUrl: s.banner_url || null,
+    tint: s.theme_color || TINTS[i % TINTS.length],
+  };
+}
 
 function StoreCard({ store }) {
   const { go, toast } = useStore();
@@ -18,17 +45,22 @@ function StoreCard({ store }) {
   };
   return (
     <div className="ms-dir-card card">
-      <div className="ms-dir-cover" style={{ background: `linear-gradient(135deg, ${store.color}, ${store.color}99)` }} onClick={openStore} />
+      <div
+        className="ms-dir-cover"
+        onClick={openStore}
+        style={store.bannerUrl
+          ? { backgroundImage: `url(${store.bannerUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+          : { background: `linear-gradient(135deg, ${store.tint}, ${store.tint}99)` }}
+      />
       <div className="ms-dir-body">
-        <span className="ms-dir-avatar" style={{ background: store.color }}><Icon name="store" size={18} /></span>
+        <span className="ms-dir-avatar" style={{ background: store.tint }}>
+          {store.logoUrl ? <img src={store.logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} /> : <Icon name="store" size={18} />}
+        </span>
         <b onClick={openStore}>{store.name}</b>
-        <p className="muted">{store.tagline}</p>
+        {store.tagline && <p className="muted">{store.tagline}</p>}
         <div className="ms-dir-meta">
-          <span><Icon name="star" size={13} fill="var(--gold)" /> {store.rating} <small>({store.reviews})</small></span>
+          {store.rating != null && <span><Icon name="star" size={13} fill="var(--gold)" /> {Number(store.rating).toFixed(1)} {store.reviews != null && <small>({store.reviews})</small>}</span>}
           {store.verified && <span className="ms-dir-verified"><Icon name="shield" size={13} /> Verified</span>}
-        </div>
-        <div className="ms-dir-tags">
-          {store.tags.map(tg => <span key={tg} className="chip">{tg}</span>)}
         </div>
         <button className="btn btn-primary btn-sm btn-block" onClick={() => toast('Following ' + store.name)}>Follow Store</button>
       </div>
@@ -37,22 +69,32 @@ function StoreCard({ store }) {
 }
 
 export function MicroStoresDirectory() {
-  const { go } = useStore();
+  const { go, toast } = useStore();
+  const [stores, setStores] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
-  const [cat, setCat] = useState('All stores');
   const [status, setStatus] = useState('all');
   const [sort, setSort] = useState('popular');
 
-  let list = MICROSTORES.filter(s =>
-    (!q || s.name.toLowerCase().includes(q.toLowerCase())) &&
-    (cat === 'All stores' || s.tags.includes(cat)) &&
-    (status === 'all' || (status === 'verified' && s.verified) || (status === 'top' && s.rating >= 4.7))
-  );
-  list = [...list].sort((a, b) => {
-    if (sort === 'rating') return b.rating - a.rating;
-    if (sort === 'az') return a.name.localeCompare(b.name);
-    return b.reviews - a.reviews;
-  });
+  useEffect(() => {
+    microstoresApi.list({ per_page: 100 })
+      .then((res) => setStores(unwrapStores(res).map(normalizeStore)))
+      .catch((e) => toast('Could not load MicroStores'))
+      .finally(() => setLoading(false));
+  }, [toast]);
+
+  const list = useMemo(() => {
+    let r = stores.filter((s) =>
+      (!q || s.name.toLowerCase().includes(q.toLowerCase())) &&
+      (status === 'all' || (status === 'verified' && s.verified) || (status === 'top' && (s.rating ?? 0) >= 4.7))
+    );
+    r = [...r].sort((a, b) => {
+      if (sort === 'rating') return (b.rating ?? 0) - (a.rating ?? 0);
+      if (sort === 'az') return a.name.localeCompare(b.name);
+      return (b.reviews ?? 0) - (a.reviews ?? 0);
+    });
+    return r;
+  }, [stores, q, status, sort]);
 
   return (
     <div className="page page-fade">
@@ -82,15 +124,6 @@ export function MicroStoresDirectory() {
               <input className="input" placeholder="Search stores…" value={q} onChange={e => setQ(e.target.value)} />
             </div>
             <div className="filter-block">
-              <h5>Shop categories</h5>
-              {DIR_CATS.map(c => (
-                <label key={c} className="check">
-                  <input type="radio" name="dircat" checked={cat === c} onChange={() => setCat(c)} />
-                  <span className="cbox round"><Icon name="check" size={12} stroke={3} /></span>{c}
-                </label>
-              ))}
-            </div>
-            <div className="filter-block">
               <h5>Store status</h5>
               {[['all', 'All stores'], ['verified', 'Verified stores'], ['top', 'Top rated']].map(([v, l]) => (
                 <label key={v} className="check">
@@ -111,7 +144,11 @@ export function MicroStoresDirectory() {
           </aside>
 
           <div>
-            {list.length === 0 ? (
+            {loading ? (
+              <div style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--text-faint)' }}>Loading stores…</div>
+            ) : stores.length === 0 ? (
+              <div style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--text-faint)' }}>No MicroStores have opened yet — check back soon.</div>
+            ) : list.length === 0 ? (
               <div style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--text-faint)' }}>No stores match your filters.</div>
             ) : (
               <div className="ms-dir-grid">

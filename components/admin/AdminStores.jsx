@@ -8,24 +8,28 @@ import { messageFrom } from '@/lib/api/errors';
 import { useStore } from '@/components/store/StoreProvider';
 import { hasPermission } from '@/lib/auth/permissions';
 import { useAdminToast } from './AdminToastContext';
-import { AdmHead, Pager, usePager } from './AdminShared';
+import { AdmHead, EmptyState, Pager, usePager } from './AdminShared';
 
 const asList = (res) => (Array.isArray(res) ? res : res?.items || res?.data || []);
 
-function StoreConsole({ mode = 'microstores' }) {
-  const isCelebrity = mode === 'celebrity';
+// MicroStore moderation (GET/moderate/feature on /admin/microstores) is a
+// real, documented admin endpoint — used below as-is. There is no
+// corresponding /admin/celebrity-stores endpoint at all (confirmed against
+// the API spec), so AdminCelebrityStores below stays an honest empty state
+// instead of reusing this console with an unverified "is this microstore
+// actually a celebrity store" guess. Neither mode has a real admin-side
+// creation endpoint either (only GET/moderate/feature are documented), so
+// there's no "Create store" action here — stores are only created by their
+// own owner, via /my-microstore or /my-celebrity-store.
+function StoreConsole() {
   const { user } = useStore();
-  const canManage = isCelebrity
-    ? (hasPermission(user, 'celebrity_stores.manage') || hasPermission(user, 'microstores.manage'))
-    : hasPermission(user, 'microstores.manage');
+  const canManage = hasPermission(user, 'microstores.manage');
   const addToast = useAdminToast();
 
   const [stores, setStores] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [createDraft, setCreateDraft] = useState(null);
-  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -44,9 +48,6 @@ function StoreConsole({ mode = 'microstores' }) {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return stores.filter((s) => {
-      if (isCelebrity && !s.is_featured && s.settings?.is_celebrity !== true && s.type !== 'celebrity') {
-        // Show featured / celebrity-tagged stores in Celebrity Stores view while still allowing creation
-      }
       if (statusFilter === 'featured' && !s.is_featured) return false;
       if (statusFilter !== 'all' && statusFilter !== 'featured' && String(s.moderation_status || s.status || '').toLowerCase() !== statusFilter) {
         return false;
@@ -54,9 +55,9 @@ function StoreConsole({ mode = 'microstores' }) {
       if (!needle) return true;
       return `${s.name || ''} ${s.slug || ''} ${s.user?.username || ''} ${s.user?.email || ''}`.toLowerCase().includes(needle);
     });
-  }, [isCelebrity, q, statusFilter, stores]);
+  }, [q, statusFilter, stores]);
 
-  const { shown, pagerProps } = usePager(filtered, q + statusFilter + mode);
+  const { shown, pagerProps } = usePager(filtered, q + statusFilter);
 
   const moderate = async (store, moderation_status) => {
     try {
@@ -78,27 +79,6 @@ function StoreConsole({ mode = 'microstores' }) {
     }
   };
 
-  const createStore = async () => {
-    if (!createDraft?.name?.trim() || !createDraft?.user_id) return;
-    setSaving(true);
-    try {
-      await adminMicrostoresApi.create({
-        user_id: Number(createDraft.user_id),
-        name: createDraft.name.trim(),
-        tagline: createDraft.tagline?.trim() || undefined,
-        is_featured: Boolean(createDraft.is_featured ?? isCelebrity),
-        settings: isCelebrity ? { is_celebrity: true } : undefined,
-      });
-      addToast(isCelebrity ? 'Celebrity store created' : 'MicroStore created');
-      setCreateDraft(null);
-      await load();
-    } catch (err) {
-      addToast(messageFrom(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const activeCount = stores.filter((s) => s.status === 'active' || s.moderation_status === 'approved').length;
   const pendingCount = stores.filter((s) => s.moderation_status === 'pending' || s.moderation_status === 'pending_review').length;
   const featuredCount = stores.filter((s) => Boolean(s.is_featured)).length;
@@ -106,15 +86,10 @@ function StoreConsole({ mode = 'microstores' }) {
   return (
     <>
       <AdmHead
-        title={isCelebrity ? 'Celebrity Stores' : 'MicroStores'}
-        sub={isCelebrity ? 'Curate and feature verified celebrity storefronts.' : 'Moderate creator storefronts, featured placements, and store status.'}
+        title="MicroStores"
+        sub="Moderate creator storefronts, featured placements, and store status."
       >
         <button className="adm-btn ghost" onClick={load}><Icon name="refresh" size={14} /> Refresh</button>
-        {canManage && (
-          <button className="adm-btn primary" onClick={() => setCreateDraft({ user_id: '', name: '', tagline: '', is_featured: isCelebrity })}>
-            <Icon name="plus" size={15} /> {isCelebrity ? 'Create celebrity store' : 'Create microstore'}
-          </button>
-        )}
       </AdmHead>
 
       <div className="kpi-grid">
@@ -192,35 +167,28 @@ function StoreConsole({ mode = 'microstores' }) {
           <Pager {...pagerProps} />
         </div>
       </div>
-
-      {createDraft && (
-        <div className="role-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setCreateDraft(null); }}>
-          <div className="role-modal">
-            <div className="role-modal-h">
-              <div><h3 style={{ fontSize: 18 }}>{isCelebrity ? 'Create celebrity store' : 'Create microstore'}</h3></div>
-              <button className="role-modal-x" onClick={() => setCreateDraft(null)} aria-label="Close"><Icon name="close" size={18} /></button>
-            </div>
-            <div className="role-modal-b">
-              <label className="adm-field"><span>Owner User ID</span><input type="number" min="1" value={createDraft.user_id} onChange={(e) => setCreateDraft((d) => ({ ...d, user_id: e.target.value }))} placeholder="e.g. 12" /></label>
-              <label className="adm-field"><span>Store name</span><input value={createDraft.name} onChange={(e) => setCreateDraft((d) => ({ ...d, name: e.target.value }))} placeholder="e.g. Wizkid Official Picks" /></label>
-              <label className="adm-field"><span>Tagline</span><input value={createDraft.tagline} onChange={(e) => setCreateDraft((d) => ({ ...d, tagline: e.target.value }))} placeholder="Curated favorites" /></label>
-            </div>
-            <div className="role-modal-f">
-              <button className="adm-btn ghost" onClick={() => setCreateDraft(null)} disabled={saving}>Cancel</button>
-              <button className="adm-btn primary" onClick={createStore} disabled={saving || !createDraft.name.trim() || !createDraft.user_id}>{saving ? 'Creating…' : 'Create store'}</button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
 
 export function AdminMicrostores() {
-  return <StoreConsole mode="microstores" />;
+  return <StoreConsole />;
 }
 
+// No /admin/celebrity-stores endpoint exists (confirmed against the API
+// spec) — reusing the microstore console here would just show microstores
+// mislabeled as celebrity stores, so this stays an honest empty state
+// instead until the backend has a real endpoint for it.
 export function AdminCelebrityStores() {
-  return <StoreConsole mode="celebrity" />;
+  return (
+    <>
+      <AdmHead title="Celebrity Stores" sub="Curate and feature verified celebrity storefronts." />
+      <EmptyState
+        icon="star"
+        title="Not available yet"
+        description="There's no admin endpoint for Celebrity Stores on the backend yet — this will populate once that's added."
+      />
+    </>
+  );
 }
 

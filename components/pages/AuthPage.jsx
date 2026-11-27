@@ -5,7 +5,7 @@ import { Icon, Logo } from '@/components/icons/Icon';
 import { useStore } from '@/components/store/StoreProvider';
 import { SocialMark } from '@/components/ui/SocialMark';
 import { FormAlert } from '@/components/forms/Shared';
-import { authApi, myMicrostoreApi } from '@/lib/api/endpoints';
+import { authApi, myMicrostoreApi, myCelebrityStoreApi } from '@/lib/api/endpoints';
 import { ApiError } from '@/lib/api/client';
 import { fieldErrorsFrom, messageFrom } from '@/lib/api/errors';
 import { hasAnyAdminAccess, hasAffiliateAccess, firstPermittedAdminPath } from '@/lib/auth/permissions';
@@ -107,6 +107,10 @@ export function AuthPage({ mode = 'signin' }) {
     try {
       const res = await myMicrostoreApi.get();
       if (res?.microstore || res) { go('microstoreDashboard'); return; }
+    } catch (e) {}
+    try {
+      const res = await myCelebrityStoreApi.get();
+      if (res?.celebrity_store || res) { go('celebrityStoreDashboard'); return; }
     } catch (e) {}
     go('account');
   };
