@@ -27,6 +27,8 @@ export async function generateMetadata({ params }) {
   return buildMetadata({
     title,
     description,
+    noindex: !entry,
+    images: entry?.cover_image_url || entry?.image_url,
     path: `/pages/${encodeURIComponent(slug)}`,
   });
 }

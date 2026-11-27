@@ -2,7 +2,7 @@ import { AboutPage } from '@/components/pages/AboutPage';
 import { buildMetadata } from '@/lib/seo';
 
 export const metadata = buildMetadata({
-  title: 'About Limitra',
+  title: 'About Our Marketplace',
   description:
     'Learn how Limitra connects shoppers with curated products, verified brands, creator microstores, and fast delivery across Nigeria.',
   path: '/about',

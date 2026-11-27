@@ -1,5 +1,8 @@
+import { buildMetadata } from '@/lib/seo';
 /* Ported from legacy/404.html */
 import Link from 'next/link';
+export const metadata = buildMetadata({ title: 'Page Not Found', noindex: true });
+
 export default function NotFound() {
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg)', padding: 24 }}>

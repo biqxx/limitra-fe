@@ -266,6 +266,7 @@ export function CheckoutPage() {
   const searchParams = useSearchParams();
   const [step, setStep] = useState(0);
   const [orderId, setOrderId] = useState(null);
+  const [orderPublicId, setOrderPublicId] = useState(null);
   const [transferInfo, setTransferInfo] = useState(null); // real bank_transfer details, once we have them
   const [placing, setPlacing] = useState(false);
   const [resolvingReturn, setResolvingReturn] = useState(false);
@@ -499,6 +500,7 @@ export function CheckoutPage() {
         contact_email: email,
       }, idemKey);
       const newOrderId = order?.id ?? order?.order_id ?? order?.order_number ?? order?.data?.id ?? null;
+      setOrderPublicId(order?.public_id ?? order?.data?.public_id ?? null);
 
       // The order exists from here on regardless of payment outcome — the
       // cart's job is done (re-quoting the same items into a second order
@@ -559,7 +561,7 @@ export function CheckoutPage() {
     }
   };
 
-  if (orderId) return <OrderSuccess orderId={orderId} email={email} eta={isPickupMode ? 'Ready for pickup' : selectedOption?.sub} pending={!!transferInfo} transferInfo={transferInfo} />;
+  if (orderId) return <OrderSuccess orderId={orderId} trackingId={orderPublicId ?? orderId} email={email} eta={isPickupMode ? 'Ready for pickup' : selectedOption?.sub} pending={!!transferInfo} transferInfo={transferInfo} />;
 
   const shipFee = isPickupMode ? 0 : (selectedOption?.fee ?? 0);
   const methodLabel = isPickupMode ? 'Pickup station (Free)' : (selectedOption ? `${selectedOption.label}${selectedOption.sub ? ' · ' + selectedOption.sub : ''}${selectedOption.fee === 0 ? ' (Free)' : ''}` : '');
@@ -759,7 +761,7 @@ export function CheckoutPage() {
   );
 }
 
-export function OrderSuccess({ orderId, email, eta, pending, transferInfo }) {
+export function OrderSuccess({ orderId, trackingId = orderId, email, eta, pending, transferInfo }) {
   const { go, toast } = useStore();
   const [copied, setCopied] = useState('');
   eta = eta || 'Delivery timing will be confirmed on your order page';
@@ -797,7 +799,7 @@ export function OrderSuccess({ orderId, email, eta, pending, transferInfo }) {
           {!pending && <div className="row between" style={{ marginTop: 12 }}><span className="muted">Estimated delivery</span><b style={{ color: 'var(--success)' }}>{eta}</b></div>}
         </div>
         <div className="row" style={{ gap: 12, justifyContent: 'center', marginTop: 26, flexWrap: 'wrap' }}>
-          <button className="btn btn-primary btn-lg" onClick={() => go('tracking', orderId)}><Icon name="truck" size={18} /> Track order</button>
+          <button className="btn btn-primary btn-lg" onClick={() => go('tracking', trackingId)}><Icon name="truck" size={18} /> Track order</button>
           <button className="btn btn-outline btn-lg" onClick={() => go('shop', 'all')}>Continue shopping</button>
         </div>
       </div>

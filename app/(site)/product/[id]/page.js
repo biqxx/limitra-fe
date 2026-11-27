@@ -27,6 +27,7 @@ export async function generateMetadata({ params }) {
   if (!product) {
     return buildMetadata({
       title: 'Product Details',
+      noindex: true,
       description: 'Explore curated products on Limitra with fast nationwide delivery.',
       path: `/product/${encodeURIComponent(id)}`,
     });
@@ -76,6 +77,8 @@ export default async function ProductRoutePage({ params }) {
     const productUrl = canonicalUrl(`/product/${encodeURIComponent(slugOrId)}`);
     const images = extractImageUrls(product);
     const price = Number(product.price);
+    const hasPrice = product.price != null && product.price !== '' && Number.isFinite(price) && price >= 0;
+    const hasStock = product.stock != null || typeof product.in_stock === 'boolean';
     const reviewCount = Number(product.review_count ?? product.reviews_count ?? 0);
     const ratingValue = Number(product.average_rating ?? product.rating ?? 0);
 
@@ -88,17 +91,19 @@ export default async function ProductRoutePage({ params }) {
       ...(product.sku ? { sku: product.sku } : {}),
       ...(product.brand ? { brand: { '@type': 'Brand', name: product.brand } } : {}),
       ...(product.category?.name ? { category: product.category.name } : {}),
-      offers: {
-        '@type': 'Offer',
-        url: productUrl,
-        priceCurrency: product.currency || 'NGN',
-        price: Number.isFinite(price) ? price.toFixed(2) : '0.00',
-        availability:
-          Number(product.stock) > 0 || product.in_stock
-            ? 'https://schema.org/InStock'
-            : 'https://schema.org/OutOfStock',
-        itemCondition: 'https://schema.org/NewCondition',
-      },
+      ...(hasPrice ? {
+        offers: {
+          '@type': 'Offer',
+          url: productUrl,
+          priceCurrency: product.currency || 'NGN',
+          price: price.toFixed(2),
+          ...(hasStock ? {
+            availability: Number(product.stock) > 0 || product.in_stock === true
+              ? 'https://schema.org/InStock'
+              : 'https://schema.org/OutOfStock',
+          } : {}),
+        },
+      } : {}),
       ...(reviewCount > 0 && ratingValue > 0
         ? {
             aggregateRating: {
@@ -154,7 +159,7 @@ export default async function ProductRoutePage({ params }) {
   return (
     <>
       <JsonLd data={jsonLd} />
-      <ProductPage id={id} />
+      <ProductPage key={id} id={id} initialProduct={product} />
     </>
   );
 }

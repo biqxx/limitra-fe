@@ -35,6 +35,7 @@ export async function generateMetadata({ params }) {
   return buildMetadata({
     title,
     description,
+    noindex: cat !== 'all' && !category,
     path: `/shop/${encodeURIComponent(cat || 'all')}`,
     images: category?.image?.url || category?.image_url,
   });

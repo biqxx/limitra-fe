@@ -33,12 +33,13 @@ export async function generateMetadata({ params }) {
   const subName = subcategory?.name || formatSlugTitle(sub);
   const title = `${subName} — ${catName}`;
   const description =
-    truncateText(subcategory?.description || category?.description, 160) ||
+    truncateText(subcategory?.description, 160) ||
     `Shop ${subName} in ${catName} on ${SITE_NAME} with verified sellers and fast nationwide delivery.`;
 
   return buildMetadata({
     title,
     description,
+    noindex: !subcategory,
     path: `/shop/${encodeURIComponent(cat)}/${encodeURIComponent(sub)}`,
     images: subcategory?.image?.url || category?.image?.url,
   });

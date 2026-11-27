@@ -27,7 +27,6 @@ function safeDate(value) {
 }
 
 export default async function sitemap() {
-  const now = new Date();
   const entries = new Map();
 
   const addEntry = (path, opts = {}) => {
@@ -35,7 +34,7 @@ export default async function sitemap() {
     if (!entries.has(url)) {
       entries.set(url, {
         url,
-        lastModified: opts.lastModified || now,
+        ...(opts.lastModified ? { lastModified: opts.lastModified } : {}),
         changeFrequency: opts.changeFrequency || 'weekly',
         priority: opts.priority ?? 0.7,
         ...(opts.images?.length ? { images: opts.images } : {}),
@@ -45,7 +44,6 @@ export default async function sitemap() {
 
   for (const route of STATIC_PUBLIC_ROUTES) {
     addEntry(route.path, {
-      lastModified: now,
       changeFrequency: route.changeFrequency,
       priority: route.priority,
     });
@@ -53,7 +51,7 @@ export default async function sitemap() {
 
   const [categoriesData, products, microstores, blogPosts] = await Promise.all([
     fetchApiJson('/categories', { revalidate }),
-    fetchPaginatedAll('/products', { perPage: 100, maxPages: 100, revalidate }),
+    fetchPaginatedAll('/products', { perPage: 25, maxPages: 400, revalidate }),
     fetchPaginatedAll('/microstores', { perPage: 50, maxPages: 50, revalidate }),
     fetchPaginatedAll('/blog/posts', { perPage: 50, maxPages: 50, revalidate }),
   ]);
@@ -67,7 +65,7 @@ export default async function sitemap() {
   for (const cat of categories) {
     if (!cat?.slug) continue;
     addEntry(`/shop/${encodeURIComponent(cat.slug)}`, {
-      lastModified: safeDate(cat.updated_at) || now,
+      lastModified: safeDate(cat.updated_at),
       changeFrequency: 'daily',
       priority: 0.85,
     });
@@ -75,7 +73,7 @@ export default async function sitemap() {
     for (const sub of subs) {
       if (!sub?.slug) continue;
       addEntry(`/shop/${encodeURIComponent(cat.slug)}/${encodeURIComponent(sub.slug)}`, {
-        lastModified: safeDate(sub.updated_at) || safeDate(cat.updated_at) || now,
+        lastModified: safeDate(sub.updated_at) || safeDate(cat.updated_at),
         changeFrequency: 'daily',
         priority: 0.8,
       });
@@ -93,7 +91,7 @@ export default async function sitemap() {
       : [];
 
     addEntry(`/product/${encodeURIComponent(identifier)}`, {
-      lastModified: safeDate(product.updated_at || product.created_at) || now,
+      lastModified: safeDate(product.updated_at || product.created_at),
       changeFrequency: 'daily',
       priority: 0.9,
       images: productImages,
@@ -106,7 +104,7 @@ export default async function sitemap() {
       (src) => typeof src === 'string' && /^https?:\/\//i.test(src)
     );
     addEntry(`/microstores/${encodeURIComponent(store.slug)}`, {
-      lastModified: safeDate(store.updated_at || store.created_at) || now,
+      lastModified: safeDate(store.updated_at || store.created_at),
       changeFrequency: 'weekly',
       priority: 0.75,
       images: storeImages,
@@ -117,7 +115,7 @@ export default async function sitemap() {
     const slug = post?.slug || post?.id;
     if (!slug) continue;
     addEntry(`/blog/${encodeURIComponent(slug)}`, {
-      lastModified: safeDate(post.updated_at || post.published_at || post.created_at) || now,
+      lastModified: safeDate(post.updated_at || post.published_at || post.created_at),
       changeFrequency: 'weekly',
       priority: 0.75,
     });

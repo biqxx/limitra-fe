@@ -21,6 +21,7 @@ export async function generateMetadata({ params }) {
   if (!post) {
     return buildMetadata({
       title: 'Blog Article',
+      noindex: true,
       description: `Read articles and buying guides on ${SITE_NAME}.`,
       path: `/blog/${encodeURIComponent(slug)}`,
       type: 'article',
@@ -34,6 +35,8 @@ export async function generateMetadata({ params }) {
       `${post.title} on ${SITE_NAME} Journal.`,
     path: `/blog/${encodeURIComponent(post.slug || slug)}`,
     images: post.cover_image_url || post.image_url,
+    publishedTime: post.published_at,
+    modifiedTime: post.updated_at,
     type: 'article',
   });
 }

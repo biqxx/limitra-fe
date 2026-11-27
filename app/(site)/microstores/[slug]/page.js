@@ -21,6 +21,7 @@ export async function generateMetadata({ params }) {
   if (!store) {
     return buildMetadata({
       title: 'Creator Microstore',
+      noindex: true,
       description: `Discover curated creator storefronts on ${SITE_NAME}.`,
       path: `/microstores/${encodeURIComponent(slug)}`,
     });
@@ -74,7 +75,7 @@ export default async function MicroStoreRoutePage({ params }) {
   return (
     <>
       <JsonLd data={jsonLd} />
-      <MicroStorePage slug={slug} />
+      <MicroStorePage key={slug} slug={slug} initialStore={store} />
     </>
   );
 }

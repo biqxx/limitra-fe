@@ -2,7 +2,8 @@ import { AffiliatePage } from '@/components/pages/AffiliatePage';
 import { buildMetadata } from '@/lib/seo';
 
 export const metadata = buildMetadata({
-  title: 'Limitra Affiliate Program — Earn Commissions',
+  title: 'Affiliate Program in Nigeria',
+  images: '/assets/img/affiliate-hero.png',
   description:
     'Join the Limitra Affiliate Program, share curated products with your audience, and earn commissions on every verified purchase.',
   path: '/affiliate',

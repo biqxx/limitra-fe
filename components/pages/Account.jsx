@@ -240,7 +240,7 @@ function OrderList({ orders }) {
             <b>{naira(o.total)}</b>
           </div>
           <div className="or-actions">
-            {o.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => go('tracking', o.id)}><Icon name="truck" size={15} /> Track</button>}
+            {o.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => go('tracking', o.raw.public_id ?? o.id)}><Icon name="truck" size={15} /> Track</button>}
             {o.status === 'delivered' && <button className="btn btn-ghost btn-sm" onClick={() => setReturning(o)}><Icon name="refresh" size={15} /> Request return</button>}
             {['pending_payment', 'confirmed'].includes(o.status) && (
               <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={async () => {
