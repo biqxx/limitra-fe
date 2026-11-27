@@ -19,15 +19,46 @@ function genClientMessageId() {
 
 // Response shape is undocumented — role/text/images/product-id fields are
 // all read defensively under several plausible names.
+function mapAiProduct(raw) {
+  if (!raw) return null;
+  if (typeof raw !== 'object') return byId(raw) || null;
+  const cached = byId(raw.id);
+  if (cached) return cached;
+  const price = Number(raw.price ?? raw.sale_price ?? 0);
+  const oldPrice = Number(raw.compare_at_price ?? raw.old_price ?? 0);
+  const img = raw.image_url ?? raw.thumbnail ?? raw.image ?? (Array.isArray(raw.images) ? (typeof raw.images[0] === 'string' ? raw.images[0] : raw.images[0]?.url) : null);
+  return {
+    id: raw.id,
+    slug: raw.slug || raw.id,
+    name: raw.name || raw.title || 'Product',
+    price: Number.isFinite(price) ? price : 0,
+    oldPrice: Number.isFinite(oldPrice) && oldPrice > price ? oldPrice : 0,
+    off: price > 0 && oldPrice > price ? Math.round(((oldPrice - price) / oldPrice) * 100) : Number(raw.off || 0),
+    brand: raw.brand || raw.category?.name || '',
+    rating: Number(raw.average_rating ?? raw.rating ?? 0),
+    image: img || null,
+    images: img ? [img] : [],
+  };
+}
+
 function normalizeAiMessage(m) {
   const role = m.role ?? (m.is_assistant || m.sender === 'assistant' || m.author_type === 'assistant' || m.from === 'ai' ? 'assistant' : 'user');
-  const productIds = m.product_ids ?? (Array.isArray(m.products) ? m.products.map(p => (typeof p === 'object' ? p.id : p)) : []);
+  const rawProducts = m.metadata?.products ?? m.products ?? m.product_ids ?? [];
+  const seen = new Set();
+  const products = [];
+  for (const item of (Array.isArray(rawProducts) ? rawProducts : [])) {
+    const mapped = mapAiProduct(item);
+    if (mapped && mapped.id != null && !seen.has(String(mapped.id))) {
+      seen.add(String(mapped.id));
+      products.push(mapped);
+    }
+  }
   return {
     role,
     text: m.text ?? m.message ?? m.content ?? '',
     images: Array.isArray(m.images) ? m.images : (Array.isArray(m.attachments) ? m.attachments : []),
     clientId: m.client_message_id,
-    products: (productIds || []).filter(id => byId(id)),
+    products,
   };
 }
 
@@ -286,7 +317,7 @@ export function EloAI() {
 
           <div className="lucy-body" ref={bodyRef}>
             {msgs.map((m, i) => (
-              <div key={i} className={'lucy-msg ' + m.role}>
+              <div key={i} className={'lucy-msg ' + m.role + (m.products?.length ? ' has-cards' : '')}>
                 {m.role === 'assistant' && <span className="lucy-msg-av"><span className="lucy-av-text sm">Elo</span></span>}
                 {m.role === 'user' && <span className="lucy-msg-av user"><Icon name="user" size={14} /></span>}
                 <div className="lucy-bubble">
@@ -298,37 +329,48 @@ export function EloAI() {
                   {m.text && <span>{m.text}</span>}
                   {m.products && m.products.length > 0 && (
                     <div className="lucy-cards">
-                      {m.products.map(pid => {
-                        const p = byId(pid);
+                      {m.products.map(item => {
+                        const p = typeof item === 'object' ? (byId(item.id) || item) : byId(item);
                         if (!p) return null;
                         const faved = wish.includes(p.id);
                         const openProduct = () => { go('product', p.slug || p.id); setOpen(false); };
+                        const thumbSrc = REAL_IMG[p.id] || p.image || p.images?.[0];
                         return (
-                          <div className="lucy-card" key={pid} onClick={openProduct} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openProduct(); } }}>
-                            <div className="lucy-card-thumb"><Thumb product={p} src={REAL_IMG[p.id]} /></div>
-                            <div className="lucy-card-info">
-                              <b>{p.name}</b>
-                              <span className="lucy-card-price">{naira(p.price)}</span>
+                          <div className="lucy-card" key={p.id} onClick={openProduct} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openProduct(); } }}>
+                            <div className="lucy-card-thumb">
+                              <Thumb product={p} src={thumbSrc} />
+                              {p.off > 0 && <span className="lucy-card-badge">-{p.off}%</span>}
                             </div>
-                            <div className="lucy-card-actions">
-                              <button
-                                type="button"
-                                className="lucy-card-icon primary"
-                                title="Add to cart"
-                                aria-label="Add to cart"
-                                onClick={e => { e.stopPropagation(); addToCart(p); }}
-                              >
-                                <Icon name="cart" size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                className={'lucy-card-icon fav' + (faved ? ' on' : '')}
-                                title={faved ? 'Remove from favourites' : 'Add to favourites'}
-                                aria-label={faved ? 'Remove from favourites' : 'Add to favourites'}
-                                onClick={e => { e.stopPropagation(); toggleWish(p.id); }}
-                              >
-                                <Icon name="heart" size={16} fill={faved ? 'currentColor' : 'none'} />
-                              </button>
+                            <div className="lucy-card-main">
+                              <div className="lucy-card-info">
+                                {p.brand && <span className="lucy-card-brand">{p.brand}</span>}
+                                <b>{p.name}</b>
+                                <div className="lucy-card-price-row">
+                                  <span className="lucy-card-price">{naira(p.price)}</span>
+                                  {p.oldPrice > p.price && <span className="lucy-card-old">{naira(p.oldPrice)}</span>}
+                                </div>
+                              </div>
+                              <div className="lucy-card-actions">
+                                <button
+                                  type="button"
+                                  className="lucy-card-icon primary"
+                                  title="Add to cart"
+                                  aria-label="Add to cart"
+                                  onClick={e => { e.stopPropagation(); addToCart(p); }}
+                                >
+                                  <Icon name="cart" size={15} />
+                                  <span>Add</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className={'lucy-card-icon fav' + (faved ? ' on' : '')}
+                                  title={faved ? 'Remove from favourites' : 'Add to favourites'}
+                                  aria-label={faved ? 'Remove from favourites' : 'Add to favourites'}
+                                  onClick={e => { e.stopPropagation(); toggleWish(p.id); }}
+                                >
+                                  <Icon name="heart" size={15} fill={faved ? 'currentColor' : 'none'} />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         );
