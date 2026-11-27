@@ -96,7 +96,7 @@ function ShopShell({ baseList, title, eyebrow, crumbLabel }) {
   const [view, setView] = useState('grid');
   const [page, setPage] = useState(1);
   const [drawer, setDrawer] = useState(false);
-  const perPage = 10;
+  const perPage = 30;
 
   const filtered = useMemo(() => {
     let r = baseList.filter(p =>

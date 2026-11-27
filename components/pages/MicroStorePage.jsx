@@ -18,28 +18,26 @@ import { microstoresApi } from '@/lib/api/endpoints';
 import { byId } from '@/lib/data';
 
 const SORTS = [['relevance', 'Most relevant'], ['low', 'Price: low to high'], ['high', 'Price: high to low'], ['rating', 'Top rated'], ['new', 'Newest']];
-const PER_PAGE = 10;
+const PER_PAGE = 30;
 
 const EMPTY_FILTERS = { maxPrice: null, brands: [], minRating: 0, onSale: false, inStock: false };
 
-export function MicroStorePage({ slug }) {
+export function MicroStorePage({ slug, initialStore }) {
   const { go, toast } = useStore();
-  const [store, setStore] = useState(null);
+  const [store, setStore] = useState(initialStore);
   const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     if (!slug) return;
     let active = true;
     setLoading(true);
-    setNotFound(false);
     Promise.all([
       microstoresApi.get(slug),
       microstoresApi.products(slug, { per_page: 100 }).catch(() => null),
     ]).then(([storeRes, productsRes]) => {
       if (!active) return;
       const s = storeRes?.microstore || storeRes;
-      if (!s) { setNotFound(true); setLoading(false); return; }
+      if (!s) { setLoading(false); return; }
       const curated = Array.isArray(productsRes) ? productsRes
         : Array.isArray(productsRes?.items) ? productsRes.items
         : Array.isArray(productsRes?.data) ? productsRes.data
@@ -47,7 +45,7 @@ export function MicroStorePage({ slug }) {
       setStore({ ...s, _curated: curated });
       setLoading(false);
     }).catch(() => {
-      if (active) { setNotFound(true); setLoading(false); }
+      if (active) setLoading(false);
     });
     microstoresApi.trackClick(slug, { source: 'storefront' }).catch(() => {});
     return () => { active = false; };
@@ -108,11 +106,11 @@ export function MicroStorePage({ slug }) {
   const activeCount = f.brands.length + (f.onSale ? 1 : 0) + (f.inStock ? 1 : 0) + (f.minRating ? 1 : 0) + (f.maxPrice != null ? 1 : 0);
   const clearAll = () => setF(EMPTY_FILTERS);
 
-  if (loading) {
+  if (loading && !store) {
     return <div className="page page-fade"><div className="wrap" style={{ padding: '60px 0' }}><p className="muted">Loading store…</p></div></div>;
   }
 
-  if (notFound || !store) {
+  if (!store) {
     return (
       <div className="page page-fade"><div className="wrap">
         <EmptyState icon="store" title="Store not found" body="This MicroStore doesn’t exist or may have been removed." action="Explore MicroStores" onAction={() => go('microstoresExplore')} />
