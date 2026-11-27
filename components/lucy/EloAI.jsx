@@ -61,7 +61,7 @@ function compressImage(file) {
   });
 }
 
-const ELO_STORAGE_KEY = 'lim_elo_chat_v1';
+const ELO_STORAGE_KEY = 'lim_elo_chat_v2';
 
 export function EloAI() {
   const { go, addToCart, toggleWish, wish, isAuthenticated, refreshCart } = useStore();
@@ -137,7 +137,7 @@ export function EloAI() {
     if (imgs.length) { e.preventDefault(); addFiles(imgs); }
   };
 
-  const sendReal = async (q, imgs) => {
+  const sendReal = async (q, imgs, retried = false) => {
     let convId = conversationId;
     let activeGuestToken = isAuthenticated ? null : guestToken;
     if (!convId) {
@@ -154,21 +154,51 @@ export function EloAI() {
     const clientMessageId = genClientMessageId();
     const priorCount = msgs.length;
     let sendRes = null;
-    if (imgs.length > 0) {
-      const formData = new FormData();
-      formData.append('text', q || 'Find similar products in the store based on this image.');
-      formData.append('client_message_id', clientMessageId);
-      imgs.forEach((img, idx) => {
-        if (img.blob) {
-          formData.append('images[]', img.blob, img.name || `photo-${idx + 1}.jpg`);
+    try {
+      if (imgs.length > 0) {
+        const formData = new FormData();
+        formData.append('text', q || 'Find similar products in the store based on this image.');
+        formData.append('client_message_id', clientMessageId);
+        imgs.forEach((img, idx) => {
+          if (img.blob) {
+            formData.append('images[]', img.blob, img.name || `photo-${idx + 1}.jpg`);
+          }
+        });
+        sendRes = await aiConversationsApi.sendMessage(convId, formData, activeGuestToken);
+      } else {
+        sendRes = await aiConversationsApi.sendMessage(convId, {
+          text: q,
+          client_message_id: clientMessageId,
+        }, activeGuestToken);
+      }
+    } catch (e) {
+      if (!retried && conversationId && (e?.status === 401 || e?.status === 403 || e?.status === 404)) {
+        setConversationId(null);
+        setGuestToken(null);
+        const res = await aiConversationsApi.create({ channel: 'web' }, null);
+        const data = res?.data ?? res;
+        convId = data?.id ?? data?.conversation_id ?? data?.conversation?.id;
+        if (!convId) throw e;
+        activeGuestToken = !isAuthenticated && data?.guest_token ? data.guest_token : null;
+        if (activeGuestToken) setGuestToken(activeGuestToken);
+        setConversationId(convId);
+        if (imgs.length > 0) {
+          const formData = new FormData();
+          formData.append('text', q || 'Find similar products in the store based on this image.');
+          formData.append('client_message_id', genClientMessageId());
+          imgs.forEach((img, idx) => {
+            if (img.blob) formData.append('images[]', img.blob, img.name || `photo-${idx + 1}.jpg`);
+          });
+          sendRes = await aiConversationsApi.sendMessage(convId, formData, activeGuestToken);
+        } else {
+          sendRes = await aiConversationsApi.sendMessage(convId, {
+            text: q,
+            client_message_id: genClientMessageId(),
+          }, activeGuestToken);
         }
-      });
-      sendRes = await aiConversationsApi.sendMessage(convId, formData, activeGuestToken);
-    } else {
-      sendRes = await aiConversationsApi.sendMessage(convId, {
-        text: q,
-        client_message_id: clientMessageId,
-      }, activeGuestToken);
+      } else {
+        throw e;
+      }
     }
     const sendMsg = sendRes?.data ?? sendRes;
     const sendActions = sendMsg?.metadata?.actions ?? sendMsg?.actions ?? [];
