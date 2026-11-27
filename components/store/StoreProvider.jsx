@@ -338,7 +338,7 @@ export function StoreProvider({ children }) {
         subcategoryName: p.subcategory?.name || null,
         desc: p.description || '',
         description: p.description || '',
-        store: p.creator?.name || p.creator?.username || 'Limitra',
+        store: 'Limitra',
         rating: Number(p.average_rating ?? p.rating) || 0,
         reviews: Number(p.review_count ?? p.reviews_count ?? p.reviews) || 0,
         specs: Array.isArray(p.specifications)

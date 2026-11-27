@@ -47,7 +47,7 @@ function mapProductDetails(product, registerImage = true) {
     stock: Number(product.stock) || 0,
     desc: product.description || '',
     description: product.description || '',
-    store: product.creator?.name || product.creator?.username || 'Limitra',
+    store: 'Limitra',
     rating: Number(product.average_rating ?? product.rating) || 0,
     reviews: Number(product.review_count ?? product.reviews_count ?? product.reviews) || 0,
     bestseller: Boolean(product.is_bestseller),
@@ -333,7 +333,7 @@ export function ProductPage({ id, initialProduct }) {
         <Gallery product={product} variantKey={variantKey} activeImages={activeVariantImages} />
         <div className="pdp-info">
           <div className="row between">
-            <span className="pc-brand" style={{ fontSize: 13 }}>{product.brand} · <span style={{ color: 'var(--text-muted)' }}>{product.store}</span></span>
+            <span className="pc-brand" style={{ fontSize: 13 }}>{product.brand || 'Limitra'}</span>
             <button className={'icon-btn fav' + (faved ? ' on' : '')} onClick={() => toggleWish(product.id)}><Icon name="heart" size={17} fill={faved ? 'currentColor' : 'none'} /></button>
           </div>
           <h1 style={{ fontSize: 28, margin: '8px 0 12px', lineHeight: 1.15 }}>{product.name}</h1>
@@ -438,7 +438,7 @@ export function ProductPage({ id, initialProduct }) {
           {tab === 'desc' && (
             <div className="prose">
               <p>{product.desc}</p>
-              <p>Every Limitra order ships in tamper-proof packaging and is covered by our buyer-protection guarantee. This product is sold by <b>{product.store}</b>, a verified Limitra seller with a 98% positive rating.</p>
+              <p>Every Limitra order ships in tamper-proof packaging and is covered by our buyer-protection guarantee. This product is sold and fulfilled by <b>Limitra</b> with verified quality inspection before dispatch.</p>
               <ul className="feat-list">
                 <li><Icon name="check" size={16} stroke={3} /> Genuine product with official manufacturer warranty</li>
                 <li><Icon name="check" size={16} stroke={3} /> Inspected & quality-checked before dispatch</li>
