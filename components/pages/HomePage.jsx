@@ -31,49 +31,35 @@ export function Countdown({ hours = 8 }) {
 
 const HERO_SLIDES = [
 {
-  eyebrow: 'Limitra Exclusive',
-  title: ['Premium marketplace,', 'smarter', ' shopping.'],
-  body: 'Quality products. Secure shopping. Reliable delivery across Nigeria. Plus, earn more with our affiliate program.',
+  plain: true,
+  alt: 'Limitra Black Friday — up to 50% off, shop now',
+  cta: 'Shop Now',
+  route: ['shop', 'deals'],
+  img: '/assets/img/hero-blackfriday.gif'
+},
+{
+  eyebrow: 'Welcome to Limitra',
+  title: ['Where taste meets', 'commerce', '.'],
+  body: 'Discover curated products and exclusive drops or apply to launch your own brand, or celebrity microstore.',
   primary: ['Shop Now', 'shop', 'all'],
   secondary: ['Become an Affiliate', 'affiliate', null, 'user'],
-  img: '/assets/img/hero-shop3d.png',
-  pos: 'right center'
+  img: '/assets/img/hero-fashion.jpg'
 },
 {
-  eyebrow: 'New Season · Audio',
-  title: ['Elevate every', 'listening', ' moment.'],
-  body: 'Discover premium audio equipment designed for immersive sound, exceptional comfort, and uncompromising performance.',
-  primary: ['Shop electronics', 'shop', 'electronics'],
-  secondary: ['View deals', 'shop', 'deals', 'flame'],
-  img: '/assets/img/hero-audio.jpg',
-  offer: ['Save', '25%', 'today']
+  eyebrow: 'Curated Essentials',
+  title: ['Luxury & Everyday', 'Icons', ', Vetted for You.'],
+  body: 'Discover authentic skincare, signature scents, and lifestyle staples handpicked by voices you trust.',
+  primary: ['Beauty and Care', 'shop', 'beauty'],
+  secondary: ['Top Picks', 'shop', 'all', 'star'],
+  img: '/assets/img/hero-cosmetics.jpg'
 },
 {
-  eyebrow: 'Work & Play',
-  title: ['Power up your', 'setup', ' today.'],
-  body: 'Laptops, phones, earbuds and accessories built to keep you productive, premium tech from trusted brands, delivered fast.',
-  primary: ['Shop computing', 'shop', 'computing'],
-  secondary: ['Become an Affiliate', 'affiliate', null, 'user'],
-  img: '/assets/img/hero-tech.jpg',
-  offer: ['Student', '15%', 'deal']
-},
-{
-  eyebrow: 'Style Edit · Fashion',
-  title: ['Wear your', 'confidence', ' every day.'],
-  body: 'Fresh-season clothing and footwear for men and women. Premium fabrics, true-to-size fits and styles that move with you.',
-  primary: ['Shop fashion', 'shop', 'womens'],
-  secondary: ['Shop men’s', 'shop', 'mens', 'tag'],
-  img: '/assets/img/hero-fashion.jpg',
-  offer: ['Up to', '30%', 'off']
-},
-{
-  eyebrow: 'Beauty · Cosmetics',
-  title: ['Glow that', 'speaks', ' for itself.'],
-  body: 'Skincare, makeup and fragrance from trusted brands, authentic products, expertly curated, delivered fast across Nigeria.',
-  primary: ['Shop cosmetics', 'shop', 'beauty'],
-  secondary: ['Explore beauty', 'shop', 'beauty', 'spark'],
-  img: '/assets/img/hero-cosmetics.jpg',
-  offer: ['Save', '20%', 'now']
+  eyebrow: 'For Creators & Brands',
+  title: ['Your Taste. Your', 'Storefront', '. No Friction'],
+  body: 'Launch a custom microstore in minutes, curate your favorite gear or sell your own line with seamless local payments and delivery.',
+  primary: ['See Microstores', 'microstores'],
+  secondary: ['How it works', 'microstores', null, 'gear'],
+  img: '/assets/img/hero-microstores.jpg'
 }];
 
 
@@ -87,6 +73,22 @@ const HERO_TRUST = [
 
 function HeroSlide({ slide, showChips, showStats }) {
   const { go } = useStore();
+  // A finished banner graphic (logo/headline already baked into the image,
+  // e.g. a seasonal campaign asset) — skip the usual eyebrow/h1/body text
+  // overlay instead of duplicating what the image already shows, but the
+  // CTA button itself isn't part of the image, so that's still real markup.
+  if (slide.plain) {
+    return (
+      <div className="hero">
+        <img className="hero-bg" src={slide.img} alt={slide.alt || ''} style={slide.pos ? { objectPosition: slide.pos } : null} />
+        {slide.cta && slide.route && (
+          <div className="hero-plain-cta">
+            <button className="btn btn-primary btn-lg" onClick={() => go(slide.route[0], slide.route[1])}>{slide.cta} <Icon name="arrowr" size={18} /></button>
+          </div>
+        )}
+      </div>
+    );
+  }
   const [secLabel, secRoute, secParam, secIcon] = slide.secondary;
   return (
     <div className="hero">
