@@ -98,7 +98,12 @@
 /* storefront */
 .ms-store-banner { position: relative; border-radius: var(--r-xl); padding: 28px; display: flex; align-items: center; gap: 22px; color: var(--text); flex-wrap: wrap; overflow: hidden; background: var(--surface); isolation: isolate; }
 .ms-store-banner-bgimg { position: absolute; inset: 0; background-size: cover; background-position: center right; z-index: -2; }
-.ms-store-banner-fade { position: absolute; inset: 0; background: linear-gradient(90deg, var(--surface) 0%, var(--surface) 42%, color-mix(in srgb, var(--navy) 55%, var(--surface)) 68%, var(--navy) 100%); z-index: -1; }
+/* Solid on the left (keeps the logo/name/CTAs readable over any photo),
+   fading to fully transparent on the right where the banner image is
+   anchored (background-position: center right above) — this previously had
+   no transparent stop at all (every color was opaque, even the "fade" end),
+   which hid any banner_url entirely regardless of its value. */
+.ms-store-banner-fade { position: absolute; inset: 0; background: linear-gradient(90deg, var(--surface) 0%, var(--surface) 38%, color-mix(in srgb, var(--surface) 35%, transparent) 62%, transparent 100%); z-index: -1; }
 .ms-store-banner-avatar { width: 76px; height: 76px; border-radius: var(--r-md); display: grid; place-items: center; color: var(--text); flex: none; background: #fff; box-shadow: var(--shadow-sm); overflow: hidden; }
 .ms-store-banner-info { flex: 1; min-width: 240px; }
 .ms-store-banner-info b { font-size: 22px; font-family: var(--font-display); display: block; color: var(--text); }
